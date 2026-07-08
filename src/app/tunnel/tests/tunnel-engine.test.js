@@ -297,8 +297,8 @@ test("keepAlive connects eagerly on arm and never idle-tears-down", async () => 
   );
   try {
     await tunnel.arm();
-    await waitFor(() => ssh.total() === 1); // eager connect, no client yet
-    assert.equal(tunnel.state, "connected");
+    await waitFor(() => tunnel.state === "connected"); // eager connect, no client yet
+    assert.equal(ssh.total(), 1);
     await delay(120); // well past the linger
     assert.equal(
       ssh.active(),
