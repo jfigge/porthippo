@@ -113,6 +113,23 @@ contextBridge.exposeInMainWorld("porthippo", {
   diagnostics: {
     copy: () => ipcRenderer.invoke("diagnostics:copy"),
   },
+
+  // ── Selectable secret storage (Feature 90) ────────────────────────────────
+  // The renderer only sends mode/unlock INTENTS; all crypto, keychain access and
+  // re-encryption happen in main. Nothing here ever carries a decrypted secret or
+  // key material — only the mode/lock status, and (write-only, inbound) a master
+  // password to set or verify. A mode/unlock change is announced back via the
+  // one-way porthippo:secret-storage-changed event (wired below).
+  secretStorage: {
+    getMode: () => ipcRenderer.invoke("secret-storage:get-mode"),
+    // payload: { mode, password? }  →  { ok, reason?, failures? }
+    setMode: (payload) =>
+      ipcRenderer.invoke("secret-storage:set-mode", payload),
+    // Wrap the bare password into the channel's { password } request shape.
+    unlock: (password) =>
+      ipcRenderer.invoke("secret-storage:unlock", { password }),
+    lock: () => ipcRenderer.invoke("secret-storage:lock"),
+  },
 });
 
 // ── Main → renderer push events ───────────────────────────────────────────────
@@ -126,6 +143,9 @@ for (const channel of [
   "porthippo:stats",
   "porthippo:hostkey-unknown",
   "porthippo:hostkey-changed",
+  // Feature 90: the at-rest secret-storage mode / lock status changed. Carries
+  // { mode, locked, available, hasPassword } — never a secret or key material.
+  "porthippo:secret-storage-changed",
 ]) {
   ipcRenderer.on(channel, (_event, detail) => {
     window.dispatchEvent(new CustomEvent(channel, { detail }));

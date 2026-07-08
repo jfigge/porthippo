@@ -16,11 +16,11 @@ setup mirrors its sibling project **Rest Hippo** (`../resthippo`).
 ## Status
 
 Being built stage-by-stage from the plans in `features/` (see `features/ROADMAP.md`).
-**Features 00–60 have landed:** the data model + encrypted store, the SSH tunnel engine,
-monitoring/stats, the Definition + Monitoring views, CI/CD packaging, and the app shell
-(tray, hide-to-tray, launch-at-login, settings, native menu, logging/diagnostics, i18n).
-Remaining: docs (80) and selectable secret storage (90). When a stage is finished, move its
-plan file into `features/done/`.
+**Features 00–70 and 90 have landed:** the data model + encrypted store, the SSH tunnel
+engine, monitoring/stats, the Definition + Monitoring views, CI/CD packaging, the app shell
+(tray, hide-to-tray, launch-at-login, settings, native menu, logging/diagnostics, i18n), and
+selectable secret storage (Settings → Security: device key / OS keychain / master password).
+Remaining: docs (80). When a stage is finished, move its plan file into `features/done/`.
 
 ## Source Directories
 
@@ -61,12 +61,14 @@ Electron main process (src/app/main.js)
   sandboxed and communicates exclusively via `window.porthippo.*`.
 - Request/response IPC channels are registered in `ipc/store.js` (CRUD + settings +
   `hostkeys:list|revoke`), `ipc/engine.js` (`tunnels:arm|disarm|status|apply`,
-  `hostkeys:trust|reject`), `ipc/dialog.js` (`dialog:open-key-file`) and `ipc/shell.js`
-  (`i18n:load`, `diagnostics:copy`), and exposed through `preload.js`; **keep the handler and
-  the `window.porthippo.*` exposure in lockstep** (the `ipc-parity` test guards this — add
-  any new `ipc/*.js` file to its scan list).
+  `hostkeys:trust|reject`), `ipc/dialog.js` (`dialog:open-key-file`), `ipc/shell.js`
+  (`i18n:load`, `diagnostics:copy`) and `ipc/secret-storage.js`
+  (`secret-storage:get-mode|set-mode|unlock|lock`), and exposed through `preload.js`; **keep
+  the handler and the `window.porthippo.*` exposure in lockstep** (the `ipc-parity` test
+  guards this — add any new `ipc/*.js` file to its scan list).
 - Live state flows the other way as one-way `porthippo:*` broadcasts
-  (`porthippo:tunnel-state`, `porthippo:hostkey-unknown`, `porthippo:hostkey-changed`):
+  (`porthippo:tunnel-state`, `porthippo:hostkey-unknown`, `porthippo:hostkey-changed`,
+  `porthippo:secret-storage-changed`):
   `main.js` sends via `webContents.send`; `preload.js` re-dispatches each as a global
   `CustomEvent` on `window`. Payloads are serializable and carry fingerprints only — never
   secrets.
@@ -200,6 +202,17 @@ make clean     # Remove build/ and dist/
   opt-in (Feature 40).
 - Encrypt stored passwords/passphrases at rest (Feature 10); the renderer never receives a
   decrypted secret.
+- The at-rest backend is **user-selectable** (Feature 90, Settings → Security): a promptless
+  device **app key** (`enck:v1:`, the default so a fresh install raises no Keychain prompt),
+  the **OS keychain** (`enc:v1:`, `safeStorage`), or a **master password** (`encm:v1:`,
+  PBKDF2→AES-256-GCM; the key lives in memory only, so the mode boots **locked** and prompts
+  to unlock). All crypto/keychain/migration lives in main (`store/{crypto,secret-storage}.js`);
+  the renderer only sends mode/unlock intents and reacts to `porthippo:secret-storage-changed`.
+- Switching backends **re-encrypts every stored secret** all-or-nothing (crash-safe: a durable
+  migration marker, then the mode flip as the atomicity anchor, auto-finished on next launch).
+  **No mode ever silently downgrades a secret to plaintext** — OS keychain is refused when
+  `safeStorage` is unavailable, leaving a locked master password is refused, and the app-key
+  file is deleted only after a completed switch away from it.
 - Verify SSH host keys against `known_hosts` (trust-on-first-use with an explicit prompt);
   never auto-accept (Feature 20).
 - Redact secrets from logs, diagnostics, and any export.

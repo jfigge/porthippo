@@ -16,17 +16,20 @@
 
 /**
  * crypto.js — Encryption helpers for secrets at rest (SSH passwords + key
- * passphrases). Ported down from Rest Hippo's crypto.js to the two backends
- * Port Hippo needs.
+ * passphrases). Ported down from Rest Hippo's crypto.js.
  *
- * Two at-rest ciphertext families, each self-identifying by prefix so decryption
- * dispatches on the value alone (which keeps a mix of the two — e.g. during a
- * platform move — readable as long as the needed key is loaded):
+ * Three at-rest ciphertext families, each self-identifying by prefix so
+ * decryption dispatches on the value alone (which keeps a mix — e.g. during a
+ * backend switch or a platform move — readable as long as the needed key is
+ * loaded):
  *   enc:v1:   OS keystore  (Electron safeStorage — macOS Keychain / Windows DPAPI
  *             / Linux libsecret; the key never materialises in JS)
  *   enck:v1:  app key      (a random 256-bit key in a 0600 file under userData;
  *             AES-256-GCM). The promptless DEFAULT — a background tunnel manager
  *             must not fire a Keychain prompt on every launch.
+ *   encm:v1:  master pass  (a PBKDF2-derived key held IN MEMORY for the session
+ *             only; AES-256-GCM). Boots LOCKED — the key is absent until the user
+ *             unlocks, so an encm: value can't be decrypted until then.
  *
  * All encrypt/decrypt runs in the Electron main process; the renderer only ever
  * receives a `hasSecret` flag, never a decrypted value (see tunnel-store.js).
@@ -54,32 +57,97 @@ const nodeCrypto = require("crypto");
 // ── At-rest ciphertext families (self-identifying prefixes) ───────────────────
 const PREFIX = "enc:v1:"; // os-keychain (Electron safeStorage)
 const PREFIX_APPKEY = "enck:v1:"; // app-key (AES-256-GCM under the key file)
-const AT_REST_PREFIXES = [PREFIX, PREFIX_APPKEY];
+const PREFIX_MASTER = "encm:v1:"; // master-password (AES-256-GCM under a PBKDF2 key)
+const AT_REST_PREFIXES = [PREFIX, PREFIX_APPKEY, PREFIX_MASTER];
 
-// AES-256-GCM wire constants for the app-key family.
+// AES-256-GCM wire constants for the app-key + master-password families.
 const IV_LEN = 12; // GCM standard nonce length
 const TAG_LEN = 16;
+
+// Master-password key derivation. PBKDF2-HMAC-SHA256 with a high iteration count
+// so a stolen `secret-storage.json` (which carries the salt) is expensive to
+// brute-force. 210,000 matches the OWASP 2023 PBKDF2-SHA256 guidance.
+const PBKDF2_ITERATIONS = 210000;
+const DERIVED_KEY_LEN = 32; // AES-256
 
 // ── Active backend — set once at bootstrap via configure() ─────────────────────
 // The default "os-keychain" preserves the historical no-key behaviour for any
 // caller that never calls configure() (the unit tests, which run in no-op mode).
 let _activeMode = "os-keychain";
 let _appKey = null; // Buffer(32) when app-key mode is active
+let _masterKey = null; // Buffer(32) when the master password is unlocked this session
 
 /**
- * Configure the active at-rest backend and its key. Called once at startup (the
- * secret-storage bootstrap) BEFORE the first decrypt. Any omitted field is left
- * unchanged.
- * @param {{mode?:string, appKey?:Buffer|null}} opts
+ * Configure the active at-rest backend and its key(s). Called once at startup
+ * (the secret-storage bootstrap) BEFORE the first decrypt, and again on a mode
+ * switch / unlock. Any omitted field is left unchanged — so loading the master
+ * key on unlock doesn't disturb an app key kept around for mixed-store reads.
+ * @param {{mode?:string, appKey?:Buffer|null, masterKey?:Buffer|null}} opts
  */
-function configure({ mode, appKey } = {}) {
+function configure({ mode, appKey, masterKey } = {}) {
   if (mode !== undefined) _activeMode = mode;
   if (appKey !== undefined) _appKey = appKey;
+  if (masterKey !== undefined) _masterKey = masterKey;
 }
 
-/** The active at-rest mode: "os-keychain" | "app-key". */
+/** The active at-rest mode: "os-keychain" | "app-key" | "master-password". */
 function getMode() {
   return _activeMode;
+}
+
+/** The self-identifying ciphertext prefix a backend seals with. */
+function _prefixFor(backend) {
+  switch (backend) {
+    case "os-keychain":
+      return PREFIX;
+    case "app-key":
+      return PREFIX_APPKEY;
+    case "master-password":
+      return PREFIX_MASTER;
+    default:
+      throw new Error(`unknown secret-storage backend: ${backend}`);
+  }
+}
+
+/**
+ * Derive a 32-byte AES key from a master password. Pure and deterministic for a
+ * given (password, salt, iterations), so secret-storage can both mint a key when
+ * a password is first set and re-derive it to verify an unlock attempt.
+ * @param {string} password
+ * @param {Buffer} salt
+ * @param {number} [iterations]
+ * @returns {Buffer} 32 bytes
+ */
+function deriveKey(password, salt, iterations = PBKDF2_ITERATIONS) {
+  return nodeCrypto.pbkdf2Sync(
+    password,
+    salt,
+    iterations,
+    DERIVED_KEY_LEN,
+    "sha256",
+  );
+}
+
+/**
+ * Load the session master key (an unlock). Held in memory only; never persisted.
+ * @param {Buffer|null} key
+ */
+function setMasterKey(key) {
+  _masterKey = key;
+}
+
+/** Drop the session master key (re-lock master-password mode). */
+function lock() {
+  _masterKey = null;
+}
+
+/**
+ * True when master-password mode is active but the key hasn't been unlocked this
+ * session — so any encm: secret is currently unreadable. Other modes are never
+ * "locked".
+ */
+function isLocked() {
+  return _activeMode === "master-password" && _masterKey === null;
 }
 
 /** AES-256-GCM seal → iv(12)|tag(16)|ct (the caller supplies the key). */
@@ -107,16 +175,17 @@ function _aesGcmDecrypt(blob, key) {
 
 /**
  * Tagged error thrown when an encrypted value cannot be turned back into
- * plaintext — either because the OS keystore is unavailable for data marked
- * encrypted, or because decryption threw (corrupted blob, keystore/profile
- * mismatch, rotated key, missing app key).
+ * plaintext — because the OS keystore is unavailable for data marked encrypted,
+ * because master-password mode is locked (its key isn't loaded), or because
+ * decryption threw (corrupted blob, keystore/profile mismatch, rotated key,
+ * missing app key).
  *
  * It deliberately carries NO secret material — only a machine-readable code — so
  * it is safe to log and to surface to the renderer. `.code` is the project-wide
  * error discriminator (see io.js and the note in main.js).
  */
 class DecryptError extends Error {
-  /** @param {"encryption-unavailable"|"decrypt-failed"} code */
+  /** @param {"encryption-unavailable"|"decrypt-failed"|"locked"} code */
   constructor(code) {
     super(`decrypt failed: ${code}`);
     this.name = "DecryptError";
@@ -142,9 +211,9 @@ function isAvailable() {
 }
 
 /**
- * True when `value` is at-rest ciphertext from either backend (os-keychain
- * `enc:v1:` or app-key `enck:v1:`). Used by the decrypt + anti-clobber paths, so
- * it must recognise both families.
+ * True when `value` is at-rest ciphertext from any backend (os-keychain
+ * `enc:v1:`, app-key `enck:v1:`, or master-password `encm:v1:`). Used by the
+ * decrypt + anti-clobber paths, so it must recognise every family.
  * @param {unknown} value
  * @returns {boolean}
  */
@@ -170,7 +239,8 @@ function _rawEncryptTo(plain, backend) {
         // SECURITY: keystore unavailable → this secret would be written as
         // cleartext. Surface once per process so a silent plaintext-at-rest
         // downgrade doesn't go unnoticed. (The app-key default avoids this on the
-        // normal path; this branch is the no-op test / misconfigured mode.)
+        // normal path; this branch is the no-op test / misconfigured mode. A real
+        // switch TO os-keychain is refused upstream when the keystore is absent.)
         if (!_warnedUnavailable) {
           _warnedUnavailable = true;
           console.warn(
@@ -188,6 +258,14 @@ function _rawEncryptTo(plain, backend) {
       if (!_appKey) throw new DecryptError("decrypt-failed");
       return PREFIX_APPKEY + _aesGcmEncrypt(plain, _appKey).toString("base64");
     }
+    case "master-password": {
+      // No key loaded ⇒ master-password mode is locked; refuse rather than write
+      // an unusable (or worse, plaintext) value.
+      if (!_masterKey) throw new DecryptError("locked");
+      return (
+        PREFIX_MASTER + _aesGcmEncrypt(plain, _masterKey).toString("base64")
+      );
+    }
     default:
       throw new Error(`unknown secret-storage backend: ${backend}`);
   }
@@ -196,7 +274,7 @@ function _rawEncryptTo(plain, backend) {
 /**
  * Encrypt a plaintext secret under the ACTIVE backend. Returns `plaintext`
  * unchanged when it is empty or already at-rest ciphertext (idempotent, under
- * either backend prefix).
+ * any backend prefix).
  *
  * @param {string} plaintext
  * @returns {string}
@@ -207,8 +285,32 @@ function encryptString(plaintext) {
 }
 
 /**
+ * Re-seal a value to a DIFFERENT backend (the mode-switch migration primitive).
+ * Decrypts by dispatching on the value's own prefix (so the source key must be
+ * loaded) then re-encrypts to `targetBackend`. Unlike {@link encryptString},
+ * this deliberately does NOT short-circuit on an at-rest prefix — that is exactly
+ * the value we need to convert.
+ *
+ * Idempotent: a value already sealed under the target family passes through
+ * untouched, so re-running an interrupted migration only converts the stragglers
+ * a crash left in the old family.
+ *
+ * @param {string} value  an at-rest ciphertext (any family) or bare plaintext
+ * @param {string} targetBackend
+ * @returns {string} ciphertext under `targetBackend`
+ * @throws {DecryptError} if the source can't be decrypted (wrong/absent key)
+ */
+function reencryptValue(value, targetBackend) {
+  if (!value || typeof value !== "string") return value;
+  if (value.startsWith(_prefixFor(targetBackend))) return value; // already converted
+  const plain = isEncrypted(value) ? decryptString(value) : value;
+  if (!plain) return plain;
+  return _rawEncryptTo(plain, targetBackend);
+}
+
+/**
  * Decrypt an at-rest value by DISPATCHING ON ITS PREFIX — so a value sealed under
- * either backend decrypts as long as that backend's key is loaded. Values with no
+ * any backend decrypts as long as that backend's key is loaded. Values with no
  * at-rest prefix are returned as-is (plaintext written by an older / no-op run). A
  * value that IS marked encrypted but cannot be recovered throws a
  * {@link DecryptError}.
@@ -239,6 +341,19 @@ function decryptString(value) {
       throw new DecryptError("decrypt-failed");
     }
   }
+  if (value.startsWith(PREFIX_MASTER)) {
+    // Locked (no key) is distinct from a bad blob: the caller can prompt to
+    // unlock rather than treat the secret as corrupt.
+    if (!_masterKey) throw new DecryptError("locked");
+    try {
+      return _aesGcmDecrypt(
+        Buffer.from(value.slice(PREFIX_MASTER.length), "base64"),
+        _masterKey,
+      );
+    } catch {
+      throw new DecryptError("decrypt-failed");
+    }
+  }
   return value; // plaintext passthrough
 }
 
@@ -246,11 +361,20 @@ module.exports = {
   DecryptError,
   PREFIX,
   PREFIX_APPKEY,
+  PREFIX_MASTER,
+  PBKDF2_ITERATIONS,
   configure,
   getMode,
+  deriveKey,
+  setMasterKey,
+  lock,
+  isLocked,
   isAvailable,
   isEncrypted,
   encryptString,
+  reencryptValue,
   decryptString,
+  _aesGcmEncrypt,
+  _aesGcmDecrypt,
   _setSafeStorage,
 };

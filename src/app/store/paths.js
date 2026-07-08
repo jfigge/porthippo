@@ -55,7 +55,10 @@ class Paths {
 
   /**
    * Secret-storage mode config (UNENCRYPTED — read at bootstrap before any
-   * decrypt, so it must never depend on the keystore). Records the active mode.
+   * decrypt, so it must never depend on the keystore). Records the active mode
+   * plus, for master-password mode, the PBKDF2 `kdf` (salt + iterations) and the
+   * `verifier` blob, and any in-flight `migration` marker (Feature 90). No secret
+   * or key material is stored here — the derived key lives in memory only.
    */
   secretStorageConfigPath() {
     return path.join(this.dataDir, "secret-storage.json");

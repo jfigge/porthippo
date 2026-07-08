@@ -168,6 +168,26 @@ class TunnelEngine {
     if (def.enabled && tunnel.state === "disarmed") await tunnel.arm();
   }
 
+  /**
+   * Reconcile every definition. Used after a secret-storage unlock or mode switch
+   * so tunnels that armed while a secret was undecryptable (locked master key)
+   * re-read the now-decryptable definition and can (re)connect on next access.
+   * Best-effort per tunnel: one failure never aborts the sweep.
+   */
+  async reconcileAll() {
+    const defs = this.#getStores().tunnelStore().list();
+    for (const def of defs) {
+      try {
+        await this.reconcile(def.id);
+      } catch (err) {
+        console.error(
+          `[engine] reconcile ${def.id} failed:`,
+          err && err.message,
+        );
+      }
+    }
+  }
+
   // ── Host-key trust decisions (resolve a pending verifier prompt) ──────────────
 
   /** Resolve an unknown-host-key prompt as trusted. */

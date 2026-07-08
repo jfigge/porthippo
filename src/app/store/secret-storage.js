@@ -16,18 +16,29 @@
 
 /**
  * secret-storage.js — Owns the at-rest secret-storage backend: its (unencrypted)
- * mode config file and the app-key file. Ported down from Rest Hippo to the two
- * backends Port Hippo needs (see crypto.js for the ciphertext families):
- *   - "app-key"      a random 256-bit key in a 0600 file. No OS prompt; the
- *                    DEFAULT for a background tunnel manager. enck:v1:
- *   - "os-keychain"  Electron safeStorage (macOS Keychain / Windows DPAPI /
- *                    Linux libsecret). enc:v1:
+ * mode config file, the app-key file, and switching between the three backends
+ * (see crypto.js for the ciphertext families):
+ *   - "app-key"          a random 256-bit key in a 0600 file. No OS prompt; the
+ *                        DEFAULT for a background tunnel manager. enck:v1:
+ *   - "os-keychain"      Electron safeStorage (macOS Keychain / Windows DPAPI /
+ *                        Linux libsecret). enc:v1:
+ *   - "master-password"  a PBKDF2-derived key held in memory for the session
+ *                        only; boots LOCKED and must be unlocked each run. encm:v1:
  *
  * The active mode is recorded in an UNENCRYPTED config file (`secret-storage.json`)
  * read at bootstrap BEFORE any decrypt, so resolving the mode never touches the
  * keystore (and so never triggers a Keychain prompt). If that config is ever lost
  * the mode is inferred from the prefix of existing on-disk ciphertext, so we never
  * mint a fresh app key that orphans already-sealed secrets.
+ *
+ * A mode switch RE-ENCRYPTS every stored secret to the new backend, crash-safely:
+ * a durable `migration` marker is written first, the secrets are converted, and
+ * the mode is flipped LAST (the atomicity anchor). A crash between the marker and
+ * the flip is auto-finished on the next launch by {@link SecretStorage#bootstrap}
+ * (no-password directions) or by the unlock handler (master-password directions).
+ * No secret is ever downgraded to plaintext: switching to OS keychain when
+ * safeStorage is unavailable is refused, and the app-key file is deleted only
+ * AFTER a completed switch away from it.
  */
 "use strict";
 
@@ -38,8 +49,17 @@ const io = require("./io");
 const crypto = require("./crypto");
 
 const CONFIG_VERSION = 1;
-const MODES = ["app-key", "os-keychain"];
+const MODES = ["app-key", "os-keychain", "master-password"];
 const DEFAULT_MODE = "app-key";
+
+// A fixed constant sealed under the master key; decrypting it back proves the
+// entered password is correct (the GCM tag does the verification). Not secret.
+const VERIFIER_PLAINTEXT = "porthippo:secret-storage:verifier:v1";
+const MASTER_SALT_LEN = 16;
+
+// tunnels.json is Port Hippo's only secret-bearing file; a hop's auth secret
+// lives at `auth[].{password|passphrase}` as `{ enc: "<ciphertext>" }`.
+const SECRET_FIELDS = ["password", "passphrase"];
 
 /**
  * Pick the backend for a fresh install with no existing managed ciphertext.
@@ -61,6 +81,71 @@ const DEFAULT_MODE = "app-key";
 function defaultModeFor(platform, keystoreAvailable) {
   if (platform === "win32" && keystoreAvailable) return "os-keychain";
   return DEFAULT_MODE;
+}
+
+// ── Secret taxonomy over a tunnels.json document ───────────────────────────────
+// A `collect`/`transform` pair sharing one traversal so the two migration passes
+// (validate then convert) can never drift over which values are secrets.
+
+/** Every hop (sshServer + jumps) of a tunnel definition. */
+function hopsOf(t) {
+  if (!t || typeof t !== "object") return [];
+  return [t.sshServer, ...(Array.isArray(t.jumps) ? t.jumps : [])];
+}
+
+/** Yield each sealed ciphertext string in a tunnels.json document. */
+function collectTunnels(doc) {
+  const out = [];
+  const tunnels = Array.isArray(doc?.tunnels) ? doc.tunnels : [];
+  for (const t of tunnels) {
+    for (const hop of hopsOf(t)) {
+      for (const entry of Array.isArray(hop?.auth) ? hop.auth : []) {
+        if (!entry || typeof entry !== "object") continue;
+        for (const field of SECRET_FIELDS) {
+          const enc = entry[field]?.enc;
+          if (typeof enc === "string") out.push(enc);
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/** A hop with `fn` applied to each of its sealed ciphertext strings. */
+function mapHopSecrets(hop, fn) {
+  if (!hop || typeof hop !== "object" || !Array.isArray(hop.auth)) return hop;
+  return {
+    ...hop,
+    auth: hop.auth.map((entry) => {
+      if (!entry || typeof entry !== "object") return entry;
+      const next = { ...entry };
+      for (const field of SECRET_FIELDS) {
+        const enc = entry[field]?.enc;
+        if (typeof enc === "string") {
+          next[field] = { ...entry[field], enc: fn(enc) };
+        }
+      }
+      return next;
+    }),
+  };
+}
+
+/** A copy of a tunnels.json document with `fn` applied to every ciphertext. */
+function mapTunnels(doc, fn) {
+  if (!doc || typeof doc !== "object") return doc;
+  const tunnels = Array.isArray(doc.tunnels) ? doc.tunnels : [];
+  return {
+    ...doc,
+    tunnels: tunnels.map((t) => {
+      if (!t || typeof t !== "object") return t;
+      const next = { ...t };
+      next.sshServer = mapHopSecrets(t.sshServer, fn);
+      if (Array.isArray(t.jumps)) {
+        next.jumps = t.jumps.map((hop) => mapHopSecrets(hop, fn));
+      }
+      return next;
+    }),
+  };
 }
 
 class SecretStorage {
@@ -127,30 +212,110 @@ class SecretStorage {
     return key;
   }
 
+  /** Remove the app-key file (only after a completed switch AWAY from app-key). */
+  deleteAppKey() {
+    io.remove(this._paths.secretKeyPath());
+  }
+
+  // ── Master password (PBKDF2 → AES key) ──────────────────────────────────────
+
+  /**
+   * Mint the durable material for a new master password: a random salt, the
+   * derived key (held only in memory), and a verifier blob (the fixed plaintext
+   * sealed under the key) that later proves an unlock attempt. The salt +
+   * iterations + verifier ride the unencrypted `secret-storage.json`; the key
+   * itself is never written.
+   *
+   * @param {string} password
+   * @returns {{key:Buffer, kdf:{salt:string,iterations:number}, verifier:string}}
+   */
+  prepareMasterPassword(password) {
+    const salt = nodeCrypto.randomBytes(MASTER_SALT_LEN);
+    const iterations = crypto.PBKDF2_ITERATIONS;
+    const key = crypto.deriveKey(password, salt, iterations);
+    const verifier = crypto._aesGcmEncrypt(VERIFIER_PLAINTEXT, key);
+    return {
+      key,
+      kdf: { salt: salt.toString("base64"), iterations },
+      verifier: verifier.toString("base64"),
+    };
+  }
+
+  /**
+   * Verify a candidate master password against a stored config. Re-derives the
+   * key from the stored salt and tries to open the verifier; a correct password
+   * returns the derived key (ready to load), a wrong one (GCM tag mismatch) or a
+   * malformed config returns null.
+   *
+   * @param {string} password
+   * @param {object} config  the stored secret-storage config
+   * @returns {Buffer|null} the derived key on success, else null
+   */
+  verifyMasterPassword(password, config) {
+    if (!config || !config.kdf || !config.verifier) return null;
+    try {
+      const salt = Buffer.from(config.kdf.salt, "base64");
+      const key = crypto.deriveKey(password, salt, config.kdf.iterations);
+      const got = crypto._aesGcmDecrypt(
+        Buffer.from(config.verifier, "base64"),
+        key,
+      );
+      return got === VERIFIER_PLAINTEXT ? key : null;
+    } catch {
+      return null; // bad password (GCM tag) or malformed verifier
+    }
+  }
+
   // ── Bootstrap (called once at startup, before any decrypt) ──────────────────
 
   /**
    * Resolve the active mode + key and configure crypto, BEFORE any store reads.
    *
    * On a fresh config (first run, or a lost config file) the mode is INFERRED from
-   * existing on-disk ciphertext by prefix — os-keychain (`enc:v1:`) → app-key
-   * (`enck:v1:`) → the platform default — and persisted so it never re-scans. The
-   * app key is loaded whenever the key file exists (even in os-keychain mode) so a
-   * mix of both families stays decryptable; only its absence in app-key mode mints
-   * a new one.
+   * existing on-disk ciphertext by prefix — master-password (`encm:v1:`) →
+   * os-keychain (`enc:v1:`) → app-key (`enck:v1:`) → the platform default — and
+   * persisted so it never re-scans. A crash-interrupted no-password migration is
+   * finished here; a pending master-password migration (or plain master-password
+   * mode) boots LOCKED so the renderer prompts for the passphrase.
    *
-   * @returns {{mode:string}}
+   * @returns {{mode:string, locked:boolean}}
    */
   bootstrap() {
     let config = this.readConfig();
     if (!config) config = this._inferAndPersist();
 
-    const mode = config.mode;
-    let appKey = mode === "app-key" ? this.ensureAppKey() : this.readAppKey();
-    if (appKey === null && mode === "app-key") appKey = this.ensureAppKey();
+    // Finish a crash-interrupted mode switch. The no-password directions
+    // (app-key ↔ os-keychain) complete silently here; a master-password
+    // direction is deferred to unlock (boots locked below).
+    const marker = this._migrationOf(config);
+    if (marker && !this._markerNeedsPassword(marker)) {
+      try {
+        this.resumeMigration({});
+      } catch (err) {
+        console.warn(
+          `[secret-storage] auto-resume failed: ${err && err.message}`,
+        );
+      }
+      config = this.readConfig() || config; // mode flipped, marker cleared
+    }
 
-    crypto.configure({ mode, appKey });
-    return { mode };
+    // A still-pending master-password migration boots LOCKED in master-password
+    // mode so the renderer prompts for the passphrase; the unlock handler then
+    // finishes it. Otherwise the mode is exactly what the config records.
+    const pending = this._migrationOf(config);
+    const mode =
+      pending && this._markerNeedsPassword(pending)
+        ? "master-password"
+        : config.mode;
+
+    // Load the app key whenever the file exists (even in os-keychain /
+    // master-password mode) so a mix of families — including values a crashed
+    // migration hasn't converted yet — stays decryptable. Only its absence in
+    // app-key mode mints a new one.
+    const appKey = mode === "app-key" ? this.ensureAppKey() : this.readAppKey();
+
+    crypto.configure({ mode, appKey, masterKey: null });
+    return { mode, locked: crypto.isLocked() };
   }
 
   /** Probe on-disk ciphertext to infer the pre-existing mode, then persist it. */
@@ -168,42 +333,310 @@ class SecretStorage {
    * guess a mode that orphans that ciphertext. Probe each family by string prefix
    * (never decrypts — no keychain prompt) and fall back to the platform default
    * only when no managed ciphertext exists at all.
+   *
+   * SECURITY: probe master-password FIRST. Mis-reading encm: data as app-key
+   * would mint a fresh key over unlock-only secrets, orphaning them permanently;
+   * inferring master-password when wrong merely boots locked (harmless).
    */
   _inferMode() {
-    if (this._anySealedSecret((v) => v.startsWith(crypto.PREFIX))) {
+    const startsWith = (prefix) => (v) =>
+      typeof v === "string" && v.startsWith(prefix);
+    if (this._anySealedSecret(startsWith(crypto.PREFIX_MASTER))) {
+      return "master-password";
+    }
+    if (this._anySealedSecret(startsWith(crypto.PREFIX))) {
       return "os-keychain";
     }
-    if (this._anySealedSecret((v) => v.startsWith(crypto.PREFIX_APPKEY))) {
+    if (this._anySealedSecret(startsWith(crypto.PREFIX_APPKEY))) {
       return "app-key";
     }
     return defaultModeFor(process.platform, crypto.isAvailable());
   }
 
   /**
-   * Whether ANY sealed secret in tunnels.json satisfies `isHit`. tunnels.json is
-   * the only secret-bearing file in Feature 10; secrets live at
-   * `sshServer.auth[].{password,passphrase}.enc` and the same under each
-   * `jumps[].auth[]`. Pure string-prefix work — never decrypts.
-   *
+   * Whether ANY sealed secret in tunnels.json satisfies `isHit`. Pure
+   * string-prefix work over the ciphertext — never decrypts.
    * @param {(value: string) => boolean} isHit
    */
   _anySealedSecret(isHit) {
     const doc = io.readJSON(this._paths.tunnelsPath());
-    const tunnels = Array.isArray(doc?.tunnels) ? doc.tunnels : [];
-    for (const t of tunnels) {
-      if (!t || typeof t !== "object") continue;
-      const hops = [t.sshServer, ...(Array.isArray(t.jumps) ? t.jumps : [])];
-      for (const hop of hops) {
-        for (const entry of Array.isArray(hop?.auth) ? hop.auth : []) {
-          if (!entry || typeof entry !== "object") continue;
-          for (const field of ["password", "passphrase"]) {
-            const enc = entry[field]?.enc;
-            if (typeof enc === "string" && isHit(enc)) return true;
-          }
+    return collectTunnels(doc).some(isHit);
+  }
+
+  // ── Migration marker (durable, brackets a mode switch) ──────────────────────
+
+  /** The valid `{from,to}` marker in a config, or null. */
+  _migrationOf(config) {
+    const m = config && config.migration;
+    if (!m || typeof m !== "object") return null;
+    if (!MODES.includes(m.from) || !MODES.includes(m.to) || m.from === m.to) {
+      return null;
+    }
+    return { from: m.from, to: m.to };
+  }
+
+  /** True when either end of a migration is master-password (needs the key). */
+  _markerNeedsPassword(marker) {
+    return marker.from === "master-password" || marker.to === "master-password";
+  }
+
+  /** The pending migration marker (if a switch was interrupted), or null. */
+  pendingMigration() {
+    return this._migrationOf(this.readConfig());
+  }
+
+  /**
+   * Durably record an in-flight switch BEFORE any secret is converted. Keeps the
+   * mode at `from` (so a crash before the flip still reads the old family) and
+   * carries any target key material (`extra` = the master-password kdf/verifier)
+   * so the switch can be finished after a crash.
+   */
+  markMigration(from, to, extra = {}) {
+    const config = this.readConfig() || {};
+    const preserved = {};
+    if (config.kdf) preserved.kdf = config.kdf;
+    if (config.verifier) preserved.verifier = config.verifier;
+    this.writeConfig({
+      ...preserved,
+      ...extra,
+      mode: from,
+      migration: { from, to },
+    });
+  }
+
+  /** Drop the migration marker (a switch was abandoned before any convert). */
+  clearMigration() {
+    const config = this.readConfig();
+    if (!config || !config.migration) return;
+    const { migration: _drop, ...rest } = config;
+    this.writeConfig(rest);
+  }
+
+  /**
+   * Finish a crash-interrupted migration. Loads whatever keys are needed to read
+   * `from` and seal to `to`, re-encrypts the stragglers (idempotent), then flips
+   * the mode LAST and reconfigures the live backend. A master-password direction
+   * with no key returns `needs-unlock` (the unlock handler retries with the key).
+   *
+   * @param {{masterKey?:Buffer|null}} [opts]
+   * @returns {{status:string, from?:string, to?:string, failures?:object[]}}
+   */
+  resumeMigration({ masterKey = null } = {}) {
+    const config = this.readConfig();
+    const marker = this._migrationOf(config);
+    if (!marker) return { status: "none" };
+    const { from, to } = marker;
+    if (this._markerNeedsPassword(marker) && !masterKey) {
+      return { status: "needs-unlock", from, to };
+    }
+
+    // Load every key needed to READ `from` and SEAL to `to`.
+    const appKey =
+      from === "app-key" || to === "app-key"
+        ? this.ensureAppKey()
+        : this.readAppKey();
+    crypto.configure({ mode: from, appKey, masterKey });
+
+    const result = this.reencryptAll(to);
+    if (!result.ok) return { status: "failed", failures: result.failures };
+
+    this._flipMode(to, {
+      kdf: config.kdf,
+      verifier: config.verifier,
+      masterKey,
+    });
+    return { status: "resumed", from, to };
+  }
+
+  // ── Re-encryption (all-or-nothing, two-pass) ────────────────────────────────
+
+  /** The secret-bearing files: Port Hippo has exactly one (tunnels.json). */
+  _secretFiles() {
+    return [
+      {
+        path: this._paths.tunnelsPath(),
+        label: "tunnels",
+        collect: collectTunnels,
+        transform: mapTunnels,
+      },
+    ];
+  }
+
+  /**
+   * Re-encrypt every stored secret to `targetBackend`, all-or-nothing.
+   *
+   * Pass 1 VALIDATES: decrypt every secret under the current backend (also
+   * coalescing the single macOS Keychain preflight into one place); ANY failure
+   * aborts with nothing written. Pass 2 CONVERTS: re-seal each value to the
+   * target and write. Because pass 1 proved decryptability, pass 2 can't strand a
+   * half-converted file, and reencryptValue is idempotent so a re-run is safe.
+   *
+   * @param {string} targetBackend
+   * @returns {{ok:boolean, failures:{file:string,reason:string}[]}}
+   */
+  reencryptAll(targetBackend) {
+    const files = this._secretFiles();
+
+    const failures = [];
+    for (const f of files) {
+      const doc = io.readJSON(f.path);
+      if (!doc) continue;
+      for (const value of f.collect(doc)) {
+        if (!crypto.isEncrypted(value)) continue;
+        try {
+          crypto.reencryptValue(value, targetBackend); // decrypt-then-seal (discarded)
+        } catch (err) {
+          failures.push({
+            file: f.label,
+            reason: (err && err.code) || "error",
+          });
         }
       }
     }
-    return false;
+    if (failures.length) return { ok: false, failures };
+
+    for (const f of files) {
+      const doc = io.readJSON(f.path);
+      if (!doc) continue;
+      const next = f.transform(doc, (v) =>
+        crypto.reencryptValue(v, targetBackend),
+      );
+      io.writeJSON(f.path, next);
+    }
+    return { ok: true, failures: [] };
+  }
+
+  // ── Mode switch / unlock / lock (the IPC-facing operations) ──────────────────
+
+  /** The renderer-facing state: active mode + session lock + capabilities. */
+  getState() {
+    const config = this.readConfig();
+    return {
+      mode: crypto.getMode(),
+      locked: crypto.isLocked(),
+      available: crypto.isAvailable(), // is the OS keychain usable here?
+      hasPassword: Boolean(config && config.verifier),
+    };
+  }
+
+  /**
+   * Switch the at-rest backend, re-encrypting every secret to it. All-or-nothing
+   * and crash-safe: prepare the target key material, mark the migration, convert,
+   * then flip the mode LAST. A decrypt failure aborts with nothing changed.
+   *
+   * Never downgrades to plaintext: os-keychain is refused when safeStorage is
+   * unavailable, and leaving master-password requires an unlocked session.
+   *
+   * @param {string} targetMode
+   * @param {string} [password]  required when switching TO master-password
+   * @returns {{ok:boolean, unchanged?:boolean, reason?:string, failures?:object[]}}
+   */
+  setMode(targetMode, password) {
+    if (!MODES.includes(targetMode))
+      return { ok: false, reason: "invalid-mode" };
+    const current = crypto.getMode();
+    if (targetMode === current) return { ok: true, unchanged: true };
+
+    // Leaving master-password requires an unlocked session to read encm: secrets.
+    if (current === "master-password" && crypto.isLocked()) {
+      return { ok: false, reason: "locked" };
+    }
+
+    // Prepare the TARGET backend's durable key material BEFORE converting.
+    let prep = null;
+    let markerExtra = {};
+    if (targetMode === "app-key") {
+      crypto.configure({ appKey: this.ensureAppKey() }); // active mode still `current`
+    } else if (targetMode === "os-keychain") {
+      if (!crypto.isAvailable())
+        return { ok: false, reason: "keychain-unavailable" };
+    } else if (targetMode === "master-password") {
+      if (typeof password !== "string" || password.length === 0) {
+        return { ok: false, reason: "password-required" };
+      }
+      prep = this.prepareMasterPassword(password);
+      markerExtra = { kdf: prep.kdf, verifier: prep.verifier };
+    }
+
+    // Durably record the in-flight switch, then load the target key and convert.
+    this.markMigration(current, targetMode, markerExtra);
+    if (targetMode === "master-password") crypto.setMasterKey(prep.key);
+
+    const result = this.reencryptAll(targetMode);
+    if (!result.ok) {
+      this.clearMigration();
+      // Undo an unused freshly-set master key so the session doesn't linger unlocked.
+      if (targetMode === "master-password") crypto.lock();
+      return {
+        ok: false,
+        reason: "migration-failed",
+        failures: result.failures,
+      };
+    }
+
+    this._flipMode(targetMode, {
+      kdf: prep && prep.kdf,
+      verifier: prep && prep.verifier,
+      masterKey: prep && prep.key,
+    });
+    return { ok: true };
+  }
+
+  /**
+   * Flip the active mode LAST (the atomicity anchor): persist the target config
+   * (dropping the marker), reconfigure the live crypto backend, and delete the
+   * app-key file when leaving app-key. Shared by setMode + resumeMigration.
+   */
+  _flipMode(to, { kdf, verifier, masterKey } = {}) {
+    if (to === "master-password") {
+      this.writeConfig({ mode: to, kdf, verifier });
+      crypto.configure({ mode: to, appKey: null, masterKey });
+    } else if (to === "app-key") {
+      this.writeConfig({ mode: to });
+      crypto.configure({
+        mode: to,
+        appKey: this.readAppKey(),
+        masterKey: null,
+      });
+    } else {
+      this.writeConfig({ mode: to });
+      crypto.configure({ mode: to, appKey: null, masterKey: null });
+    }
+    if (to !== "app-key") this.deleteAppKey();
+  }
+
+  /**
+   * Unlock a locked master-password session for this run. Verifies the password,
+   * loads the derived key, and finishes any master-password migration a crash
+   * interrupted.
+   *
+   * @param {string} password
+   * @returns {{ok:boolean, reason?:string}}
+   */
+  unlock(password) {
+    const config = this.readConfig();
+    const marker = this.pendingMigration();
+    const masterMigration = marker && this._markerNeedsPassword(marker);
+    if (
+      !config ||
+      (config.mode !== "master-password" && !masterMigration) ||
+      !config.verifier
+    ) {
+      return { ok: false, reason: "not-applicable" };
+    }
+    const key = this.verifyMasterPassword(password, config);
+    if (!key) return { ok: false, reason: "bad-password" };
+
+    crypto.setMasterKey(key);
+    // Finish an interrupted migration to/from master-password (no-op otherwise).
+    this.resumeMigration({ masterKey: key });
+    return { ok: true };
+  }
+
+  /** Drop the in-memory master key (re-lock master-password secrets). */
+  lock() {
+    crypto.lock();
+    return { ok: true };
   }
 }
 

@@ -31,16 +31,24 @@ import { field } from "../field.js";
 import { PopupManager } from "../popup-manager.js";
 import { t, LOCALE_OPTIONS } from "../i18n.js";
 
-const PANELS = ["appearance", "defaults", "behaviour"];
+const PANELS = ["appearance", "defaults", "behaviour", "security"];
 
 export class SettingsPopup {
   #porthippo;
   #el = null;
   #built = false;
   #loadedLanguage = null;
+  #securityState = null; // last { mode, locked, available, hasPassword }
+  #pendingMode = null; // a non-master mode awaiting inline switch confirmation
 
   constructor({ porthippo } = {}) {
     this.#porthippo = porthippo || window.porthippo;
+
+    // A mode/lock change (ours or from elsewhere — menu, another window) refreshes
+    // the Security tab in place. Payload carries only status, never a secret.
+    window.addEventListener("porthippo:secret-storage-changed", (event) => {
+      this.#applySecurityState(event.detail);
+    });
   }
 
   /** Load current settings and open the popup. */
@@ -86,6 +94,7 @@ export class SettingsPopup {
       this.#appearancePanel(),
       this.#defaultsPanel(),
       this.#behaviourPanel(),
+      this.#securityPanel(),
     ]);
 
     const closeBtn = el("button", {
@@ -215,6 +224,187 @@ export class SettingsPopup {
     ]);
   }
 
+  // ── Security (selectable secret storage, Feature 90) ─────────────────────────
+  // A three-option radiogroup over the at-rest backend. Everything renders inline
+  // (PopupManager only hosts one popup, so a nested confirm would detach Settings):
+  // a non-master switch shows an inline confirm bar; master-password reveals inline
+  // set/confirm fields; a locked session shows an inline unlock row. Intents go out
+  // over window.porthippo.secretStorage.*; a decrypted secret never comes back.
+
+  #securityPanel() {
+    return this.#panel("security", [
+      el("h3", {
+        class: "settings-subhead",
+        text: t("settings.security.heading"),
+      }),
+      el("p", { class: "settings-help", text: t("settings.security.help") }),
+
+      // Locked master-password session: enter the password to unlock (hidden
+      // unless the active mode is master-password and no key is loaded).
+      el("div", { class: "security-locked-row", hidden: true }, [
+        el("p", {
+          class: "settings-help",
+          text: t("settings.security.lockedNote"),
+        }),
+        this.#secretField(
+          "security-unlock-pw",
+          t("settings.security.password"),
+          () => this.#unlockMaster(),
+          el("button", {
+            class: "btn btn--secondary security-unlock-btn",
+            type: "button",
+            text: t("settings.security.unlock"),
+            onClick: () => this.#unlockMaster(),
+          }),
+        ),
+      ]),
+
+      el(
+        "div",
+        {
+          class: "security-mode-group",
+          role: "radiogroup",
+          "aria-label": t("settings.security.modeAria"),
+        },
+        [
+          this.#securityModeOption(
+            "app-key",
+            "settings.security.mode.appKey",
+            "settings.security.mode.appKeyDesc",
+          ),
+          this.#securityModeOption(
+            "os-keychain",
+            "settings.security.mode.osKeychain",
+            "settings.security.mode.osKeychainDesc",
+          ),
+          this.#securityModeOption(
+            "master-password",
+            "settings.security.mode.masterPassword",
+            "settings.security.mode.masterPasswordDesc",
+            this.#masterFields(),
+          ),
+        ],
+      ),
+
+      // Inline switch-confirm for the two no-password modes.
+      el("div", { class: "security-confirm-row", hidden: true }, [
+        el("p", {
+          class: "settings-help",
+          text: t("settings.security.switchMessage"),
+        }),
+        el("div", { class: "security-confirm-actions" }, [
+          el("button", {
+            class: "btn btn--secondary security-confirm-cancel",
+            type: "button",
+            text: t("common.cancel"),
+            onClick: () => this.#cancelSwitch(),
+          }),
+          el("button", {
+            class: "btn btn--primary security-confirm-apply",
+            type: "button",
+            text: t("settings.security.switchConfirm"),
+            onClick: () => this.#applyMode(this.#pendingMode),
+          }),
+        ]),
+      ]),
+
+      el("p", {
+        class: "security-status",
+        role: "status",
+        "aria-live": "polite",
+      }),
+    ]);
+  }
+
+  // One radio card; `extra` (the master-password fields) nests inside when given.
+  #securityModeOption(value, labelKey, descKey, extra) {
+    const head = el("label", { class: "security-mode-head" }, [
+      el("input", {
+        type: "radio",
+        name: "secret-storage-mode",
+        value,
+        class: "security-mode-radio",
+        onChange: () => this.#onSecurityModeChange(value),
+      }),
+      el("span", { class: "security-mode-text" }, [
+        el("span", { class: "security-mode-label", text: t(labelKey) }),
+        el("span", { class: "security-mode-desc", text: t(descKey) }),
+      ]),
+    ]);
+    return el(
+      "div",
+      {
+        class: extra
+          ? "security-mode-option security-mode-option--expandable"
+          : "security-mode-option",
+      },
+      [head, extra].filter(Boolean),
+    );
+  }
+
+  // The inline set-a-master-password fields (hidden until master-password is
+  // selected). The Apply button commits the switch (which re-encrypts secrets).
+  #masterFields() {
+    return el("div", { class: "security-master-fields", hidden: true }, [
+      this.#secretField("security-master-pw", t("settings.security.password")),
+      this.#secretField(
+        "security-master-pw-confirm",
+        t("settings.security.confirmPassword"),
+        () => this.#applyMasterPassword(),
+      ),
+      el("p", {
+        class: "settings-help security-master-warn",
+        text: t("settings.security.setPasswordWarn"),
+      }),
+      el("button", {
+        class: "btn btn--primary security-master-apply",
+        type: "button",
+        text: t("settings.security.setPasswordSubmit"),
+        onClick: () => this.#applyMasterPassword(),
+      }),
+    ]);
+  }
+
+  // A masked password input with a show/hide reveal toggle, plus optional trailing
+  // control (e.g. an Unlock button). `onEnter` fires on the Enter key.
+  #secretField(className, ariaLabel, onEnter, trailing) {
+    const input = el("input", {
+      type: "password",
+      class: `settings-input security-secret-input ${className}`,
+      autocomplete: "new-password",
+      spellcheck: false,
+      "aria-label": ariaLabel,
+      placeholder: ariaLabel,
+      onKeydown: (e) => {
+        if (e.key === "Enter" && onEnter) {
+          e.preventDefault();
+          onEnter();
+        }
+      },
+    });
+    const reveal = el("button", {
+      class: "btn btn--icon security-reveal-btn",
+      type: "button",
+      text: "👁",
+      title: t("settings.security.reveal"),
+      "aria-label": t("settings.security.reveal"),
+      onClick: () => {
+        const show = input.type === "password";
+        input.type = show ? "text" : "password";
+        const key = show
+          ? "settings.security.hide"
+          : "settings.security.reveal";
+        reveal.title = t(key);
+        reveal.setAttribute("aria-label", t(key));
+      },
+    });
+    return el(
+      "div",
+      { class: "security-inline-field" },
+      [input, reveal, trailing].filter(Boolean),
+    );
+  }
+
   // A labelled <select> that emits on change.
   #select(id, _key, options) {
     return el(
@@ -256,10 +446,233 @@ export class SettingsPopup {
     for (const panel of this.#el.querySelectorAll(".settings-panel")) {
       panel.hidden = panel.dataset.panel !== name;
     }
+    // The Security tab reads live main-process state, so refresh it each reveal.
+    if (name === "security") this.#loadSecurityState();
   }
 
   #get(id) {
     return this.#el.querySelector(`#${id}`);
+  }
+
+  // ── Security state + actions ─────────────────────────────────────────────────
+
+  async #loadSecurityState() {
+    let state;
+    try {
+      state = await this.#porthippo?.secretStorage?.getMode?.();
+    } catch {
+      return; // leave the panel as-is on a read failure
+    }
+    if (state) this.#applySecurityState(state);
+  }
+
+  // Reflect a { mode, locked, available, hasPassword } snapshot into the panel.
+  #applySecurityState(state) {
+    if (!state || typeof state !== "object") return;
+    this.#securityState = state;
+    if (!this.#built || !this.#el) return;
+
+    this.#syncSecurityRadio(state.mode);
+    this.#showMasterFields(false);
+    this.#showConfirmBar(false);
+    this.#pendingMode = null;
+
+    const keychainRadio = this.#el.querySelector(
+      '.security-mode-radio[value="os-keychain"]',
+    );
+    if (keychainRadio) keychainRadio.disabled = !state.available;
+
+    const lockedRow = this.#el.querySelector(".security-locked-row");
+    if (lockedRow) lockedRow.hidden = !state.locked;
+
+    this.#setSecurityStatus("");
+  }
+
+  // A radio was picked. app-key/os-keychain → inline confirm; master-password →
+  // reveal the set-password fields (the switch commits on Apply).
+  #onSecurityModeChange(target) {
+    const current = this.#securityState?.mode;
+    this.#setSecurityStatus("");
+    if (target === current) {
+      this.#showMasterFields(false);
+      this.#showConfirmBar(false);
+      return;
+    }
+    if (target === "master-password") {
+      this.#showConfirmBar(false);
+      this.#showMasterFields(true);
+      return;
+    }
+    this.#showMasterFields(false);
+    this.#pendingMode = target;
+    this.#showConfirmBar(true);
+  }
+
+  // The user backed out of a pending no-password switch: revert the radio.
+  #cancelSwitch() {
+    this.#pendingMode = null;
+    this.#showConfirmBar(false);
+    this.#syncSecurityRadio(this.#securityState?.mode);
+  }
+
+  async #applyMode(target) {
+    if (!target) return;
+    this.#showConfirmBar(false);
+    this.#setSecurityStatus(t("settings.security.switching"));
+    let res;
+    try {
+      res = await this.#porthippo?.secretStorage?.setMode?.({ mode: target });
+    } catch {
+      res = { ok: false, reason: "error" };
+    }
+    this.#afterMutation(res);
+  }
+
+  async #applyMasterPassword() {
+    const pw = this.#secretValue("security-master-pw");
+    const confirm = this.#secretValue("security-master-pw-confirm");
+    if (!pw) {
+      this.#setSecurityStatus(
+        t("settings.security.error.passwordRequired"),
+        true,
+      );
+      return;
+    }
+    if (pw !== confirm) {
+      this.#setSecurityStatus(
+        t("settings.security.error.passwordMismatch"),
+        true,
+      );
+      return;
+    }
+    this.#setSecurityStatus(t("settings.security.switching"));
+    let res;
+    try {
+      res = await this.#porthippo?.secretStorage?.setMode?.({
+        mode: "master-password",
+        password: pw,
+      });
+    } catch {
+      res = { ok: false, reason: "error" };
+    }
+    this.#afterMutation(res);
+  }
+
+  async #unlockMaster() {
+    const input = this.#el.querySelector(".security-unlock-pw");
+    const pw = input ? input.value : "";
+    if (!pw) {
+      this.#setSecurityStatus(
+        t("settings.security.error.passwordRequired"),
+        true,
+      );
+      return;
+    }
+    this.#setSecurityStatus(t("settings.security.unlocking"));
+    let res;
+    try {
+      res = await this.#porthippo?.secretStorage?.unlock?.(pw);
+    } catch {
+      res = { ok: false, reason: "error" };
+    }
+    if (res && res.ok) {
+      this.#clearSecretInputs();
+      this.#loadSecurityState(); // refresh now (the broadcast also arrives)
+      return;
+    }
+    this.#setSecurityStatus(
+      res?.reason === "bad-password"
+        ? t("settings.security.error.badPassword")
+        : t("settings.security.error.generic"),
+      true,
+    );
+    if (input) {
+      input.value = "";
+      input.focus();
+    }
+  }
+
+  // Shared success/failure tail for a mode switch. On success the panel refreshes
+  // (here and via the porthippo:secret-storage-changed broadcast); on failure the
+  // radio snaps back to the still-current mode and the reason shows.
+  #afterMutation(res) {
+    if (res && res.ok) {
+      this.#clearSecretInputs();
+      this.#loadSecurityState();
+      return;
+    }
+    this.#setSecurityStatus(this.#switchErrorMessage(res?.reason), true);
+    this.#syncSecurityRadio(this.#securityState?.mode);
+    this.#showMasterFields(false);
+    this.#showConfirmBar(false);
+  }
+
+  #switchErrorMessage(reason) {
+    switch (reason) {
+      case "keychain-unavailable":
+        return t("settings.security.error.keychainUnavailable");
+      case "locked":
+        return t("settings.security.error.lockedSwitch");
+      case "migration-failed":
+        return t("settings.security.error.migrationFailed");
+      case "password-required":
+        return t("settings.security.error.passwordRequired");
+      default:
+        return t("settings.security.error.generic");
+    }
+  }
+
+  // ── Security DOM helpers ─────────────────────────────────────────────────────
+
+  #syncSecurityRadio(mode) {
+    for (const radio of this.#el.querySelectorAll(".security-mode-radio")) {
+      radio.checked = radio.value === mode;
+    }
+  }
+
+  #showMasterFields(show) {
+    const fields = this.#el.querySelector(".security-master-fields");
+    if (fields) fields.hidden = !show;
+    if (show) this.#el.querySelector(".security-master-pw")?.focus();
+    else this.#clearSecret("security-master-pw", "security-master-pw-confirm");
+  }
+
+  #showConfirmBar(show) {
+    const row = this.#el.querySelector(".security-confirm-row");
+    if (row) row.hidden = !show;
+  }
+
+  #setSecurityStatus(message, isError = false) {
+    const status = this.#el.querySelector(".security-status");
+    if (!status) return;
+    status.textContent = message || "";
+    status.classList.toggle(
+      "security-status--error",
+      Boolean(message) && isError,
+    );
+  }
+
+  #secretValue(className) {
+    const input = this.#el.querySelector(`.${className}`);
+    return input ? input.value : "";
+  }
+
+  #clearSecret(...classNames) {
+    for (const c of classNames) {
+      const input = this.#el.querySelector(`.${c}`);
+      if (input) {
+        input.value = "";
+        input.type = "password";
+      }
+    }
+  }
+
+  #clearSecretInputs() {
+    this.#clearSecret(
+      "security-master-pw",
+      "security-master-pw-confirm",
+      "security-unlock-pw",
+    );
   }
 
   // Populate controls from a settings object; each guarded so a partial object

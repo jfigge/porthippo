@@ -48,6 +48,7 @@ const { registerStoreIPC } = require("./ipc/store");
 const { registerEngineIPC } = require("./ipc/engine");
 const { registerDialogIPC } = require("./ipc/dialog");
 const { registerShellIPC } = require("./ipc/shell");
+const { registerSecretStorageIPC } = require("./ipc/secret-storage");
 const { TunnelEngine } = require("./tunnel/engine");
 const i18n = require("./i18n");
 const { createLogger } = require("./logger");
@@ -394,6 +395,17 @@ function registerIpc() {
     safeCall,
     loadCatalog: () => refreshCatalog(),
     copyDiagnostics,
+  });
+
+  // Selectable secret storage (Feature 90): mode switch / unlock / lock. On a
+  // successful change it reconciles the engine and broadcasts so the UI + live
+  // tunnels pick up the new key state.
+  registerSecretStorageIPC({
+    ipcMain,
+    getStores,
+    getEngine,
+    broadcast,
+    safeCall,
   });
 
   // Auto-update (Feature 70).
