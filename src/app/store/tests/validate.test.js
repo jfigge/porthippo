@@ -146,6 +146,22 @@ test("lingerMs / keepAlive / name are type-checked", () => {
   assert.ok(validateDefinition(validDef({ name: "" })).errors.name);
 });
 
+test("autoReconnect is an optional boolean", () => {
+  // Absent is fine (it defaults to false in the store).
+  assert.equal(validateDefinition(validDef()).valid, true);
+  assert.equal(
+    validateDefinition(validDef({ autoReconnect: true })).valid,
+    true,
+  );
+  assert.equal(
+    validateDefinition(validDef({ autoReconnect: false })).valid,
+    true,
+  );
+  assert.ok(
+    validateDefinition(validDef({ autoReconnect: "yes" })).errors.autoReconnect,
+  );
+});
+
 test("a non-object definition is rejected wholesale", () => {
   assert.equal(validateDefinition(null).valid, false);
   assert.equal(validateDefinition([]).valid, false);

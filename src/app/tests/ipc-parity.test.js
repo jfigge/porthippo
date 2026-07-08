@@ -50,9 +50,13 @@ function channelsFor(source, fnPattern) {
   return out;
 }
 
-// The main-process IPC surface is split across main.js (app:version) and the
-// store IPC module it delegates to (tunnels:* / settings:* / hostkeys:*).
-const mainProcessSource = ["main.js", "ipc/store.js"].map(read).join("\n");
+// The main-process IPC surface is split across main.js (app:version), the store
+// IPC module (tunnels:list|get|create|update|delete|reorder / settings:* /
+// hostkeys:list|revoke) and the engine IPC module (tunnels:arm|disarm|status|apply
+// / hostkeys:trust|reject).
+const mainProcessSource = ["main.js", "ipc/store.js", "ipc/engine.js"]
+  .map(read)
+  .join("\n");
 
 const handlers = channelsFor(mainProcessSource, "ipcMain\\.handle");
 const invokes = channelsFor(read("preload.js"), "ipcRenderer\\.invoke");

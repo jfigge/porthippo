@@ -1,0 +1,475 @@
+/*
+ * Copyright 2026 Jason Figge
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/**
+ * tunnel.js — the per-definition state machine that ties the listener, the shared
+ * (lazily-established) SSH connection, the byte relays, and the idle-teardown timer
+ * together.
+ *
+ * Lifecycle:
+ *   disarmed → (arm) → listening → (first local connection) → connecting → connected
+ *   → (idle > linger) → listening (SSH torn down, listener still bound)
+ *   → (disarm) → disarmed
+ *
+ * The SSH connection is opened lazily on the first accepted local socket (unless the
+ * definition sets `keepAlive`, which connects eagerly on arm and never idle-tears
+ * down). A ref-count of live relays drives idle teardown: when it hits zero a linger
+ * timer starts; if it fires, the SSH connection is disposed but the listener stays
+ * bound so a later access re-opens it.
+ *
+ * Reconcile: while armed, a connection-affecting edit is applied immediately when the
+ * tunnel is idle, or stashed as a **pending** change while clients are connected and
+ * auto-applied once the last one disconnects. `forceApply()` applies a pending change
+ * at once, dropping live connections. Cosmetic edits (name/order/lingerMs/
+ * autoReconnect) update in place with no teardown.
+ *
+ * On an unexpected SSH drop the branch is `def.autoReconnect` (default false): false →
+ * fail the connections and return to `listening` (re-establish on next access); true
+ * (or `keepAlive`) → bounded-backoff reconnect, moving to `error` only on exhaustion.
+ */
+"use strict";
+
+const { Listener } = require("./listener");
+const { connectChain } = require("./ssh-chain");
+const { startRelay } = require("./relay");
+
+const BASE_BACKOFF_MS = 1000;
+const MAX_BACKOFF_MS = 30000;
+const MAX_RECONNECT_ATTEMPTS = 6;
+
+const DEFAULT_BIND_HOST = "127.0.0.1";
+
+/**
+ * Does the change from `a` to `b` require re-binding / re-connecting? Cosmetic
+ * fields (name, order, lingerMs, autoReconnect) are read live from the current
+ * definition and never need a teardown.
+ */
+function connectionAffectingChange(a, b) {
+  if (a.localPort !== b.localPort) return true;
+  if ((a.bindHost || DEFAULT_BIND_HOST) !== (b.bindHost || DEFAULT_BIND_HOST))
+    return true;
+  if (Boolean(a.keepAlive) !== Boolean(b.keepAlive)) return true;
+  if (Boolean(a.enabled) !== Boolean(b.enabled)) return true;
+  if (JSON.stringify(a.destination) !== JSON.stringify(b.destination))
+    return true;
+  if (JSON.stringify(a.sshServer) !== JSON.stringify(b.sshServer)) return true;
+  if (JSON.stringify(a.jumps || []) !== JSON.stringify(b.jumps || []))
+    return true;
+  return false;
+}
+
+class Tunnel {
+  #def;
+  #deps;
+
+  #state = "disarmed";
+  #error = null;
+
+  #listener = null;
+  #sshConnection = null; // { client, dispose } once connected
+  #connectPromise = null; // in-flight connectChain (dedupes concurrent first hits)
+
+  #connections = new Set(); // live/pending connections: { socket, relay }
+  #lingerTimer = null;
+  #reconnectTimer = null;
+  #reconnectAttempts = 0;
+
+  #pendingDef = null; // a connection-affecting edit awaiting an idle moment
+  #disposed = false;
+
+  /**
+   * @param {object} def   the decrypted tunnel definition
+   * @param {object} deps
+   * @param {(ctx: object) => Function} deps.hostVerifierFactory  per-hop verifier
+   * @param {(snapshot: object) => void} [deps.onStateChange]  state/pending changed
+   * @param {(def: object) => number} deps.getLingerMs  effective linger for a def
+   * @param {typeof import('fs').readFileSync} [deps.readFileSync]  key reads (tests)
+   */
+  constructor(def, deps) {
+    this.#def = def;
+    this.#deps = deps;
+  }
+
+  get id() {
+    return this.#def.id;
+  }
+
+  get state() {
+    return this.#state;
+  }
+
+  /** A serializable snapshot for IPC status + `porthippo:tunnel-state` broadcasts. */
+  status() {
+    return {
+      id: this.#def.id,
+      state: this.#state,
+      error: this.#error || undefined,
+      pendingChanges: Boolean(this.#pendingDef),
+      connections: this.#connections.size,
+    };
+  }
+
+  // ── Arm / disarm ──────────────────────────────────────────────────────────────
+
+  /** Bind the listener; if `keepAlive`, also connect the SSH chain eagerly. */
+  async arm() {
+    if (this.#disposed) return this.status();
+
+    if (this.#listener) {
+      await this.#listener.stop();
+      this.#listener = null;
+    }
+    this.#error = null;
+
+    const listener = new Listener({
+      bindHost: this.#def.bindHost || DEFAULT_BIND_HOST,
+      port: this.#def.localPort,
+      onConnection: (socket) => this.#handleConnection(socket),
+      onError: (err) => this.#handleListenerError(err),
+    });
+
+    try {
+      await listener.start();
+    } catch (err) {
+      this.#error = err.message;
+      this.#setState("error");
+      return this.status();
+    }
+
+    this.#listener = listener;
+    this.#setState("listening");
+
+    if (this.#def.keepAlive) {
+      this.#ensureConnected().catch((err) => this.#failConnect(err));
+    }
+    return this.status();
+  }
+
+  /** Tear everything down (listener, SSH, relays, timers) → disarmed. */
+  async disarm() {
+    await this.#teardown();
+    this.#pendingDef = null;
+    this.#setState("disarmed");
+    return this.status();
+  }
+
+  /** Permanent teardown (engine dropping this tunnel or app quit). */
+  async dispose() {
+    this.#disposed = true;
+    await this.#teardown();
+    this.#pendingDef = null;
+    this.#state = "disarmed";
+  }
+
+  // ── Reconcile (edits) ─────────────────────────────────────────────────────────
+
+  /**
+   * React to an edited definition. Cosmetic edits apply in place; connection-
+   * affecting edits apply immediately when idle, else stash as pending.
+   */
+  applyDefinition(newDef) {
+    if (!connectionAffectingChange(this.#def, newDef)) {
+      this.#def = newDef; // name/order/lingerMs/autoReconnect — live, no teardown
+      this.#emitState();
+      return;
+    }
+    if (this.#state === "disarmed") {
+      this.#def = newDef; // takes effect on next arm
+      return;
+    }
+    if (this.#connections.size === 0) {
+      this.#reapply(newDef); // idle → apply now
+    } else {
+      this.#pendingDef = newDef; // active → wait for idle (or forceApply)
+      this.#emitState();
+    }
+  }
+
+  /** Apply a pending change immediately, forcing live connections to disconnect. */
+  forceApply() {
+    if (!this.#pendingDef) return;
+    const next = this.#pendingDef;
+    this.#pendingDef = null;
+    this.#reapply(next);
+  }
+
+  /** Disarm + re-arm with `newDef` (or leave disarmed if the edit disabled it). */
+  async #reapply(newDef) {
+    await this.#teardown();
+    this.#def = newDef;
+    if (newDef.enabled) {
+      await this.arm();
+    } else {
+      this.#setState("disarmed");
+    }
+  }
+
+  #maybeApplyPending() {
+    if (!this.#pendingDef || this.#connections.size > 0) return;
+    const next = this.#pendingDef;
+    this.#pendingDef = null;
+    this.#reapply(next);
+  }
+
+  // ── Local connection handling ─────────────────────────────────────────────────
+
+  #isAccepting() {
+    return (
+      Boolean(this.#listener) && !this.#disposed && this.#state !== "paused"
+    );
+  }
+
+  #handleConnection(socket) {
+    if (!this.#isAccepting()) {
+      socket.destroy();
+      return;
+    }
+    this.#cancelLinger();
+
+    const conn = { socket, relay: null };
+    this.#connections.add(conn);
+
+    // If the socket dies before its relay exists, drop it from the ref-count.
+    socket.once("close", () => {
+      if (conn.relay) return; // the relay now owns the lifecycle
+      if (this.#connections.delete(conn)) this.#onIdleCheck();
+    });
+
+    this.#ensureConnected()
+      .then((sshConn) => {
+        if (this.#disposed || !this.#connections.has(conn)) {
+          socket.destroy();
+          return;
+        }
+        conn.relay = startRelay({
+          client: sshConn.client,
+          socket,
+          destination: this.#def.destination,
+          onClose: () => {
+            if (this.#connections.delete(conn)) this.#onIdleCheck();
+          },
+        });
+        this.#emitState(); // connection count changed
+      })
+      .catch((err) => {
+        this.#connections.delete(conn);
+        socket.destroy();
+        this.#failConnect(err);
+      });
+  }
+
+  #onIdleCheck() {
+    if (this.#connections.size > 0) return;
+    this.#maybeStartLinger();
+    this.#maybeApplyPending();
+    this.#emitState();
+  }
+
+  #handleListenerError(err) {
+    this.#error = err.message;
+    this.#setState("error");
+  }
+
+  // ── SSH connection lifecycle ──────────────────────────────────────────────────
+
+  #ensureConnected() {
+    if (this.#sshConnection) return Promise.resolve(this.#sshConnection);
+    if (this.#connectPromise) return this.#connectPromise;
+
+    this.#setState("connecting");
+    const hops = [...(this.#def.jumps || []), this.#def.sshServer];
+
+    this.#connectPromise = connectChain({
+      hops,
+      tunnelId: this.#def.id,
+      hostVerifierFactory: this.#deps.hostVerifierFactory,
+      readFileSync: this.#deps.readFileSync,
+    })
+      .then((sshConn) => {
+        this.#connectPromise = null;
+        if (this.#disposed) {
+          sshConn.dispose();
+          throw new Error("tunnel disposed during connect");
+        }
+        this.#sshConnection = sshConn;
+        this.#reconnectAttempts = 0;
+        this.#error = null;
+        this.#wireDrop(sshConn);
+        this.#setState("connected");
+        this.#maybeStartLinger(); // eager (keepAlive/reconnect) connect with no clients
+        return sshConn;
+      })
+      .catch((err) => {
+        this.#connectPromise = null;
+        throw err;
+      });
+    return this.#connectPromise;
+  }
+
+  /** Detect an unexpected drop of a *current* SSH connection. */
+  #wireDrop(sshConn) {
+    const onDrop = (err) => {
+      // Identity check: an intentional dispose nulls #sshConnection first, so a
+      // teardown-triggered close/error is ignored here (not treated as a drop).
+      if (this.#sshConnection !== sshConn) return;
+      this.#handleDrop(err);
+    };
+    sshConn.client.on("close", () => onDrop());
+    sshConn.client.on("error", (err) => onDrop(err));
+  }
+
+  #handleDrop(err) {
+    this.#sshConnection = null;
+    this.#error = err ? String(err.message || err) : "SSH connection dropped";
+    this.#failAllConnections();
+    this.#cancelLinger();
+
+    if (this.#shouldStayHot()) {
+      this.#attemptReconnect();
+    } else {
+      this.#setState("listening"); // re-establish on next access
+      this.#maybeApplyPending();
+    }
+  }
+
+  #shouldStayHot() {
+    return Boolean(this.#def.keepAlive) || Boolean(this.#def.autoReconnect);
+  }
+
+  #attemptReconnect() {
+    if (this.#disposed || this.#reconnectTimer) return;
+    this.#setState("connecting");
+    const delay = Math.min(
+      MAX_BACKOFF_MS,
+      BASE_BACKOFF_MS * 2 ** this.#reconnectAttempts,
+    );
+    this.#reconnectTimer = setTimeout(() => {
+      this.#reconnectTimer = null;
+      if (this.#disposed || !this.#listener) return;
+      this.#ensureConnected().catch(() => {
+        this.#reconnectAttempts += 1;
+        if (this.#reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+          this.#reconnectAttempts = 0;
+          this.#setState("error");
+        } else {
+          this.#attemptReconnect();
+        }
+      });
+    }, delay);
+  }
+
+  /** A connect attempt failed (lazy connect, eager keepAlive, or reconnect). */
+  #failConnect(err) {
+    this.#error = String((err && err.message) || err || "connection failed");
+    if (this.#shouldStayHot()) {
+      this.#attemptReconnect();
+    } else {
+      // Keep the listener bound; the next local access retries the chain.
+      this.#setState(this.#listener ? "error" : "disarmed");
+    }
+  }
+
+  // ── Idle teardown (linger) ────────────────────────────────────────────────────
+
+  #maybeStartLinger() {
+    if (this.#def.keepAlive) return; // keepAlive never idle-tears-down
+    if (this.#connections.size > 0) return;
+    if (!this.#sshConnection || this.#lingerTimer) return;
+
+    const ms = this.#deps.getLingerMs(this.#def);
+    this.#lingerTimer = setTimeout(() => {
+      this.#lingerTimer = null;
+      if (this.#connections.size === 0 && this.#sshConnection) {
+        this.#disposeSsh();
+        this.#setState("listening");
+        this.#maybeApplyPending();
+      }
+    }, ms);
+  }
+
+  #cancelLinger() {
+    if (this.#lingerTimer) {
+      clearTimeout(this.#lingerTimer);
+      this.#lingerTimer = null;
+    }
+  }
+
+  #cancelReconnect() {
+    if (this.#reconnectTimer) {
+      clearTimeout(this.#reconnectTimer);
+      this.#reconnectTimer = null;
+    }
+    this.#reconnectAttempts = 0;
+  }
+
+  // ── Teardown helpers ──────────────────────────────────────────────────────────
+
+  #failAllConnections() {
+    for (const conn of [...this.#connections]) {
+      if (conn.relay) {
+        try {
+          conn.relay.close();
+        } catch {
+          // ignore
+        }
+      } else {
+        try {
+          conn.socket.destroy();
+        } catch {
+          // ignore
+        }
+      }
+    }
+    this.#connections.clear();
+  }
+
+  #disposeSsh() {
+    const conn = this.#sshConnection;
+    this.#sshConnection = null; // null first so #wireDrop ignores the close it triggers
+    this.#connectPromise = null;
+    if (conn) {
+      try {
+        conn.dispose();
+      } catch {
+        // ending an already-closed connection is fine
+      }
+    }
+  }
+
+  async #teardown() {
+    this.#cancelLinger();
+    this.#cancelReconnect();
+    this.#failAllConnections();
+    this.#disposeSsh();
+    if (this.#listener) {
+      await this.#listener.stop();
+      this.#listener = null;
+    }
+  }
+
+  // ── State emission ────────────────────────────────────────────────────────────
+
+  #setState(state) {
+    this.#state = state;
+    this.#emitState();
+  }
+
+  #emitState() {
+    this.#deps.onStateChange?.(this.status());
+  }
+}
+
+module.exports = { Tunnel, connectionAffectingChange };

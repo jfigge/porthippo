@@ -1,0 +1,90 @@
+/*
+ * Copyright 2026 Jason Figge
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/**
+ * ipc/engine.js — SSH tunnel engine IPC handlers.
+ *
+ * The renderer only ever sends *intents* over these channels — arm/disarm a
+ * definition, ask for a status snapshot, force-apply a pending edit, or answer a
+ * host-key trust prompt. All sockets and SSH live in the engine (main). Live state
+ * flows the other way as `porthippo:tunnel-state` / `porthippo:hostkey-*` broadcasts
+ * (see main.js), not through these request/response channels.
+ *
+ * Engine calls are async, so each handler is wrapped to await the result and turn a
+ * failure into the same discriminable `{ __hippoError }` envelope the store IPC uses.
+ *
+ * Every channel registered here MUST have a matching `window.porthippo.*` exposure
+ * in preload.js — the ipc-parity test fails the build otherwise.
+ *
+ * @param {object} deps
+ * @param {Electron.IpcMain} deps.ipcMain
+ * @param {() => import('../tunnel/engine').TunnelEngine} deps.getEngine
+ */
+function registerEngineIPC({ ipcMain, getEngine }) {
+  // Await the engine call; a throw/rejection becomes an error envelope. Returns the
+  // handler function — each call site passes the channel as a string LITERAL to
+  // ipcMain.handle so the ipc-parity guard can see it.
+  const wrap =
+    (channel, fn) =>
+    async (_event, ...args) => {
+      try {
+        const result = await fn(...args);
+        return result === undefined ? null : result;
+      } catch (err) {
+        console.error(`[main] ${channel} error:`, err && err.message);
+        return {
+          __hippoError: true,
+          channel,
+          message: err && err.message,
+          code: err && err.code,
+        };
+      }
+    };
+
+  // ── Arm / disarm / status ─────────────────────────────────────────────────────
+
+  ipcMain.handle(
+    "tunnels:arm",
+    wrap("tunnels:arm", (id) => getEngine().arm(id)),
+  );
+  ipcMain.handle(
+    "tunnels:disarm",
+    wrap("tunnels:disarm", (id) => getEngine().disarm(id)),
+  );
+  ipcMain.handle(
+    "tunnels:status",
+    wrap("tunnels:status", () => getEngine().status()),
+  );
+
+  // Force-apply a pending, connection-affecting edit now (drops live connections).
+  ipcMain.handle(
+    "tunnels:apply",
+    wrap("tunnels:apply", (id) => getEngine().apply(id)),
+  );
+
+  // ── Host-key trust decisions (resolve a pending TOFU prompt) ──────────────────
+
+  ipcMain.handle(
+    "hostkeys:trust",
+    wrap("hostkeys:trust", (promptId) => getEngine().trustHostKey(promptId)),
+  );
+  ipcMain.handle(
+    "hostkeys:reject",
+    wrap("hostkeys:reject", (promptId) => getEngine().rejectHostKey(promptId)),
+  );
+}
+
+module.exports = { registerEngineIPC };

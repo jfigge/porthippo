@@ -23,13 +23,21 @@
 // the window.porthippo bridge in preload.js.
 "use strict";
 
-const { app, BrowserWindow, ipcMain, nativeImage } = require("electron");
+const {
+  app,
+  BrowserWindow,
+  ipcMain,
+  nativeImage,
+  webContents,
+} = require("electron");
 const path = require("path");
 const fs = require("fs");
 
 const { parseArgs } = require("./cli-args");
 const { Stores } = require("./store/stores");
 const { registerStoreIPC } = require("./ipc/store");
+const { registerEngineIPC } = require("./ipc/engine");
+const { TunnelEngine } = require("./tunnel/engine");
 const updater = require("./updater");
 
 // Delay the silent startup update check so it never competes with window
@@ -70,6 +78,36 @@ function getStores() {
     _stores = new Stores(app.getPath("userData"));
   }
   return _stores;
+}
+
+// ─── Tunnel engine (Feature 20) ─────────────────────────────────────────────────
+// The single engine owns every live tunnel (listeners, SSH connections, relays). It
+// is created eagerly once Electron is ready (so it can arm enabled tunnels on start
+// and hold state), and reaches the renderer only through the broadcaster below — it
+// never imports Electron itself.
+
+let _engine = null;
+
+/** The shared TunnelEngine (created in app.whenReady). */
+function getEngine() {
+  return _engine;
+}
+
+/**
+ * Push a one-way event to every live renderer. Skips destroyed contexts so it
+ * survives window close/reopen (macOS activate) and the Feature 60 tray mode.
+ * @param {string} channel  e.g. "porthippo:tunnel-state"
+ * @param {object} payload  serializable; fingerprints only, never secrets
+ */
+function broadcastToRenderer(channel, payload) {
+  for (const wc of webContents.getAllWebContents()) {
+    if (wc.isDestroyed()) continue;
+    try {
+      wc.send(channel, payload);
+    } catch (err) {
+      console.error(`[main] broadcast ${channel} failed:`, err && err.message);
+    }
+  }
 }
 
 // ── Main-process error conventions ──────────────────────────────────────────
@@ -126,8 +164,26 @@ function registerIpc() {
   const version = resolveAppVersion();
   ipcMain.handle("app:version", () => version);
 
-  // Storage: tunnels:* / settings:* / hostkeys:* (see ipc/store.js).
-  registerStoreIPC({ ipcMain, getStores, safeCall, safeCallWrite });
+  // Storage: tunnels:* / settings:* / hostkeys:list|revoke (see ipc/store.js).
+  // After a successful definition write, reconcile the running tunnel so an edit
+  // re-arms (idle) or becomes pending (active), a new enabled tunnel arms, and a
+  // deleted one is disposed.
+  registerStoreIPC({
+    ipcMain,
+    getStores,
+    safeCall,
+    safeCallWrite,
+    afterWrite: (id) => {
+      getEngine()
+        ?.reconcile(id)
+        .catch((err) =>
+          console.error(`[main] reconcile ${id} error:`, err && err.message),
+        );
+    },
+  });
+
+  // Engine intents: tunnels:arm|disarm|status|apply, hostkeys:trust|reject.
+  registerEngineIPC({ ipcMain, getEngine });
 
   // Auto-update (Feature 70). The renderer triggers a manual check / restart;
   // the menu + tray triggers arrive in Feature 60. Lifecycle events flow back
@@ -233,6 +289,14 @@ app.whenReady().then(() => {
     app.dock.setIcon(appIcon);
   }
 
+  // Create the engine before IPC (so handlers can reach it) and arm every enabled
+  // definition on startup — binding listeners; SSH stays disconnected until first
+  // access. Broadcasts flow to the renderer via broadcastToRenderer.
+  _engine = new TunnelEngine({
+    getStores,
+    broadcast: broadcastToRenderer,
+  });
+
   registerIpc();
   createWindow();
 
@@ -245,6 +309,10 @@ app.whenReady().then(() => {
     STARTUP_UPDATE_CHECK_DELAY_MS,
   );
 
+  _engine.armAll().catch((err) => {
+    console.error("[main] armAll failed:", err && err.message);
+  });
+
   app.on("activate", () => {
     // macOS: re-create a window when the dock icon is clicked and none are open.
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -256,4 +324,12 @@ app.on("window-all-closed", () => {
   // when the window closes. For the scaffold, follow the standard convention:
   // quit on all-windows-closed except on macOS.
   if (process.platform !== "darwin") app.quit();
+});
+
+// Tear every tunnel down on quit (best-effort — the OS reclaims sockets on exit).
+let _disarmed = false;
+app.on("before-quit", () => {
+  if (_disarmed || !_engine) return;
+  _disarmed = true;
+  _engine.disarmAll().catch(() => {});
 });

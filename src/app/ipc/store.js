@@ -31,8 +31,23 @@
  * @param {() => import('../store/stores').Stores} deps.getStores
  * @param {(channel: string, fn: Function, fallback?: any) => any} deps.safeCall
  * @param {(channel: string, fn: Function) => any} deps.safeCallWrite
+ * @param {(id: string) => void} [deps.afterWrite]  notified with the affected id
+ *        after a successful definition create/update/delete so the Feature 20 engine
+ *        can reconcile the running tunnel.
  */
-function registerStoreIPC({ ipcMain, getStores, safeCall, safeCallWrite }) {
+function registerStoreIPC({
+  ipcMain,
+  getStores,
+  safeCall,
+  safeCallWrite,
+  afterWrite,
+}) {
+  // Fire the reconcile hook only after a write that actually succeeded.
+  const notify = (result, id) => {
+    if (result && !result.__hippoError && id) afterWrite?.(id);
+    return result;
+  };
+
   // ── Tunnel definitions ──────────────────────────────────────────────────────
 
   ipcMain.handle("tunnels:list", () =>
@@ -43,21 +58,26 @@ function registerStoreIPC({ ipcMain, getStores, safeCall, safeCallWrite }) {
     safeCall("tunnels:get", () => getStores().tunnelStore().get(id), null),
   );
 
-  ipcMain.handle("tunnels:create", (_event, def) =>
-    safeCallWrite("tunnels:create", () =>
+  ipcMain.handle("tunnels:create", (_event, def) => {
+    const result = safeCallWrite("tunnels:create", () =>
       getStores().tunnelStore().create(def),
-    ),
-  );
+    );
+    return notify(result, result && result.id);
+  });
 
-  ipcMain.handle("tunnels:update", (_event, id, patch) =>
-    safeCallWrite("tunnels:update", () =>
+  ipcMain.handle("tunnels:update", (_event, id, patch) => {
+    const result = safeCallWrite("tunnels:update", () =>
       getStores().tunnelStore().update(id, patch),
-    ),
-  );
+    );
+    return notify(result, id);
+  });
 
-  ipcMain.handle("tunnels:delete", (_event, id) =>
-    safeCallWrite("tunnels:delete", () => getStores().tunnelStore().delete(id)),
-  );
+  ipcMain.handle("tunnels:delete", (_event, id) => {
+    const result = safeCallWrite("tunnels:delete", () =>
+      getStores().tunnelStore().delete(id),
+    );
+    return notify(result, id);
+  });
 
   ipcMain.handle("tunnels:reorder", (_event, ids) =>
     safeCallWrite("tunnels:reorder", () =>

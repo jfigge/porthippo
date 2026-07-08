@@ -39,6 +39,7 @@ have landed; each names its prerequisites in **Context**.
 | 60 | [App shell: tray, settings & platform integration](60-app-shell-tray-and-settings.md) | System-tray presence, hide-to-tray (keep tunnels alive), launch-at-login, settings, native menus, notifications, logging/diagnostics, i18n seam | 50 |
 | 70 | [CI/CD, packaging & website](70-cicd-packaging-and-website.md) | electron-builder targets for macOS/Windows/Linux × arm64/x64, signing + notarization, auto-update feed, GitHub Actions (CI, DCO, release, deploy-site), the GitHub Pages download site | 60 |
 | 80 | [Docs & user guide](80-docs-and-user-guide.md) | In-app + hosted user guide (single Markdown source), README/CONTRIBUTING/SECURITY/NOTICE, export-compliance notes | 70 |
+| 90 | [Selectable secret storage](90-selectable-secret-storage.md) | Rest Hippo's three at-rest backends made user-selectable — device key (no prompt, default), OS keychain, master password — with re-encrypt-all migration and a Security tab in the Settings dialog | 60 |
 
 ## Cross-cutting conventions (apply in every stage)
 - **No UI framework.** Plain DOM + class-based ES modules; CSS via design tokens in

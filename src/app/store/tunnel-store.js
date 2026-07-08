@@ -176,6 +176,7 @@ function applyDefaults(def) {
     enabled: def.enabled ?? true,
     bindHost: def.bindHost ?? "127.0.0.1",
     keepAlive: def.keepAlive ?? false,
+    autoReconnect: def.autoReconnect ?? false,
     jumps: Array.isArray(def.jumps) ? def.jumps : [],
   };
 }
