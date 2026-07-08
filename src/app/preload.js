@@ -53,13 +53,16 @@ contextBridge.exposeInMainWorld("porthippo", {
 
     // ── Engine intents (Feature 20) ─────────────────────────────────────────
     // The renderer only sends intents; live state arrives via the
-    // `porthippo:tunnel-state` event below. Arm binds the local listener (SSH is
-    // opened lazily on first access); `apply` force-applies a pending edit,
-    // dropping live connections.
+    // `porthippo:tunnel-state` / `porthippo:stats` events below. Arm binds the
+    // local listener (SSH is opened lazily on first access); `apply` force-applies
+    // a pending edit, dropping live connections; `pause`/`resume` freeze and
+    // restore traffic without tearing SSH down or altering the stored definition.
     arm: (id) => ipcRenderer.invoke("tunnels:arm", id),
     disarm: (id) => ipcRenderer.invoke("tunnels:disarm", id),
     status: () => ipcRenderer.invoke("tunnels:status"),
     apply: (id) => ipcRenderer.invoke("tunnels:apply", id),
+    pause: (id) => ipcRenderer.invoke("tunnels:pause", id),
+    resume: (id) => ipcRenderer.invoke("tunnels:resume", id),
   },
 
   // ── App settings ──────────────────────────────────────────────────────────
@@ -99,6 +102,7 @@ contextBridge.exposeInMainWorld("porthippo", {
 // only — never secrets or key material.
 for (const channel of [
   "porthippo:tunnel-state",
+  "porthippo:stats",
   "porthippo:hostkey-unknown",
   "porthippo:hostkey-changed",
 ]) {

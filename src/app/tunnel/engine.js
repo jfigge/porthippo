@@ -36,6 +36,11 @@ const { makeHostVerifier } = require("./host-verifier");
 
 const DEFAULT_LINGER_MS = 10000;
 
+// The `porthippo:stats` heartbeat: one throttled snapshot of every tunnel, on a
+// timer while any tunnel is armed. State changes also emit an immediate snapshot,
+// so this only backstops steady-state rate/uptime updates between transitions.
+const STATS_INTERVAL_MS = 1000;
+
 class TunnelEngine {
   #getStores;
   #broadcast;
@@ -43,6 +48,7 @@ class TunnelEngine {
 
   #tunnels = new Map();
   #prompts = new Map(); // promptId → { resolve } for pending host-key decisions
+  #statsTimer = null; // the throttled porthippo:stats heartbeat (null when idle)
 
   /**
    * @param {object} deps
@@ -88,6 +94,20 @@ class TunnelEngine {
     return tunnel.status();
   }
 
+  /** Pause a tunnel: freeze traffic + stop accepting, keeping SSH alive. */
+  pause(id) {
+    const tunnel = this.#tunnels.get(id);
+    if (!tunnel) return { id, state: "disarmed" };
+    return tunnel.pause();
+  }
+
+  /** Resume a paused tunnel: re-accept and un-freeze its relays. */
+  resume(id) {
+    const tunnel = this.#tunnels.get(id);
+    if (!tunnel) return { id, state: "disarmed" };
+    return tunnel.resume();
+  }
+
   /** Snapshot of every tracked tunnel's state. */
   status() {
     return [...this.#tunnels.values()].map((t) => t.status());
@@ -110,6 +130,7 @@ class TunnelEngine {
   async disarmAll() {
     const tunnels = [...this.#tunnels.values()];
     this.#tunnels.clear();
+    this.#stopStatsTimer(); // dispose() doesn't emit, so stop the heartbeat here
     await Promise.all(tunnels.map((t) => t.dispose().catch(() => {})));
     for (const { resolve } of this.#prompts.values()) resolve(false);
     this.#prompts.clear();
@@ -133,6 +154,7 @@ class TunnelEngine {
           state: "disarmed",
           removed: true,
         });
+        this.#onTunnelStateChange(); // drop from the stats heartbeat
       }
       return;
     }
@@ -172,9 +194,51 @@ class TunnelEngine {
     return new Tunnel(def, {
       hostVerifierFactory: (ctx) => this.#buildHostVerifier(ctx),
       getLingerMs: (d) => this.#effectiveLinger(d),
-      onStateChange: (snapshot) =>
-        this.#broadcast?.("porthippo:tunnel-state", snapshot),
+      onStateChange: (snapshot) => {
+        this.#broadcast?.("porthippo:tunnel-state", snapshot);
+        this.#onTunnelStateChange();
+      },
     });
+  }
+
+  // ── Stats heartbeat (Feature 30) ──────────────────────────────────────────────
+  // One throttled `porthippo:stats` snapshot of every tunnel, plus an immediate
+  // snapshot on any state change so the UI reflects connect/disconnect/pause
+  // without waiting up to a second. No per-byte or per-connection IPC.
+
+  /** A tunnel changed state: (re)evaluate the heartbeat and push a snapshot now. */
+  #onTunnelStateChange() {
+    this.#refreshStatsTimer();
+    this.#emitStats();
+  }
+
+  /** Collect every tunnel's stats snapshot and broadcast it in one message. */
+  #emitStats() {
+    const snapshots = [...this.#tunnels.values()].map((t) => t.statsSnapshot());
+    this.#broadcast?.("porthippo:stats", snapshots);
+  }
+
+  /** Run the heartbeat while ≥1 tunnel is live; stop it once all are quiescent. */
+  #refreshStatsTimer() {
+    const anyLive = [...this.#tunnels.values()].some(
+      (t) => t.state !== "disarmed" && t.state !== "error",
+    );
+    if (anyLive && !this.#statsTimer) {
+      this.#statsTimer = setInterval(
+        () => this.#emitStats(),
+        STATS_INTERVAL_MS,
+      );
+      this.#statsTimer.unref?.(); // never keep the process alive for the heartbeat
+    } else if (!anyLive) {
+      this.#stopStatsTimer();
+    }
+  }
+
+  #stopStatsTimer() {
+    if (this.#statsTimer) {
+      clearInterval(this.#statsTimer);
+      this.#statsTimer = null;
+    }
   }
 
   #buildHostVerifier(ctx) {

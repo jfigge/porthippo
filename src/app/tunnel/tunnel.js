@@ -45,6 +45,7 @@
 const { Listener } = require("./listener");
 const { connectChain } = require("./ssh-chain");
 const { startRelay } = require("./relay");
+const { Stats } = require("./stats");
 
 const BASE_BACKOFF_MS = 1000;
 const MAX_BACKOFF_MS = 30000;
@@ -74,8 +75,10 @@ function connectionAffectingChange(a, b) {
 class Tunnel {
   #def;
   #deps;
+  #stats;
 
   #state = "disarmed";
+  #paused = false; // runtime pause toggle (Feature 30); orthogonal to #state
   #error = null;
 
   #listener = null;
@@ -96,29 +99,50 @@ class Tunnel {
    * @param {(ctx: object) => Function} deps.hostVerifierFactory  per-hop verifier
    * @param {(snapshot: object) => void} [deps.onStateChange]  state/pending changed
    * @param {(def: object) => number} deps.getLingerMs  effective linger for a def
+   * @param {() => number} [deps.now]  injected clock for stats (ms epoch; tests)
    * @param {typeof import('fs').readFileSync} [deps.readFileSync]  key reads (tests)
    */
   constructor(def, deps) {
     this.#def = def;
     this.#deps = deps;
+    this.#stats = new Stats({ now: deps.now });
   }
 
   get id() {
     return this.#def.id;
   }
 
+  /**
+   * The reported lifecycle state. `paused` is a runtime overlay: while paused the
+   * underlying machine (#state) keeps advancing (e.g. a lazy connect completing),
+   * but the tunnel reports `paused` until resumed.
+   */
   get state() {
-    return this.#state;
+    return this.#paused ? "paused" : this.#state;
   }
 
   /** A serializable snapshot for IPC status + `porthippo:tunnel-state` broadcasts. */
   status() {
     return {
       id: this.#def.id,
-      state: this.#state,
+      state: this.state,
       error: this.#error || undefined,
       pendingChanges: Boolean(this.#pendingDef),
       connections: this.#connections.size,
+    };
+  }
+
+  /**
+   * The Feature 30 metrics snapshot for the `porthippo:stats` stream: the tunnel's
+   * reported state + error merged with its `Stats` (rates, totals, timestamps).
+   * Plain serializable data — no live handles cross IPC.
+   */
+  statsSnapshot() {
+    return {
+      id: this.#def.id,
+      state: this.state,
+      error: this.#error || null,
+      ...this.#stats.snapshot(),
     };
   }
 
@@ -133,6 +157,7 @@ class Tunnel {
       this.#listener = null;
     }
     this.#error = null;
+    this.#paused = false; // a (re)arm always starts accepting
 
     const listener = new Listener({
       bindHost: this.#def.bindHost || DEFAULT_BIND_HOST,
@@ -150,6 +175,7 @@ class Tunnel {
     }
 
     this.#listener = listener;
+    this.#stats.onArmed(); // fresh measurement session (stamps armedAt, zeroes totals)
     this.#setState("listening");
 
     if (this.#def.keepAlive) {
@@ -162,6 +188,8 @@ class Tunnel {
   async disarm() {
     await this.#teardown();
     this.#pendingDef = null;
+    this.#paused = false;
+    this.#stats.onDisarmed();
     this.#setState("disarmed");
     return this.status();
   }
@@ -171,6 +199,8 @@ class Tunnel {
     this.#disposed = true;
     await this.#teardown();
     this.#pendingDef = null;
+    this.#paused = false;
+    this.#stats.onDisarmed();
     this.#state = "disarmed";
   }
 
@@ -224,12 +254,39 @@ class Tunnel {
     this.#reapply(next);
   }
 
+  // ── Pause / resume (Feature 30) ───────────────────────────────────────────────
+
+  /**
+   * Suspend traffic without tearing anything down: stop the listener accepting
+   * new connections and freeze byte flow on every live relay, while keeping the
+   * SSH connection and all sockets alive. Rates read zero and totals freeze;
+   * `openedAt` / `armedAt` keep ticking. No-op unless armed.
+   */
+  pause() {
+    if (this.#disposed || this.#paused) return this.status();
+    if (this.#state === "disarmed" || this.#state === "error")
+      return this.status();
+    this.#paused = true;
+    this.#cancelLinger(); // paused must never idle-tear-down the SSH connection
+    for (const conn of this.#connections) conn.relay?.pause();
+    this.#emitState();
+    return this.status();
+  }
+
+  /** Reverse pause(): re-accept new connections and un-freeze live relays. */
+  resume() {
+    if (this.#disposed || !this.#paused) return this.status();
+    this.#paused = false;
+    for (const conn of this.#connections) conn.relay?.resume();
+    this.#maybeStartLinger(); // resume the idle countdown if we're now idle
+    this.#emitState();
+    return this.status();
+  }
+
   // ── Local connection handling ─────────────────────────────────────────────────
 
   #isAccepting() {
-    return (
-      Boolean(this.#listener) && !this.#disposed && this.#state !== "paused"
-    );
+    return Boolean(this.#listener) && !this.#disposed && !this.#paused;
   }
 
   #handleConnection(socket) {
@@ -258,10 +315,14 @@ class Tunnel {
           client: sshConn.client,
           socket,
           destination: this.#def.destination,
+          stats: this.#stats,
           onClose: () => {
             if (this.#connections.delete(conn)) this.#onIdleCheck();
           },
         });
+        // A pause that landed while this connection was still connecting applies
+        // to its relay the moment it exists.
+        if (this.#paused) conn.relay.pause();
         this.#emitState(); // connection count changed
       })
       .catch((err) => {
@@ -307,6 +368,7 @@ class Tunnel {
         this.#sshConnection = sshConn;
         this.#reconnectAttempts = 0;
         this.#error = null;
+        this.#stats.onConnected(); // stamp openedAt for this SSH session
         this.#wireDrop(sshConn);
         this.#setState("connected");
         this.#maybeStartLinger(); // eager (keepAlive/reconnect) connect with no clients
@@ -333,6 +395,7 @@ class Tunnel {
 
   #handleDrop(err) {
     this.#sshConnection = null;
+    this.#stats.onDisconnected(); // this SSH session is over; openedAt clears
     this.#error = err ? String(err.message || err) : "SSH connection dropped";
     this.#failAllConnections();
     this.#cancelLinger();
@@ -385,6 +448,7 @@ class Tunnel {
   // ── Idle teardown (linger) ────────────────────────────────────────────────────
 
   #maybeStartLinger() {
+    if (this.#paused) return; // paused holds the SSH connection open regardless
     if (this.#def.keepAlive) return; // keepAlive never idle-tears-down
     if (this.#connections.size > 0) return;
     if (!this.#sshConnection || this.#lingerTimer) return;
@@ -441,6 +505,7 @@ class Tunnel {
     this.#sshConnection = null; // null first so #wireDrop ignores the close it triggers
     this.#connectPromise = null;
     if (conn) {
+      this.#stats.onDisconnected(); // openedAt clears with the session
       try {
         conn.dispose();
       } catch {
@@ -450,10 +515,14 @@ class Tunnel {
   }
 
   async #teardown() {
-    this.#cancelLinger();
     this.#cancelReconnect();
     this.#failAllConnections();
     this.#disposeSsh();
+    // Cancel the linger LAST: failing the connections above runs the idle check,
+    // which (while the SSH connection is briefly still up) can start a linger
+    // timer. Clearing it here guarantees teardown never leaves a pending timer
+    // holding the event loop open for the full lingerMs.
+    this.#cancelLinger();
     if (this.#listener) {
       await this.#listener.stop();
       this.#listener = null;

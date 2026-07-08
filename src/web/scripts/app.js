@@ -19,6 +19,11 @@
 // over the window.porthippo IPC bridge. Later features mount real components
 // into #definition-view and #monitoring-view.
 
+// Activate the Feature 30 stats seam: importing it for its side effect starts the
+// `porthippo:stats` subscription so the latest per-tunnel snapshots are captured
+// from load, ready for the Feature 50 Monitoring view to render.
+import "./stats-store.js";
+
 const VIEWS = ["definition", "monitoring", "split"];
 
 function applyView(view) {

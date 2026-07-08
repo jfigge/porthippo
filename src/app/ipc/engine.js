@@ -18,10 +18,11 @@
  * ipc/engine.js — SSH tunnel engine IPC handlers.
  *
  * The renderer only ever sends *intents* over these channels — arm/disarm a
- * definition, ask for a status snapshot, force-apply a pending edit, or answer a
- * host-key trust prompt. All sockets and SSH live in the engine (main). Live state
- * flows the other way as `porthippo:tunnel-state` / `porthippo:hostkey-*` broadcasts
- * (see main.js), not through these request/response channels.
+ * definition, pause/resume it, ask for a status snapshot, force-apply a pending
+ * edit, or answer a host-key trust prompt. All sockets and SSH live in the engine
+ * (main). Live state flows the other way as `porthippo:tunnel-state` /
+ * `porthippo:stats` / `porthippo:hostkey-*` broadcasts (see main.js), not through
+ * these request/response channels.
  *
  * Engine calls are async, so each handler is wrapped to await the result and turn a
  * failure into the same discriminable `{ __hippoError }` envelope the store IPC uses.
@@ -73,6 +74,16 @@ function registerEngineIPC({ ipcMain, getEngine }) {
   ipcMain.handle(
     "tunnels:apply",
     wrap("tunnels:apply", (id) => getEngine().apply(id)),
+  );
+
+  // Pause / resume: freeze (or restore) traffic without touching SSH or the store.
+  ipcMain.handle(
+    "tunnels:pause",
+    wrap("tunnels:pause", (id) => getEngine().pause(id)),
+  );
+  ipcMain.handle(
+    "tunnels:resume",
+    wrap("tunnels:resume", (id) => getEngine().resume(id)),
   );
 
   // ── Host-key trust decisions (resolve a pending TOFU prompt) ──────────────────
