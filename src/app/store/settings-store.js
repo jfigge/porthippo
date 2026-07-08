@@ -31,6 +31,7 @@ const DEFAULTS = Object.freeze({
   defaultBindHost: "127.0.0.1", // loopback by default (LAN exposure is opt-in)
   launchAtLogin: false,
   viewMode: "definition", // "definition" | "monitoring" | "split" (Feature 40 shell)
+  monitorFilter: "all", // "all" | "active" — Monitoring view list filter (Feature 50)
 });
 
 class SettingsStore {

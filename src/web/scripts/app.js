@@ -26,9 +26,16 @@
 import "./stats-store.js";
 
 import { DefinitionView } from "./components/definition-view.js";
+import { MonitoringView } from "./components/monitoring-view.js";
 import { HostKeyPrompt } from "./host-key-prompt.js";
 
 const VIEWS = ["definition", "monitoring", "split"];
+
+// The two panes are each mounted once and kept alive across view switches — so
+// the Monitoring view holds a single `porthippo:stats` subscription whether it is
+// shown alone or side-by-side in split mode. `applyView` only toggles visibility.
+let definitionView = null;
+let monitoringView = null;
 
 function applyView(view) {
   const content = document.getElementById("app-content");
@@ -83,13 +90,43 @@ async function initView() {
 async function initDefinitionView() {
   const host = document.getElementById("definition-view");
   if (!host) return;
-  const view = new DefinitionView();
-  host.appendChild(view.element);
+  definitionView = new DefinitionView();
+  host.appendChild(definitionView.element);
   try {
-    await view.load();
+    await definitionView.load();
   } catch (err) {
     console.error("[app] definition view load failed:", err && err.message);
   }
+}
+
+async function initMonitoringView() {
+  const host = document.getElementById("monitoring-view");
+  if (!host) return;
+  monitoringView = new MonitoringView();
+  host.appendChild(monitoringView.element);
+  try {
+    await monitoringView.load();
+  } catch (err) {
+    console.error("[app] monitoring view load failed:", err && err.message);
+  }
+}
+
+// A row's "Edit" affordance in the Monitoring view asks the shell to jump to the
+// Definition view for that tunnel. Stay put when already showing Definition (or
+// split); only flip away from the monitoring-only view.
+function initEditTunnelBridge() {
+  window.addEventListener("porthippo:edit-tunnel", (event) => {
+    const id = event.detail && event.detail.id;
+    if (!id) return;
+    const content = document.getElementById("app-content");
+    if (content && content.dataset.view === "monitoring") {
+      applyView("definition");
+      window.porthippo?.settings
+        ?.set?.({ viewMode: "definition" })
+        ?.catch?.(() => {});
+    }
+    definitionView?.selectById(id);
+  });
 }
 
 async function initVersion() {
@@ -107,6 +144,8 @@ document.addEventListener("DOMContentLoaded", () => {
   initViewToggle();
   initView();
   new HostKeyPrompt().install();
+  initEditTunnelBridge();
   initDefinitionView();
+  initMonitoringView();
   initVersion();
 });

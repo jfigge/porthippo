@@ -92,6 +92,15 @@ export class DefinitionView {
     this.#renderList();
   }
 
+  /**
+   * Open a definition for editing by id (used by the Monitoring view's edit
+   * affordance). No-op if the id isn't in the loaded list.
+   * @param {string} id
+   */
+  selectById(id) {
+    if (this.#defs.some((d) => d.id === id)) this.#select(id);
+  }
+
   destroy() {
     window.removeEventListener("porthippo:tunnel-state", this.#onTunnelState);
     this.#editor.destroy();
