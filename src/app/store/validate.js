@@ -175,6 +175,12 @@ function validateDefinition(def) {
   if (def.enabled !== undefined && typeof def.enabled !== "boolean") {
     errors.enabled = "enabled must be a boolean";
   }
+  if (
+    def.autoReconnect !== undefined &&
+    typeof def.autoReconnect !== "boolean"
+  ) {
+    errors.autoReconnect = "autoReconnect must be a boolean";
+  }
 
   return { valid: Object.keys(errors).length === 0, errors };
 }

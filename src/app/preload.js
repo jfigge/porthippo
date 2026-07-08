@@ -50,6 +50,16 @@ contextBridge.exposeInMainWorld("porthippo", {
     update: (id, patch) => ipcRenderer.invoke("tunnels:update", id, patch),
     delete: (id) => ipcRenderer.invoke("tunnels:delete", id),
     reorder: (ids) => ipcRenderer.invoke("tunnels:reorder", ids),
+
+    // ── Engine intents (Feature 20) ─────────────────────────────────────────
+    // The renderer only sends intents; live state arrives via the
+    // `porthippo:tunnel-state` event below. Arm binds the local listener (SSH is
+    // opened lazily on first access); `apply` force-applies a pending edit,
+    // dropping live connections.
+    arm: (id) => ipcRenderer.invoke("tunnels:arm", id),
+    disarm: (id) => ipcRenderer.invoke("tunnels:disarm", id),
+    status: () => ipcRenderer.invoke("tunnels:status"),
+    apply: (id) => ipcRenderer.invoke("tunnels:apply", id),
   },
 
   // ── App settings ──────────────────────────────────────────────────────────
@@ -64,5 +74,26 @@ contextBridge.exposeInMainWorld("porthippo", {
   hostkeys: {
     list: () => ipcRenderer.invoke("hostkeys:list"),
     revoke: (hostPort) => ipcRenderer.invoke("hostkeys:revoke", hostPort),
+
+    // Resolve an unknown-host-key prompt raised during a connection (TOFU). The
+    // engine holds the connection pending until one of these is called.
+    trust: (promptId) => ipcRenderer.invoke("hostkeys:trust", promptId),
+    reject: (promptId) => ipcRenderer.invoke("hostkeys:reject", promptId),
   },
 });
+
+// ── Main → renderer push events ───────────────────────────────────────────────
+// The engine pushes live state one-way over these channels. We re-dispatch each as
+// a global `porthippo:*` CustomEvent (matching the renderer's app-wide event
+// convention) so any panel can `window.addEventListener(...)`. Only the serializable
+// payload crosses; the raw Electron event is stripped. Payloads carry fingerprints
+// only — never secrets or key material.
+for (const channel of [
+  "porthippo:tunnel-state",
+  "porthippo:hostkey-unknown",
+  "porthippo:hostkey-changed",
+]) {
+  ipcRenderer.on(channel, (_event, detail) => {
+    window.dispatchEvent(new CustomEvent(channel, { detail }));
+  });
+}

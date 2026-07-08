@@ -24,8 +24,8 @@ real UI arrive in later features. When a stage is finished, move its plan file i
 ## Source Directories
 
 - `src/app/` — Electron **main** process (Node.js, CommonJS): window lifecycle, IPC
-  handlers, and (later) the SSH tunnel engine, sockets, and storage. All native I/O lives
-  here.
+  handlers (`ipc/`), storage (`store/`), and the SSH tunnel engine (`tunnel/`). All native
+  I/O — sockets and SSH — lives here.
 - `src/web/` — **renderer** (Vanilla JS ES modules + CSS): UI. Sandboxed; talks to main
   only through `window.porthippo.*`.
 - `src/web/fonts/` — bundled Inter variable font; never load fonts from a CDN.
@@ -41,15 +41,47 @@ Do **not** modify anything under `build/` or `src/node_modules/`.
 
 ```
 Electron main process (src/app/main.js)
-  └── IPC bridge (src/app/preload.js)  →  window.porthippo.*
+  ├── Store factory (src/app/store/)         encrypted definitions, settings, host keys
+  ├── Tunnel engine (src/app/tunnel/)        listeners, SSH connections, byte relays
+  ├── IPC handlers  (src/app/ipc/)           store.js + engine.js  →  ipcMain.handle
+  └── IPC bridge    (src/app/preload.js)     →  window.porthippo.*
         └── Renderer / UI (src/web/scripts/app.js)
 ```
 
-- The main process owns all filesystem I/O, sockets, and SSH (via `ssh2`, added in
-  Feature 20). The renderer is sandboxed and communicates exclusively via
-  `window.porthippo.*`.
-- IPC channels are registered in `main.js` and exposed through `preload.js`; **keep those
-  two files in lockstep** when adding a channel.
+- The main process owns all filesystem I/O, sockets, and SSH (via `ssh2`). The renderer is
+  sandboxed and communicates exclusively via `window.porthippo.*`.
+- Request/response IPC channels are registered in `ipc/store.js` (CRUD + settings +
+  `hostkeys:list|revoke`) and `ipc/engine.js` (`tunnels:arm|disarm|status|apply`,
+  `hostkeys:trust|reject`), and exposed through `preload.js`; **keep the handler and the
+  `window.porthippo.*` exposure in lockstep** (the `ipc-parity` test guards this — add any
+  new `ipc/*.js` file to its scan list).
+- Live state flows the other way as one-way `porthippo:*` broadcasts
+  (`porthippo:tunnel-state`, `porthippo:hostkey-unknown`, `porthippo:hostkey-changed`):
+  `main.js` sends via `webContents.send`; `preload.js` re-dispatches each as a global
+  `CustomEvent` on `window`. Payloads are serializable and carry fingerprints only — never
+  secrets.
+
+### Tunnel engine (`src/app/tunnel/`, Feature 20)
+
+A single `TunnelEngine` (created in `main.js`, `armAll()` on startup, `disarmAll()` on
+`before-quit`) owns a `Map<id, Tunnel>`. Each `Tunnel` is a state machine
+(`disarmed → listening → connecting → connected → …`, plus `error`). We own the local
+socket and relay bytes ourselves — never shell out to the system `ssh`.
+
+- `listener.js` — the local `net` listener bound on `bindHost:localPort`; structured
+  `EADDRINUSE` / privileged-port errors.
+- `ssh-chain.js` — connects the SSH chain (`jumps → sshServer`) by chaining `ssh2.Client`s
+  through the `sock` option; per-hop auth (agent / key / password) via `authHandler`.
+- `relay.js` — `forwardOut` + bidirectional pipe with byte counters (Feature 30 reads them).
+- `host-verifier.js` — verifies each hop's key against `~/.ssh/known_hosts` + the accepted-
+  keys store; TOFU-prompts on unknown, hard-rejects a changed key. Never auto-accepts.
+- `tunnel.js` — per-definition lifecycle: lazy connect on first access, ref-counted idle
+  teardown after `lingerMs`, `keepAlive`, reconcile (pending edits / force-apply), and the
+  `autoReconnect` drop policy (default off → re-establish on next access).
+- `engine.js` — the singleton: `arm/disarm/armAll/disarmAll/status/apply/reconcile` and
+  host-key prompt mediation. Reads decrypted definitions via
+  `tunnelStore().getDecrypted()/listDecrypted()`; never imports Electron (broadcasts are
+  injected).
 
 ## Common Commands
 
@@ -88,6 +120,10 @@ make clean     # Remove build/ and dist/
 
 - **No framework** — plain DOM APIs and CSS. Do not introduce React, Vue, or similar, or an
   event-bus library.
+- **No god files** — keep each module focused on a single responsibility. When a file starts
+  accumulating unrelated concerns (or grows past a few hundred lines), split it along its
+  seams rather than letting one file own everything. This applies to both main-process and
+  renderer code.
 - Components are class-based ES modules; follow the pattern in existing files.
 - **CSS** uses the custom properties in `src/web/styles/theme.css` — use them, don't
   hardcode colours or sizes.

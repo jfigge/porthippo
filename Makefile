@@ -94,7 +94,7 @@ license-headers:
 	@echo "--------------------------------"
 
 # ─── Testing ──────────────────────────────────────────────────────────────────
-test: test-license-headers test-js
+test: test-license-headers test-js test-tunnel
 
 # Guard: every first-party src/ JS+CSS file and build script must carry the
 # Apache 2.0 header. Fix any failure with `make license-headers`.
@@ -103,9 +103,17 @@ test-license-headers:
 	@node $(WORKSPACE)/scripts/license-header.mjs --check
 	@echo "--------------------------------"
 
+# Unit tests: everything except the tunnel-engine integration suite (that runs
+# under test-tunnel so it isn't executed twice).
 test-js:
 	@echo "Running JavaScript unit tests..."
-	@cd $(SRC_DIR) && node --test "app/**/*.test.js"
+	@cd $(SRC_DIR) && node --test "app/tests/**/*.test.js" "app/store/**/*.test.js"
+	@echo "--------------------------------"
+
+# Integration tests for the SSH tunnel engine (in-process ssh2 server + echo dest).
+test-tunnel:
+	@echo "Running SSH tunnel engine integration tests..."
+	@cd $(SRC_DIR) && node --test "app/tunnel/**/*.test.js"
 	@echo "--------------------------------"
 
 # ─── Build ────────────────────────────────────────────────────────────────────
@@ -167,5 +175,5 @@ help:
 	@echo "   download site are added in Feature 70.)"
 
 .PHONY: version info install debug debug-inspect fmt fmt-check lint license-headers test \
-        test-license-headers test-js build build-mac dmg build-setup \
+        test-license-headers test-js test-tunnel build build-mac dmg build-setup \
         build-install clean help
