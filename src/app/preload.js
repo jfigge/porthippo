@@ -100,6 +100,19 @@ contextBridge.exposeInMainWorld("porthippo", {
     check: () => ipcRenderer.invoke("updater:check"),
     quitAndInstall: () => ipcRenderer.invoke("updater:quit-and-install"),
   },
+
+  // ── App shell (Feature 60) ────────────────────────────────────────────────
+  // i18n.load returns the active locale's catalog (resolved from settings +
+  // the OS locale) for the renderer to layer over its embedded English.
+  i18n: {
+    load: () => ipcRenderer.invoke("i18n:load"),
+  },
+
+  // diagnostics.copy builds the redacted diagnostics report, copies it to the
+  // clipboard in main, and returns the text (never contains secrets).
+  diagnostics: {
+    copy: () => ipcRenderer.invoke("diagnostics:copy"),
+  },
 });
 
 // ── Main → renderer push events ───────────────────────────────────────────────
@@ -133,6 +146,23 @@ const UPDATER_EVENT_MAP = {
   "updater:error": "porthippo:update-error",
 };
 for (const [channel, domEvent] of Object.entries(UPDATER_EVENT_MAP)) {
+  ipcRenderer.on(channel, (_event, payload) => {
+    window.dispatchEvent(new CustomEvent(domEvent, { detail: payload }));
+  });
+}
+
+// ── App-menu / tray commands (Feature 60) ─────────────────────────────────────
+// Native chrome the main process owns (the app menu + tray) drives the renderer
+// by sending a `menu:*` command, which we re-dispatch as a global `porthippo:*`
+// CustomEvent that app.js binds — the same one-way convention as above. Engine
+// intents (arm-all / disarm-all) are handled directly in main and don't appear
+// here; these are the commands only the renderer can carry out.
+const MENU_EVENT_MAP = {
+  "menu:open-settings": "porthippo:open-settings",
+  "menu:new-tunnel": "porthippo:new-tunnel",
+  "menu:set-view": "porthippo:set-view",
+};
+for (const [channel, domEvent] of Object.entries(MENU_EVENT_MAP)) {
   ipcRenderer.on(channel, (_event, payload) => {
     window.dispatchEvent(new CustomEvent(domEvent, { detail: payload }));
   });

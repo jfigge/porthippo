@@ -34,6 +34,9 @@
  * @param {(id: string) => void} [deps.afterWrite]  notified with the affected id
  *        after a successful definition create/update/delete so the Feature 20 engine
  *        can reconcile the running tunnel.
+ * @param {(settings: object) => void} [deps.afterSettingsWrite]  notified with the
+ *        merged settings after a successful settings:set so main can apply platform
+ *        side-effects (Feature 60 launch-at-login).
  */
 function registerStoreIPC({
   ipcMain,
@@ -41,6 +44,7 @@ function registerStoreIPC({
   safeCall,
   safeCallWrite,
   afterWrite,
+  afterSettingsWrite,
 }) {
   // Fire the reconcile hook only after a write that actually succeeded.
   const notify = (result, id) => {
@@ -91,9 +95,13 @@ function registerStoreIPC({
     safeCall("settings:get", () => getStores().settingsStore().get(), {}),
   );
 
-  ipcMain.handle("settings:set", (_event, patch) =>
-    safeCallWrite("settings:set", () => getStores().settingsStore().set(patch)),
-  );
+  ipcMain.handle("settings:set", (_event, patch) => {
+    const result = safeCallWrite("settings:set", () =>
+      getStores().settingsStore().set(patch),
+    );
+    if (result && !result.__hippoError) afterSettingsWrite?.(result);
+    return result;
+  });
 
   // ── Accepted SSH host keys (TOFU) ───────────────────────────────────────────
 

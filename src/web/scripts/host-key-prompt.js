@@ -24,7 +24,7 @@
 // rather than inside the Definition view.
 
 import { PopupManager } from "./popup-manager.js";
-import { t } from "./strings.js";
+import { t } from "./i18n.js";
 
 export class HostKeyPrompt {
   #porthippo;

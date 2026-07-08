@@ -76,6 +76,36 @@ test("the internal schemaVersion stamp is not exposed in the view", () => {
   }
 });
 
+test("the Feature 60 behaviour keys default and round-trip", () => {
+  const { dir, store } = freshStore();
+  try {
+    // Defaults are present in the view.
+    const defaults = store.get();
+    assert.equal(defaults.language, "system");
+    assert.equal(defaults.defaultKeepAlive, false);
+    assert.equal(defaults.startMinimized, false);
+    assert.equal(defaults.armOnLaunch, true);
+    assert.equal(defaults.confirmOnQuit, false);
+
+    // And a patch of the new keys persists across a fresh instance.
+    store.set({
+      language: "fr",
+      startMinimized: true,
+      armOnLaunch: false,
+      confirmOnQuit: true,
+      defaultKeepAlive: true,
+    });
+    const reread = new SettingsStore(new Paths(dir)).get();
+    assert.equal(reread.language, "fr");
+    assert.equal(reread.startMinimized, true);
+    assert.equal(reread.armOnLaunch, false);
+    assert.equal(reread.confirmOnQuit, true);
+    assert.equal(reread.defaultKeepAlive, true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("a non-object patch is rejected", () => {
   const { dir, store } = freshStore();
   try {

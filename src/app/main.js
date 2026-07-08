@@ -16,35 +16,54 @@
 
 // main.js — Electron main process for Port Hippo.
 //
-// This is the Feature 00 scaffold: it creates a single window hosting the empty
-// Definition / Monitoring two-view shell and exposes the minimal IPC seam
-// (app:version) that later features extend. All native I/O — sockets, SSH,
-// filesystem — will live in this process; the renderer talks to it only through
-// the window.porthippo bridge in preload.js.
+// Owns all native I/O — sockets, SSH, filesystem, the tray/menu, logging — and
+// exposes it to the sandboxed renderer only through the window.porthippo bridge
+// (preload.js). Feature 60 turns Port Hippo into a background-capable app: a
+// single-instance lock, a status tray, hide-to-tray (closing the window keeps
+// tunnels alive — only an explicit Quit disarms), launch-at-login, a native
+// menu, rotating logs + diagnostics, and the i18n seam that localizes main-side
+// chrome.
 "use strict";
 
 const {
   app,
   BrowserWindow,
+  Menu,
+  Tray,
+  Notification,
+  clipboard,
   dialog,
   ipcMain,
   nativeImage,
+  shell,
   webContents,
 } = require("electron");
 const path = require("path");
 const fs = require("fs");
+const os = require("os");
 
 const { parseArgs } = require("./cli-args");
 const { Stores } = require("./store/stores");
 const { registerStoreIPC } = require("./ipc/store");
 const { registerEngineIPC } = require("./ipc/engine");
 const { registerDialogIPC } = require("./ipc/dialog");
+const { registerShellIPC } = require("./ipc/shell");
 const { TunnelEngine } = require("./tunnel/engine");
+const i18n = require("./i18n");
+const { createLogger } = require("./logger");
+const { buildReport } = require("./diagnostics");
+const { installAppMenu } = require("./menu");
+const { createTray } = require("./tray");
+const { buildTrayImage } = require("./tray-icon");
+const { createLoginItem } = require("./login-item");
 const updater = require("./updater");
 
 // Delay the silent startup update check so it never competes with window
 // creation / first paint. A manual check (Settings/menu) runs immediately.
 const STARTUP_UPDATE_CHECK_DELAY_MS = 10_000;
+
+// States that count as "live" (SSH is or may be established) for the tray.
+const LIVE_STATES = new Set(["listening", "connecting", "connected", "paused"]);
 
 const {
   dev: isDev,
@@ -52,10 +71,25 @@ const {
   devTools: isDevTools,
 } = parseArgs(process.argv);
 
-// Resolve the app's own version. In a packaged build app.getVersion() returns
-// the productName version, but when running unpackaged (make debug) it falls
-// back to Electron's version — so prefer the package.json value and fall back
-// to app.getVersion() only if that read ever fails.
+// ─── Logging ────────────────────────────────────────────────────────────────
+// Install the rotating file logger FIRST so the console tee captures the
+// earliest main-process diagnostics into userData/logs. getPath('userData') is
+// resolvable before app.whenReady(); fall back to a temp dir if it isn't.
+function resolveLogsDir() {
+  try {
+    return path.join(app.getPath("userData"), "logs");
+  } catch {
+    return path.join(os.tmpdir(), "porthippo-logs");
+  }
+}
+const logger = createLogger({ dir: resolveLogsDir() });
+logger.install();
+
+/**
+ * Resolve the app's own version. In a packaged build app.getVersion() returns
+ * the productName version, but when running unpackaged (make debug) it falls
+ * back to Electron's version — so prefer the package.json value.
+ */
 function resolveAppVersion() {
   try {
     return require("../package.json").version;
@@ -65,29 +99,18 @@ function resolveAppVersion() {
 }
 
 // ─── Storage ──────────────────────────────────────────────────────────────────
-// The store factory owns all filesystem I/O + secret encryption. It is built
-// lazily on the first store IPC call (not at require time) so app.getPath is
-// resolvable and the keychain/app-key bootstrap runs after Electron is ready.
-
+// The store factory owns all filesystem I/O + secret encryption. Built lazily on
+// the first use so app.getPath is resolvable and the keychain/app-key bootstrap
+// runs after Electron is ready.
 let _stores = null;
 
-/**
- * Return the shared Stores factory, creating it on first call.
- * @returns {Stores}
- */
+/** @returns {Stores} */
 function getStores() {
-  if (!_stores) {
-    _stores = new Stores(app.getPath("userData"));
-  }
+  if (!_stores) _stores = new Stores(app.getPath("userData"));
   return _stores;
 }
 
 // ─── Tunnel engine (Feature 20) ─────────────────────────────────────────────────
-// The single engine owns every live tunnel (listeners, SSH connections, relays). It
-// is created eagerly once Electron is ready (so it can arm enabled tunnels on start
-// and hold state), and reaches the renderer only through the broadcaster below — it
-// never imports Electron itself.
-
 let _engine = null;
 
 /** The shared TunnelEngine (created in app.whenReady). */
@@ -97,9 +120,7 @@ function getEngine() {
 
 /**
  * Push a one-way event to every live renderer. Skips destroyed contexts so it
- * survives window close/reopen (macOS activate) and the Feature 60 tray mode.
- * @param {string} channel  e.g. "porthippo:tunnel-state"
- * @param {object} payload  serializable; fingerprints only, never secrets
+ * survives window hide/show and tray-only operation.
  */
 function broadcastToRenderer(channel, payload) {
   for (const wc of webContents.getAllWebContents()) {
@@ -112,19 +133,22 @@ function broadcastToRenderer(channel, payload) {
   }
 }
 
-// ── Main-process error conventions ──────────────────────────────────────────
-// Thrown store errors advertise their kind on `.code` (INVALID_ID, NOT_FOUND,
-// INVALID_DEFINITION, INVALID_ARG, DecryptError codes). The IPC wrappers below
-// turn a throw into either a quiet fallback (reads) or a discriminable
-// `{ __hippoError }` envelope (writes) so a failure never becomes an unhandled
-// rejection in the renderer.
+// The engine's broadcaster: fan out to the renderer AND refresh the tray on a
+// state change (byte-rate `porthippo:stats` heartbeats don't affect the tray's
+// count/tooltip, so those are skipped to avoid rebuilding the menu every second).
+function broadcast(channel, payload) {
+  broadcastToRenderer(channel, payload);
+  if (channel === "porthippo:tunnel-state") _tray?.update();
+}
 
-/**
- * Wrap a read store call: log + return a safe fallback on error.
- * @param {string}   channel   IPC channel (for log context)
- * @param {Function} fn        synchronous store call
- * @param {*}        fallback  value returned on error
- */
+/** Send a one-way command to the (single) renderer window. */
+function sendToRenderer(channel, payload) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(channel, payload);
+  }
+}
+
+// ── Main-process error conventions ──────────────────────────────────────────
 function safeCall(channel, fn, fallback = null) {
   try {
     return fn();
@@ -134,15 +158,6 @@ function safeCall(channel, fn, fallback = null) {
   }
 }
 
-/**
- * Wrap a write store call. A failure returns a discriminable
- * `{ __hippoError: true }` envelope (carrying `.code` and, for validation
- * failures, the field-keyed `.errors`) so the renderer can tell a failed save
- * from a successful one and show inline errors.
- * @param {string}   channel  IPC channel (for log context)
- * @param {Function} fn       synchronous store call
- * @returns {*} the call's result on success, or an error envelope on failure
- */
 function safeCallWrite(channel, fn) {
   try {
     const result = fn();
@@ -159,17 +174,197 @@ function safeCallWrite(channel, fn) {
   }
 }
 
+// ─── i18n (main-process chrome) ─────────────────────────────────────────────────
+// The menu/tray/dialogs can't reach the renderer's t(), so main resolves labels
+// against its own catalog, refreshed from the persisted language + OS locale.
+let _catalog = i18n.loadCatalog({ systemLocale: "en" });
+
+function refreshCatalog() {
+  let requested = "system";
+  try {
+    requested = getStores().settingsStore().get().language || "system";
+  } catch {
+    /* pre-store default */
+  }
+  _catalog = i18n.loadCatalog({ requested, systemLocale: app.getLocale() });
+  return _catalog;
+}
+
+// label(key, fallback) — no interpolation; t(key, params) — interpolates. Both
+// read the LIVE `_catalog`, so a locale change reflects on the next menu/tray
+// rebuild without recreating them.
+const label = (key, fallback) => i18n.label(_catalog, key, fallback);
+const t = (key, params) => i18n.format(i18n.label(_catalog, key, key), params);
+
+// ─── Launch at login ─────────────────────────────────────────────────────────
+const loginItem = createLoginItem({ app, appName: "Port Hippo" });
+
+// Sync the OS login-item with the persisted setting. Only in packaged builds —
+// in dev the executable is the Electron binary, which we must not register.
+function applyLoginItem(settings) {
+  if (!app.isPackaged) return;
+  loginItem.set(Boolean(settings.launchAtLogin), {
+    openAsHidden: Boolean(settings.startMinimized),
+  });
+}
+
+// ─── Diagnostics ───────────────────────────────────────────────────────────────
+function collectAppInfo() {
+  return {
+    version: resolveAppVersion(),
+    platform: `${process.platform}/${process.arch}`,
+    electron: process.versions.electron,
+    chrome: process.versions.chrome,
+    node: process.versions.node,
+    os: `${os.type()} ${os.release()}`,
+    locale: app.getLocale(),
+    packaged: String(app.isPackaged),
+  };
+}
+
+/** Build the redacted diagnostics report, copy it to the clipboard, return it. */
+function copyDiagnostics() {
+  const report = buildReport({
+    app: collectAppInfo(),
+    tunnels: safeCall(
+      "diagnostics:tunnels",
+      () => getStores().tunnelStore().list(),
+      [],
+    ),
+    logs: logger.readFiles(),
+    generatedAt: new Date().toISOString(),
+  });
+  try {
+    clipboard.writeText(report);
+  } catch (err) {
+    console.error("[main] clipboard write failed:", err && err.message);
+  }
+  try {
+    if (Notification.isSupported()) {
+      new Notification({
+        title: t("tray.copyDiagnostics"),
+        body: t("shell.diagnostics.copied"),
+      }).show();
+    }
+  } catch {
+    /* notifications are best-effort */
+  }
+  return report;
+}
+
+// ─── Tray + status ─────────────────────────────────────────────────────────────
+let _tray = null;
+
+/** A snapshot of every definition's name + engine state for the tray. */
+function getStatus() {
+  const defs = safeCall(
+    "tray:list",
+    () => getStores().tunnelStore().list(),
+    [],
+  );
+  const states = new Map();
+  try {
+    for (const s of getEngine()?.status() || []) states.set(s.id, s.state);
+  } catch (err) {
+    console.error("[main] status snapshot failed:", err && err.message);
+  }
+  const tunnels = defs.map((d) => ({
+    id: d.id,
+    name: d.name,
+    state: states.get(d.id) || "disarmed",
+  }));
+  const active = tunnels.filter((x) => LIVE_STATES.has(x.state)).length;
+  return { tunnels, total: tunnels.length, active };
+}
+
+const armAll = () =>
+  getEngine()
+    ?.armAll()
+    .catch((err) => console.error("[main] armAll failed:", err && err.message));
+
+const disarmAll = () =>
+  getEngine()
+    ?.disarmAll()
+    .catch((err) =>
+      console.error("[main] disarmAll failed:", err && err.message),
+    );
+
+function createTrayPresence() {
+  const colorIconPath = path.join(__dirname, "..", "web", "icons", "32x32.png");
+  const image = buildTrayImage({ nativeImage, colorIconPath });
+  _tray = createTray({
+    Tray,
+    Menu,
+    image,
+    t,
+    getStatus,
+    actions: {
+      showWindow,
+      armAll,
+      disarmAll,
+      arm: (id) =>
+        getEngine()
+          ?.arm(id)
+          .catch((err) =>
+            console.error("[main] arm failed:", err && err.message),
+          ),
+      disarm: (id) =>
+        getEngine()
+          ?.disarm(id)
+          .catch((err) =>
+            console.error("[main] disarm failed:", err && err.message),
+          ),
+      openSettings,
+      copyDiagnostics,
+      quit: requestQuit,
+    },
+  });
+}
+
+// ─── Native menu ─────────────────────────────────────────────────────────────
+function refreshMenu() {
+  installAppMenu({
+    app,
+    Menu,
+    label,
+    isDev: isDev || isDevTools || isHotReload,
+    actions: {
+      newTunnel: () => {
+        showWindow();
+        sendToRenderer("menu:new-tunnel");
+      },
+      armAll,
+      disarmAll,
+      openSettings,
+      setView: (view) => {
+        showWindow();
+        sendToRenderer("menu:set-view", view);
+      },
+      copyDiagnostics,
+      showLogs: () => shell.openPath(logger.dir),
+      about: showAbout,
+      checkUpdates: () => updater.checkForUpdates({ manual: true }),
+      quit: requestQuit,
+    },
+  });
+}
+
+function showAbout() {
+  dialog.showMessageBox(mainWindow ?? undefined, {
+    type: "info",
+    title: label("menu.about", "About Port Hippo"),
+    message: "Port Hippo",
+    detail: `v${resolveAppVersion()}\n${process.platform}/${process.arch} · Electron ${process.versions.electron}`,
+    buttons: [label("common.close", "Close")],
+    defaultId: 0,
+  });
+}
+
 // ─── IPC handlers ─────────────────────────────────────────────────────────────
-// Keep every ipcMain.handle channel mirrored by a preload.js export (lockstep);
-// the tests/ipc-parity.test.js guard fails the build on any drift.
 function registerIpc() {
   const version = resolveAppVersion();
   ipcMain.handle("app:version", () => version);
 
-  // Storage: tunnels:* / settings:* / hostkeys:list|revoke (see ipc/store.js).
-  // After a successful definition write, reconcile the running tunnel so an edit
-  // re-arms (idle) or becomes pending (active), a new enabled tunnel arms, and a
-  // deleted one is disposed.
   registerStoreIPC({
     ipcMain,
     getStores,
@@ -182,19 +377,26 @@ function registerIpc() {
           console.error(`[main] reconcile ${id} error:`, err && err.message),
         );
     },
+    // After a settings change, apply the platform side-effects the renderer
+    // can't (launch-at-login). Theme/language/defaults are live-applied in the
+    // renderer; language additionally re-localizes main chrome on the reload
+    // (did-finish-load → refreshCatalog + refreshMenu + tray.update).
+    afterSettingsWrite: (settings) => applyLoginItem(settings),
   });
 
-  // Engine intents: tunnels:arm|disarm|status|apply, hostkeys:trust|reject.
   registerEngineIPC({ ipcMain, getEngine });
 
-  // Native file pickers (Feature 40): dialog:open-key-file for the auth editor's
-  // Browse. Only paths cross back to the sandboxed renderer, never file bytes.
   registerDialogIPC({ ipcMain, dialog, getMainWindow: () => mainWindow });
 
-  // Auto-update (Feature 70). The renderer triggers a manual check / restart;
-  // the menu + tray triggers arrive in Feature 60. Lifecycle events flow back
-  // as updater:* pushes, which preload.js re-dispatches as porthippo:update-*
-  // DOM events.
+  // App-shell IPC (Feature 60): i18n catalog + diagnostics report.
+  registerShellIPC({
+    ipcMain,
+    safeCall,
+    loadCatalog: () => refreshCatalog(),
+    copyDiagnostics,
+  });
+
+  // Auto-update (Feature 70).
   ipcMain.handle("updater:check", () => {
     updater.checkForUpdates({ manual: true });
     return null;
@@ -206,8 +408,6 @@ function registerIpc() {
 }
 
 // ─── Hot reload (dev only) ────────────────────────────────────────────────────
-// Under `make debug` (--hot-reload) watch the renderer tree and reload the
-// window on change. Deliberately dependency-free (fs.watch) — no chokidar.
 function installHotReload(win) {
   const webDir = path.join(__dirname, "..", "web");
   let timer = null;
@@ -219,23 +419,11 @@ function installHotReload(win) {
       }, 120);
     });
   } catch (err) {
-    // Non-fatal: recursive watch is unsupported on some platforms.
     console.error("[main] hot-reload watcher failed:", err && err.message);
   }
 }
 
 // ─── App icon ─────────────────────────────────────────────────────────────────
-// A large source PNG is loaded once and Electron downscales it as needed. On
-// Windows/Linux it becomes the window + taskbar icon; on macOS the window `icon`
-// option is ignored (the dock icon comes from the packaged .app bundle), so we
-// set the dock icon explicitly when running unpackaged so `make debug` shows our
-// icon instead of the default Electron one.
-//
-// macOS expects the artwork to sit inside the system "safe area" — a rounded
-// square filling ~80% of the canvas with transparent padding on every side — so
-// the dock renders it at the same visual weight as native apps. We therefore use
-// the pre-padded `porthippo-mac-icon.png` on darwin; other platforms use the
-// edge-to-edge icon set, which is designed to fill its canvas.
 function loadAppIcon() {
   const file =
     process.platform === "darwin"
@@ -248,94 +436,209 @@ function loadAppIcon() {
 const appIcon = loadAppIcon();
 
 // ─── Window ───────────────────────────────────────────────────────────────────
-// The single app window. Held at module scope so the updater can push lifecycle
-// events to whichever window is currently alive.
 let mainWindow = null;
+// Set true only by an explicit Quit; the window `close` handler hides instead of
+// closing until this flips, so closing the window keeps tunnels alive.
+let isQuitting = false;
 
-function createWindow() {
+function createWindow({ show = true } = {}) {
   const win = new BrowserWindow({
     width: 1100,
     height: 720,
     minWidth: 720,
     minHeight: 480,
-    backgroundColor: "#1c1c1c", // matches --color-base (theme.css) to avoid a launch flash
-    icon: appIcon, // used on Windows/Linux; ignored on macOS
+    backgroundColor: "#1c1c1c",
+    icon: appIcon,
     show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
-      contextIsolation: true, // renderer cannot touch Node directly
-      nodeIntegration: false, // keep Node out of the renderer
-      sandbox: true, // extra process isolation
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
     },
   });
 
   win.loadFile(path.join(__dirname, "..", "web", "index.html"));
 
   mainWindow = win;
+
+  // Close hides to the tray (keeping tunnels alive) until a real Quit is in
+  // progress; first time, tell the user where the app went.
+  win.on("close", (event) => {
+    if (isQuitting) return;
+    event.preventDefault();
+    win.hide();
+    maybeShowHideNotice();
+  });
   win.on("closed", () => {
     if (mainWindow === win) mainWindow = null;
   });
 
-  win.once("ready-to-show", () => win.show());
+  // Re-localize main chrome whenever the renderer (re)loads — e.g. after a
+  // language change reloads the window.
+  win.webContents.on("did-finish-load", () => {
+    refreshCatalog();
+    refreshMenu();
+    _tray?.update();
+  });
 
-  if (isDev || isDevTools) {
-    win.webContents.openDevTools({ mode: "bottom" });
-  }
-  if (isHotReload) {
-    installHotReload(win);
-  }
+  if (show) win.once("ready-to-show", () => win.show());
+
+  if (isDev || isDevTools) win.webContents.openDevTools({ mode: "bottom" });
+  if (isHotReload) installHotReload(win);
 
   return win;
 }
 
-// ─── App lifecycle ────────────────────────────────────────────────────────────
-app.whenReady().then(() => {
-  // Show our icon in the dev dock (packaged macOS builds use the .app bundle icon).
-  if (process.platform === "darwin" && !app.isPackaged && app.dock && appIcon) {
-    app.dock.setIcon(appIcon);
+/** Show and focus the window, creating it if it was fully closed. */
+function showWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow({ show: true });
+    return;
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+/** Open the window and ask the renderer to show the Settings panel. */
+function openSettings() {
+  showWindow();
+  sendToRenderer("menu:open-settings");
+}
+
+// One-off "still running in the tray" notification, persisted so it shows once.
+function maybeShowHideNotice() {
+  let seen = false;
+  try {
+    seen = getStores().settingsStore().get().trayHintSeen === true;
+  } catch {
+    /* ignore */
+  }
+  if (seen) return;
+  try {
+    getStores().settingsStore().set({ trayHintSeen: true });
+  } catch {
+    /* ignore */
+  }
+  try {
+    if (Notification.isSupported()) {
+      new Notification({
+        title: t("shell.hide.title"),
+        body: t("shell.hide.body"),
+      }).show();
+    }
+  } catch {
+    /* best-effort */
+  }
+}
+
+/** The single quit path: optional confirm, then flag + quit (before-quit disarms). */
+function requestQuit() {
+  if (isQuitting) return;
+
+  let confirmOnQuit = false;
+  try {
+    confirmOnQuit = getStores().settingsStore().get().confirmOnQuit === true;
+  } catch {
+    /* ignore */
+  }
+  if (confirmOnQuit) {
+    const choice = dialog.showMessageBoxSync(mainWindow ?? undefined, {
+      type: "question",
+      title: t("shell.quit.title"),
+      message: t("shell.quit.title"),
+      detail: t("shell.quit.message"),
+      buttons: [t("shell.quit.confirm"), t("common.cancel")],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (choice !== 0) return;
   }
 
-  // Create the engine before IPC (so handlers can reach it) and arm every enabled
-  // definition on startup — binding listeners; SSH stays disconnected until first
-  // access. Broadcasts flow to the renderer via broadcastToRenderer.
-  _engine = new TunnelEngine({
-    getStores,
-    broadcast: broadcastToRenderer,
+  isQuitting = true;
+  app.quit();
+}
+
+// ─── Single-instance lock ──────────────────────────────────────────────────────
+// A second launch focuses the running window and exits — the store is a single
+// writer. Skipped under --hot-reload, whose self-relaunch would race the lock.
+const gotSingleInstanceLock = isHotReload || app.requestSingleInstanceLock();
+
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => showWindow());
+  bootstrap();
+}
+
+// ─── App lifecycle ────────────────────────────────────────────────────────────
+function bootstrap() {
+  app.whenReady().then(() => {
+    if (
+      process.platform === "darwin" &&
+      !app.isPackaged &&
+      app.dock &&
+      appIcon
+    ) {
+      app.dock.setIcon(appIcon);
+    }
+
+    // Resolve the catalog for main-side chrome, then create the engine (broadcasts
+    // fan out to the renderer + tray).
+    refreshCatalog();
+    _engine = new TunnelEngine({ getStores, broadcast });
+
+    registerIpc();
+
+    // Reconcile the OS login-item with the persisted setting.
+    applyLoginItem(
+      safeCall("startup:settings", () => getStores().settingsStore().get(), {}),
+    );
+
+    // Honour "start minimized to the tray" — create the window hidden so tunnels
+    // still arm but no window appears; the user opens it from the tray.
+    const settings = safeCall(
+      "startup:settings",
+      () => getStores().settingsStore().get(),
+      {},
+    );
+    createWindow({ show: !settings.startMinimized });
+
+    // Native menu + tray.
+    refreshMenu();
+    createTrayPresence();
+
+    // Auto-update (Feature 70): inert under `make debug`.
+    updater.initUpdater(() => mainWindow);
+    setTimeout(
+      () => updater.checkForUpdates({ manual: false }),
+      STARTUP_UPDATE_CHECK_DELAY_MS,
+    );
+
+    // Arm enabled definitions on startup unless the user opted out.
+    if (settings.armOnLaunch !== false) armAll();
+
+    app.on("activate", () => {
+      // macOS: clicking the dock re-shows the (hidden or closed) window.
+      showWindow();
+    });
   });
 
-  registerIpc();
-  createWindow();
-
-  // Wire electron-updater and run one debounced, silent startup check. A dev /
-  // unpackaged build short-circuits to "not available" (see updater.js), so this
-  // is inert under `make debug`.
-  updater.initUpdater(() => mainWindow);
-  setTimeout(
-    () => updater.checkForUpdates({ manual: false }),
-    STARTUP_UPDATE_CHECK_DELAY_MS,
-  );
-
-  _engine.armAll().catch((err) => {
-    console.error("[main] armAll failed:", err && err.message);
+  // A background utility stays alive when its window closes — the tray keeps it
+  // running (and tunnels up). Only an explicit Quit exits, on every platform.
+  app.on("window-all-closed", () => {
+    if (isQuitting) app.quit();
   });
 
-  app.on("activate", () => {
-    // macOS: re-create a window when the dock icon is clicked and none are open.
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  // Tear every tunnel down on quit. Set isQuitting so a window `close` fired as
+  // part of shutdown proceeds instead of hiding.
+  let _disarmed = false;
+  app.on("before-quit", () => {
+    isQuitting = true;
+    if (_disarmed || !_engine) return;
+    _disarmed = true;
+    _engine.disarmAll().catch(() => {});
+    _tray?.destroy();
   });
-});
-
-app.on("window-all-closed", () => {
-  // Feature 60 makes Port Hippo a background/tray app that keeps tunnels alive
-  // when the window closes. For the scaffold, follow the standard convention:
-  // quit on all-windows-closed except on macOS.
-  if (process.platform !== "darwin") app.quit();
-});
-
-// Tear every tunnel down on quit (best-effort — the OS reclaims sockets on exit).
-let _disarmed = false;
-app.on("before-quit", () => {
-  if (_disarmed || !_engine) return;
-  _disarmed = true;
-  _engine.disarmAll().catch(() => {});
-});
+}

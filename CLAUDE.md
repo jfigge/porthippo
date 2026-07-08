@@ -16,19 +16,25 @@ setup mirrors its sibling project **Rest Hippo** (`../resthippo`).
 ## Status
 
 Being built stage-by-stage from the plans in `features/` (see `features/ROADMAP.md`).
-**Feature 00 (this scaffold) is landing:** a launchable window with an empty
-Definition/Monitoring shell and a working `window.porthippo` bridge. SSH, storage, and the
-real UI arrive in later features. When a stage is finished, move its plan file into
-`features/done/`.
+**Features 00–60 have landed:** the data model + encrypted store, the SSH tunnel engine,
+monitoring/stats, the Definition + Monitoring views, CI/CD packaging, and the app shell
+(tray, hide-to-tray, launch-at-login, settings, native menu, logging/diagnostics, i18n).
+Remaining: docs (80) and selectable secret storage (90). When a stage is finished, move its
+plan file into `features/done/`.
 
 ## Source Directories
 
 - `src/app/` — Electron **main** process (Node.js, CommonJS): window lifecycle, IPC
   handlers (`ipc/`), storage (`store/`), and the SSH tunnel engine (`tunnel/`). All native
-  I/O — sockets and SSH — lives here.
+  I/O — sockets and SSH — lives here. Feature 60 adds the app-shell modules: `tray.js`,
+  `tray-icon.js`, `menu.js`, `login-item.js`, `logger.js`, `diagnostics.js`, and `i18n.js`
+  (main-side catalog loader).
 - `src/web/` — **renderer** (Vanilla JS ES modules + CSS): UI. Sandboxed; talks to main
   only through `window.porthippo.*`.
 - `src/web/fonts/` — bundled Inter variable font; never load fonts from a CDN.
+- `src/web/locales/` — i18n catalogs (`en.json` shipped complete). English is also embedded
+  in `src/web/scripts/i18n.js` as `EN` so `t()` resolves synchronously; a test keeps the two
+  byte-identical — **regenerate `en.json` after editing `EN`** (see below).
 - `src/web/styles/` — `theme.css` (design tokens + reset) and `app.css` (shell). Use the
   tokens; don't hardcode colours/sizes.
 - `scripts/` — build tooling (`license-header.mjs`; more in later features).
@@ -43,7 +49,10 @@ Do **not** modify anything under `build/` or `src/node_modules/`.
 Electron main process (src/app/main.js)
   ├── Store factory (src/app/store/)         encrypted definitions, settings, host keys
   ├── Tunnel engine (src/app/tunnel/)        listeners, SSH connections, byte relays
-  ├── IPC handlers  (src/app/ipc/)           store.js + engine.js  →  ipcMain.handle
+  ├── App shell     (tray/menu/login-item)   tray, native menu, launch-at-login
+  ├── Logging       (logger.js/diagnostics)  rotating log + redacted diagnostics report
+  ├── i18n (main)   (src/app/i18n.js)         loads locale catalogs for menu/tray/dialogs
+  ├── IPC handlers  (src/app/ipc/)           store.js + engine.js + dialog.js + shell.js
   └── IPC bridge    (src/app/preload.js)     →  window.porthippo.*
         └── Renderer / UI (src/web/scripts/app.js)
 ```
@@ -51,10 +60,11 @@ Electron main process (src/app/main.js)
 - The main process owns all filesystem I/O, sockets, and SSH (via `ssh2`). The renderer is
   sandboxed and communicates exclusively via `window.porthippo.*`.
 - Request/response IPC channels are registered in `ipc/store.js` (CRUD + settings +
-  `hostkeys:list|revoke`) and `ipc/engine.js` (`tunnels:arm|disarm|status|apply`,
-  `hostkeys:trust|reject`), and exposed through `preload.js`; **keep the handler and the
-  `window.porthippo.*` exposure in lockstep** (the `ipc-parity` test guards this — add any
-  new `ipc/*.js` file to its scan list).
+  `hostkeys:list|revoke`), `ipc/engine.js` (`tunnels:arm|disarm|status|apply`,
+  `hostkeys:trust|reject`), `ipc/dialog.js` (`dialog:open-key-file`) and `ipc/shell.js`
+  (`i18n:load`, `diagnostics:copy`), and exposed through `preload.js`; **keep the handler and
+  the `window.porthippo.*` exposure in lockstep** (the `ipc-parity` test guards this — add
+  any new `ipc/*.js` file to its scan list).
 - Live state flows the other way as one-way `porthippo:*` broadcasts
   (`porthippo:tunnel-state`, `porthippo:hostkey-unknown`, `porthippo:hostkey-changed`):
   `main.js` sends via `webContents.send`; `preload.js` re-dispatches each as a global
@@ -82,6 +92,50 @@ socket and relay bytes ourselves — never shell out to the system `ssh`.
   host-key prompt mediation. Reads decrypted definitions via
   `tunnelStore().getDecrypted()/listDecrypted()`; never imports Electron (broadcasts are
   injected).
+
+### App shell (Feature 60)
+
+Port Hippo is a **background utility**, so the shell keeps tunnels alive:
+
+- **Lifecycle — close hides, only Quit disarms.** The window `close` event hides to the tray
+  (unless the module `isQuitting` flag is set); `window-all-closed` never quits on its own.
+  The single Quit path (`requestQuit` — tray/menu/Cmd+Q, optionally confirmed) sets
+  `isQuitting`, then `before-quit` runs `engine.disarmAll()`. **Never disarm on a plain window
+  close.** A first-time hide shows a one-off "running in the tray" notification (persisted via
+  the `trayHintSeen` setting).
+- **Tray is the primary presence** (`tray.js`, macOS template glyph synthesised in
+  `tray-icon.js`). It is fed by teeing the engine `broadcast` — `main.js` calls `tray.update()`
+  on each `porthippo:tunnel-state` (not on the byte-rate `porthippo:stats` heartbeat).
+- **Single-instance lock** in `main.js` (skipped under `--hot-reload`); a second launch focuses
+  the running window.
+- **Native menu** (`menu.js`) and **tray** take injected Electron (`Menu`/`Tray`/`app`) — they
+  don't `require("electron")`. Custom items either call a main action directly (arm-all, quit,
+  copy-diagnostics) or `webContents.send("menu:*")` → preload re-dispatches as a
+  `porthippo:*` `CustomEvent` app.js binds.
+- **Launch at login** (`login-item.js`): `setLoginItemSettings` on macOS/Windows, a
+  `~/.config/autostart` `.desktop` on Linux. Applied (packaged builds only) via the
+  `afterSettingsWrite` hook when the `launchAtLogin` setting changes.
+
+### i18n (Feature 60)
+
+- Renderer `src/web/scripts/i18n.js` exports `t(key, params)`, `formatNumber`, `formatDate`,
+  `applyCatalog`, `init`, and the embedded English catalog `EN`. `t()` resolves synchronously
+  against `EN`; `init()` (awaited once in `app.js`) layers the active locale over IPC
+  (`window.porthippo.i18n.load`). Keys are flat `area.component.label`; `{name}` interpolates.
+- Main `src/app/i18n.js` (`loadCatalog`/`readCatalog`/`label`/`format`) resolves labels for
+  main-side chrome (menu/tray/dialogs) from `src/web/locales/<lang>.json`.
+- **Single source of truth:** edit `EN` in the renderer module, then regenerate `en.json`:
+  `cd src && node --input-type=module -e "import {EN} from './web/scripts/i18n.js'; import {writeFileSync} from 'node:fs'; writeFileSync('./web/locales/en.json', JSON.stringify(EN,null,2)+'\n')"`.
+  A test asserts they stay byte-identical and that every renderer `t("…")` key exists in `EN`.
+
+### Logging & diagnostics (Feature 60)
+
+- `logger.js` — a dependency-free rotating file logger (`userData/logs/main.log`, 1 MB × 5)
+  with a `console.*` tee installed first in `main.js`. Never hand it a secret.
+- `diagnostics.js` — a pure `buildReport({app, tunnels, logs})` string builder for
+  "Copy Diagnostics" (Help menu / tray / Settings). It reads the **sealed** tunnel list (no
+  secret values) and passes the log tail through `redact()` (PEM keys, `password:`-style
+  key/values, URL creds). **Secrets must never reach a report or the log** (tested).
 
 ## Common Commands
 

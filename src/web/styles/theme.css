@@ -76,10 +76,14 @@
   --control-height: 32px; /* text inputs, selects, and default buttons */
 }
 
-/* Light theme via the OS preference. The data-theme override (Feature 60's
-   settings picker) will win over this media query in both directions. */
+/* Light palette. Applied via the OS preference ONLY when the user hasn't picked
+   an explicit theme (`:not([data-theme])`), and via the explicit
+   `data-theme="light"` override (Feature 60's settings picker). The attribute
+   selector out-specifies the media query, so a chosen theme wins over the OS in
+   both directions — dark is the `:root` default, so `data-theme="dark"` needs no
+   palette of its own (the gated media query simply stops applying). */
 @media (prefers-color-scheme: light) {
-  :root {
+  :root:not([data-theme]) {
     color-scheme: light;
     --color-base: #f4f4f4;
     --color-mantle: #ebebeb;
@@ -97,6 +101,25 @@
     --color-danger: #b82020;
     --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.12);
   }
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --color-base: #f4f4f4;
+  --color-mantle: #ebebeb;
+  --color-crust: #dedede;
+  --color-surface-0: #d2d2d2;
+  --color-surface-1: #c2c2c2;
+  --color-overlay: #828282;
+  --color-text: #1e1e1e;
+  --color-subtext: #484848;
+  --color-muted: #686868;
+  --color-accent: #383838;
+  --color-accent-hover: #202020;
+  --color-success: #2a7a2a;
+  --color-warning: #9a6800;
+  --color-danger: #b82020;
+  --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
 
 /* ── Minimal reset ───────────────────────────────────────────────────────── */

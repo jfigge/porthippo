@@ -23,7 +23,7 @@
 // error-key prefixes and hop numbers are re-derived from position.
 
 import { el, clear } from "../dom.js";
-import { t } from "../strings.js";
+import { t } from "../i18n.js";
 import { HopEditor } from "./hop-editor.js";
 
 /** A fresh jump host: SSH default port, agent auth, everything else blank. */

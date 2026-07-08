@@ -22,7 +22,7 @@
 
 import { el } from "../dom.js";
 import { field, setFieldErrorKey } from "../field.js";
-import { t } from "../strings.js";
+import { t } from "../i18n.js";
 import { AuthEditor } from "./auth-editor.js";
 
 /** Parse a port input into a number (undefined when blank) for validation. */

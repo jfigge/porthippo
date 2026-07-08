@@ -1,37 +1,12 @@
-/*
- * Copyright 2026 Jason Figge
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
-// strings.js — the single source of every user-facing string in the renderer,
-// plus a `t(key, params?)` lookup. Feature 60 adds real i18n; until then this is
-// the seam: components already call `t("area.thing")`, so that pass only has to
-// swap this table for per-locale catalogs and localize the values — no component
-// changes. Keys follow Rest Hippo's `area.component.label` convention; `{name}`
-// placeholders interpolate from `params`.
-
-const STRINGS = {
-  // ── Common ──────────────────────────────────────────────────────────────
+{
   "common.confirm": "Confirm",
   "common.cancel": "Cancel",
   "common.delete": "Delete",
   "common.save": "Save",
+  "common.close": "Close",
   "common.trust": "Trust",
   "common.reject": "Reject",
   "common.dismiss": "Dismiss",
-
-  // ── Definition view — master list ───────────────────────────────────────
   "def.list.title": "Tunnels",
   "def.list.add": "New tunnel",
   "def.list.empty": "No tunnels yet.",
@@ -44,19 +19,15 @@ const STRINGS = {
   "def.list.summary": "localhost:{localPort} → {host}:{port}",
   "def.editor.none": "Select a tunnel to edit, or create a new one.",
   "def.unnamed": "Untitled tunnel",
-
   "def.delete.title": "Delete tunnel?",
   "def.delete.message": "Delete “{name}”? This can’t be undone.",
-
-  // ── Tunnel editor ───────────────────────────────────────────────────────
   "editor.newTitle": "New tunnel",
   "editor.name": "Name",
   "editor.local": "Local binding",
   "editor.localPort": "Local port",
   "editor.bindHost": "Bind address",
   "editor.bindHost.hint": "127.0.0.1 keeps the tunnel private to this machine.",
-  "editor.bindHost.warning":
-    "This binds beyond loopback — reachable by other machines on your network.",
+  "editor.bindHost.warning": "This binds beyond loopback — reachable by other machines on your network.",
   "editor.destination": "Destination",
   "editor.destination.host": "Host",
   "editor.destination.port": "Port",
@@ -64,16 +35,13 @@ const STRINGS = {
   "editor.jumps": "Jump hosts",
   "editor.options": "Options",
   "editor.linger": "Idle linger (ms)",
-  "editor.linger.hint":
-    "How long to hold the SSH connection open after the last local client disconnects.",
+  "editor.linger.hint": "How long to hold the SSH connection open after the last local client disconnects.",
   "editor.keepAlive": "Keep SSH connected while armed",
   "editor.enabled": "Arm on startup",
   "editor.autoReconnect": "Reconnect automatically if the connection drops",
   "editor.save": "Save",
   "editor.cancel": "Cancel",
   "editor.saveError": "Couldn’t save: {message}",
-
-  // ── Hop (SSH server / jump host) ────────────────────────────────────────
   "hop.host": "Host",
   "hop.port": "Port",
   "hop.user": "User",
@@ -83,8 +51,6 @@ const STRINGS = {
   "jumps.remove": "Remove jump host",
   "jumps.moveUp": "Move up",
   "jumps.moveDown": "Move down",
-
-  // ── Auth editor ─────────────────────────────────────────────────────────
   "auth.title": "Authentication",
   "auth.add": "Add method",
   "auth.method": "Method {n}",
@@ -104,8 +70,6 @@ const STRINGS = {
   "auth.secretPlaceholder": "Enter a new value to change",
   "auth.secretKeep": "Stored — leave blank to keep",
   "auth.agentHint": "Uses your running SSH agent — no key file or password.",
-
-  // ── Monitoring view ─────────────────────────────────────────────────────
   "mon.title": "Live tunnels",
   "mon.filter.all": "All",
   "mon.filter.active": "Active",
@@ -132,46 +96,73 @@ const STRINGS = {
   "mon.disarm": "Disarm",
   "mon.edit": "Edit",
   "mon.edit.title": "Edit this tunnel in the Definition view",
-
-  // ── State badges ────────────────────────────────────────────────────────
   "state.disarmed": "Disarmed",
   "state.listening": "Listening",
   "state.connecting": "Connecting",
   "state.connected": "Connected",
   "state.paused": "Paused",
   "state.error": "Error",
-
-  // ── Host-key trust prompt (TOFU) ────────────────────────────────────────
   "hostkey.unknown.title": "Unknown SSH host key",
-  "hostkey.unknown.message":
-    "The host {host}:{port} presented a key we haven’t seen before.",
+  "hostkey.unknown.message": "The host {host}:{port} presented a key we haven’t seen before.",
   "hostkey.unknown.question": "Trust this host and continue connecting?",
   "hostkey.hop": "Hop: {hop}",
   "hostkey.fingerprint": "Fingerprint",
   "hostkey.changed.title": "⚠ SSH host key changed",
-  "hostkey.changed.message":
-    "The key for {host}:{port} has CHANGED since you last connected. This can indicate a machine-in-the-middle attack, so the connection was refused.",
-};
-
-/**
- * Look up a display string by key, interpolating `{placeholder}` tokens from
- * `params`. An unknown key returns the key itself (so a missing string is
- * visible rather than blank — the same failure mode Rest Hippo's `t()` uses).
- *
- * @param {string} key
- * @param {Object<string, any>} [params]
- * @returns {string}
- */
-export function t(key, params) {
-  let s = Object.prototype.hasOwnProperty.call(STRINGS, key)
-    ? STRINGS[key]
-    : key;
-  if (params) {
-    s = s.replace(/\{(\w+)\}/g, (m, name) =>
-      Object.prototype.hasOwnProperty.call(params, name)
-        ? String(params[name])
-        : m,
-    );
-  }
-  return s;
+  "hostkey.changed.message": "The key for {host}:{port} has CHANGED since you last connected. This can indicate a machine-in-the-middle attack, so the connection was refused.",
+  "header.settings": "Settings",
+  "settings.title": "Settings",
+  "settings.nav.appearance": "Appearance",
+  "settings.nav.defaults": "Defaults",
+  "settings.nav.behaviour": "Behaviour",
+  "settings.appearance.theme": "Theme",
+  "settings.appearance.theme.system": "System",
+  "settings.appearance.theme.light": "Light",
+  "settings.appearance.theme.dark": "Dark",
+  "settings.appearance.language": "Language",
+  "settings.appearance.language.system": "System default",
+  "settings.defaults.linger": "Default idle linger (ms)",
+  "settings.defaults.linger.hint": "Seeded into new tunnels: how long to hold SSH open after the last client disconnects.",
+  "settings.defaults.bindHost": "Default bind address",
+  "settings.defaults.bindHost.hint": "Seeded into new tunnels. 127.0.0.1 keeps them private to this machine.",
+  "settings.defaults.keepAlive": "Keep SSH connected while armed",
+  "settings.defaults.keepAlive.hint": "The keep-alive default for new tunnels (they can override it).",
+  "settings.behaviour.launchAtLogin": "Launch Port Hippo at login",
+  "settings.behaviour.startMinimized": "Start minimized to the tray",
+  "settings.behaviour.startMinimized.hint": "Only applies when launched at login.",
+  "settings.behaviour.armOnLaunch": "Arm enabled tunnels on launch",
+  "settings.behaviour.confirmOnQuit": "Confirm before quitting",
+  "settings.behaviour.confirmOnQuit.hint": "Quitting disarms every tunnel and closes its SSH connections.",
+  "menu.file": "File",
+  "menu.edit": "Edit",
+  "menu.window": "Window",
+  "menu.help": "Help",
+  "menu.newTunnel": "New Tunnel",
+  "menu.armAll": "Arm All Tunnels",
+  "menu.disarmAll": "Disarm All Tunnels",
+  "menu.settings": "Settings…",
+  "menu.view": "View",
+  "menu.viewDefinition": "Definition",
+  "menu.viewMonitoring": "Monitoring",
+  "menu.viewSplit": "Split",
+  "menu.copyDiagnostics": "Copy Diagnostics",
+  "menu.showLogs": "Show Logs Folder",
+  "menu.about": "About Port Hippo",
+  "menu.hide": "Hide Port Hippo",
+  "menu.quit": "Quit Port Hippo",
+  "menu.checkUpdates": "Check for Updates…",
+  "tray.show": "Show Port Hippo",
+  "tray.tunnels": "Tunnels",
+  "tray.armAll": "Arm All",
+  "tray.disarmAll": "Disarm All",
+  "tray.settings": "Settings…",
+  "tray.copyDiagnostics": "Copy Diagnostics",
+  "tray.quit": "Quit Port Hippo",
+  "tray.tooltip": "Port Hippo — {active} of {total} active",
+  "tray.tooltip.none": "Port Hippo — no tunnels",
+  "shell.hide.title": "Port Hippo is still running",
+  "shell.hide.body": "Tunnels stay active in the background. Use the tray icon to show the window or quit.",
+  "shell.quit.title": "Quit Port Hippo?",
+  "shell.quit.message": "Quitting disarms every tunnel and closes its SSH connections.",
+  "shell.quit.confirm": "Quit",
+  "shell.diagnostics.copied": "Diagnostics copied to the clipboard."
 }

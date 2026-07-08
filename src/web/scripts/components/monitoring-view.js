@@ -24,7 +24,7 @@
 // and persists via settings. Every action goes through `window.porthippo.*`.
 
 import { el } from "../dom.js";
-import { t } from "../strings.js";
+import { t } from "../i18n.js";
 import { PopupManager } from "../popup-manager.js";
 import {
   formatRate,

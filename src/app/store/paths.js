@@ -65,6 +65,11 @@ class Paths {
   secretKeyPath() {
     return path.join(this.dataDir, "secret.key");
   }
+
+  /** Directory holding the rotating application log files (Feature 60). */
+  logsDir() {
+    return path.join(this.dataDir, "logs");
+  }
 }
 
 module.exports = { Paths };

@@ -55,6 +55,15 @@
 
 .app-header-meta {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Header settings (gear) button — Feature 60. */
+.app-header-settings {
+  font-size: 15px;
+  line-height: 1;
 }
 
 .app-header-version {

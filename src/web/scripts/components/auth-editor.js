@@ -30,7 +30,7 @@
 
 import { el, clear } from "../dom.js";
 import { field } from "../field.js";
-import { t } from "../strings.js";
+import { t } from "../i18n.js";
 import { AUTH_TYPES, secretFieldForAuthType } from "../validate.js";
 
 let uid = 0;

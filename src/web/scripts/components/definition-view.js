@@ -24,7 +24,7 @@
 // `window.porthippo.*`; this component never touches IPC channels directly.
 
 import { el, clear } from "../dom.js";
-import { t } from "../strings.js";
+import { t } from "../i18n.js";
 import { PopupManager } from "../popup-manager.js";
 import { TunnelEditor } from "./tunnel-editor.js";
 
@@ -99,6 +99,11 @@ export class DefinitionView {
    */
   selectById(id) {
     if (this.#defs.some((d) => d.id === id)) this.#select(id);
+  }
+
+  /** Open a blank editor for a new tunnel (used by the menu/tray "New Tunnel"). */
+  createNew() {
+    this.#createNew();
   }
 
   destroy() {

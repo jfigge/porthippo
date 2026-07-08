@@ -672,6 +672,71 @@
   color: var(--color-warning);
 }
 
+/* ── Settings panel (Feature 60) ──────────────────────────────────────────── */
+.popup-settings {
+  width: 520px;
+  max-width: 520px;
+}
+
+.settings-body {
+  padding: var(--space-3) var(--space-4);
+}
+
+.settings-nav {
+  display: flex;
+  gap: var(--space-1);
+  margin-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-overlay);
+}
+
+.settings-nav-item {
+  padding: var(--space-2) var(--space-3);
+  background: transparent;
+  color: var(--color-subtext);
+  border: none;
+  border-bottom: 2px solid transparent;
+  font-size: 13px;
+}
+
+.settings-nav-item:hover {
+  color: var(--color-text);
+}
+
+.settings-nav-item--active {
+  color: var(--color-text);
+  border-bottom-color: var(--color-accent);
+}
+
+.settings-panel[hidden] {
+  display: none;
+}
+
+/* Checkbox rows: an inline [✓] label plus an optional hint beneath. Override the
+   generic `.field input` block (which stretches inputs to full width/height). */
+.settings-check {
+  margin-bottom: var(--space-3);
+}
+
+.settings-check-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 13px;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.field .settings-check-input {
+  width: auto;
+  height: auto;
+  padding: 0;
+  margin: 0;
+}
+
+.settings-footer {
+  justify-content: space-between;
+}
+
 /* ── Narrow layouts (e.g. split view on a small window) ───────────────────── */
 @media (max-width: 900px) {
   .definition-view {
@@ -681,5 +746,9 @@
   .editor-row,
   .hop-editor-grid {
     grid-template-columns: 1fr;
+  }
+
+  .popup-settings {
+    width: 100%;
   }
 }

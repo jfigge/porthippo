@@ -28,6 +28,8 @@ import "./stats-store.js";
 import { DefinitionView } from "./components/definition-view.js";
 import { MonitoringView } from "./components/monitoring-view.js";
 import { HostKeyPrompt } from "./host-key-prompt.js";
+import { SettingsPopup } from "./components/settings-popup.js";
+import { init as initI18n, t } from "./i18n.js";
 
 const VIEWS = ["definition", "monitoring", "split"];
 
@@ -36,6 +38,7 @@ const VIEWS = ["definition", "monitoring", "split"];
 // shown alone or side-by-side in split mode. `applyView` only toggles visibility.
 let definitionView = null;
 let monitoringView = null;
+let settingsPopup = null;
 
 function applyView(view) {
   const content = document.getElementById("app-content");
@@ -75,16 +78,13 @@ function initViewToggle() {
   });
 }
 
-async function initView() {
-  // Restore the persisted view mode before the first paint of the panes.
-  let view = "definition";
-  try {
-    const settings = await window.porthippo?.settings?.get?.();
-    if (settings && VIEWS.includes(settings.viewMode)) view = settings.viewMode;
-  } catch {
-    // Non-fatal: fall back to the default view.
-  }
-  applyView(view);
+// Apply the chosen theme (Feature 60). "light"/"dark" force a palette via the
+// data-theme attribute (which wins over the OS preference in theme.css);
+// "system" (or unset) removes it so the OS preference applies.
+function applyTheme(theme) {
+  const root = document.documentElement;
+  if (theme === "light" || theme === "dark") root.dataset.theme = theme;
+  else delete root.dataset.theme;
 }
 
 async function initDefinitionView() {
@@ -140,11 +140,72 @@ async function initVersion() {
   }
 }
 
-document.addEventListener("DOMContentLoaded", () => {
+// App-shell wiring (Feature 60): the Settings panel + the commands the native
+// menu / tray dispatch to the renderer (settings, new tunnel, view switch), plus
+// live theme re-apply when settings change.
+function initShell() {
+  settingsPopup = new SettingsPopup();
+
+  const settingsBtn = document.getElementById("settings-btn");
+  if (settingsBtn) {
+    settingsBtn.setAttribute("aria-label", t("header.settings"));
+    settingsBtn.setAttribute("title", t("header.settings"));
+    settingsBtn.addEventListener("click", () => settingsPopup.open());
+  }
+
+  window.addEventListener("porthippo:open-settings", () =>
+    settingsPopup.open(),
+  );
+
+  window.addEventListener("porthippo:new-tunnel", () => {
+    const content = document.getElementById("app-content");
+    if (content && content.dataset.view === "monitoring") {
+      applyView("definition");
+      window.porthippo?.settings
+        ?.set?.({ viewMode: "definition" })
+        ?.catch?.(() => {});
+    }
+    definitionView?.createNew();
+  });
+
+  window.addEventListener("porthippo:set-view", (event) => {
+    const view = event.detail;
+    if (!VIEWS.includes(view)) return;
+    applyView(view);
+    window.porthippo?.settings?.set?.({ viewMode: view })?.catch?.(() => {});
+  });
+
+  // A settings change re-applies the theme live (other prefs are read on demand
+  // by their consumers; language triggers a full reload from the popup itself).
+  window.addEventListener("porthippo:settings-changed", (event) => {
+    if (event.detail && event.detail.theme !== undefined) {
+      applyTheme(event.detail.theme);
+    }
+  });
+}
+
+document.addEventListener("DOMContentLoaded", async () => {
+  // Load the active locale's catalog before the first render so every string
+  // resolves correctly (English is embedded, so this only matters once other
+  // locales ship — but awaiting it keeps the ordering guarantee).
+  await initI18n();
+
+  // One settings read drives the pre-paint theme + view restore.
+  let settings = {};
+  try {
+    settings = (await window.porthippo?.settings?.get?.()) || {};
+  } catch {
+    // Non-fatal: fall back to defaults.
+  }
+  applyTheme(settings.theme);
+
   initViewToggle();
-  initView();
+  applyView(
+    VIEWS.includes(settings.viewMode) ? settings.viewMode : "definition",
+  );
   new HostKeyPrompt().install();
   initEditTunnelBridge();
+  initShell();
   initDefinitionView();
   initMonitoringView();
   initVersion();

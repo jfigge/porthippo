@@ -27,7 +27,7 @@
 
 import { el } from "../dom.js";
 import { field, applyFieldErrors } from "../field.js";
-import { t } from "../strings.js";
+import { t } from "../i18n.js";
 import { validateDefinition } from "../validate.js";
 import { HopEditor } from "./hop-editor.js";
 import { JumpHostEditor } from "./jump-host-editor.js";

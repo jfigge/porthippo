@@ -18,20 +18,33 @@
  * settings-store.js — App-wide preferences (no secrets). A single JSON document
  * under userData; `get()` returns the stored values layered over the defaults,
  * `set(patch)` shallow-merges a patch and persists. Later features read these:
- * theme + the default lingerMs / bindHost seeded into new definitions, and
- * launch-at-login (Feature 60).
+ * theme + language, the default lingerMs / bindHost / keep-alive seeded into new
+ * definitions, and the Feature 60 shell behaviour (launch-at-login, start
+ * minimized, arm-on-launch, confirm-on-quit).
  */
 "use strict";
 
 const io = require("./io");
 
 const DEFAULTS = Object.freeze({
+  // ── Appearance ────────────────────────────────────────────────────────────
   theme: "system", // "system" | "light" | "dark"
-  defaultLingerMs: 10000, // idle grace before SSH teardown, seeded into new tunnels
+  language: "system", // "system" | a BCP-47 subtag (e.g. "en"); Feature 60 i18n
+
+  // ── Defaults seeded into new tunnel definitions ───────────────────────────
+  defaultLingerMs: 10000, // idle grace before SSH teardown
   defaultBindHost: "127.0.0.1", // loopback by default (LAN exposure is opt-in)
-  launchAtLogin: false,
+  defaultKeepAlive: false, // hold SSH open while armed, by default
+
+  // ── Shell / view state ────────────────────────────────────────────────────
   viewMode: "definition", // "definition" | "monitoring" | "split" (Feature 40 shell)
   monitorFilter: "all", // "all" | "active" — Monitoring view list filter (Feature 50)
+
+  // ── Feature 60 behaviour ──────────────────────────────────────────────────
+  launchAtLogin: false, // start Port Hippo at OS login
+  startMinimized: false, // when launched at login, start hidden in the tray
+  armOnLaunch: true, // arm enabled definitions on startup (bind their listeners)
+  confirmOnQuit: false, // ask before quitting (tears down live tunnels)
 });
 
 class SettingsStore {

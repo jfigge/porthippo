@@ -24,7 +24,7 @@
 // it for delete confirmations and the SSH host-key trust prompt.
 
 import { el } from "./dom.js";
-import { t } from "./strings.js";
+import { t } from "./i18n.js";
 
 const state = {
   overlay: null, // the mask element (lazily created, lives on <body>)
