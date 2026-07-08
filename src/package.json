@@ -57,6 +57,7 @@
     ],
     "mac": {
       "category": "public.app-category.developer-tools",
+      "icon": "web/icons/1024x1024.png",
       "extendInfo": {
         "ITSAppUsesNonExemptEncryption": false
       },
@@ -68,6 +69,7 @@
       ]
     },
     "win": {
+      "icon": "web/icons/256x256.png",
       "target": [
         {
           "target": "nsis",
@@ -77,6 +79,7 @@
     },
     "linux": {
       "category": "Network",
+      "icon": "web/icons/512x512.png",
       "target": [
         {
           "target": "AppImage",

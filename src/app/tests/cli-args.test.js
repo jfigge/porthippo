@@ -25,6 +25,7 @@ test("parseArgs: no flags", () => {
   assert.deepEqual(parseArgs(["node", "main.js"]), {
     dev: false,
     hotReload: false,
+    devTools: false,
   });
 });
 
@@ -36,14 +37,31 @@ test("parseArgs: --hot-reload sets hotReload", () => {
   assert.equal(parseArgs(["node", "main.js", "--hot-reload"]).hotReload, true);
 });
 
-test("parseArgs: both flags", () => {
-  assert.deepEqual(parseArgs(["--dev", "--hot-reload"]), {
+test("parseArgs: --devtools sets devTools", () => {
+  assert.equal(parseArgs(["node", "main.js", "--devtools"]).devTools, true);
+});
+
+test("parseArgs: --hot-reload does not imply devTools", () => {
+  assert.equal(parseArgs(["node", "main.js", "--hot-reload"]).devTools, false);
+});
+
+test("parseArgs: all flags", () => {
+  assert.deepEqual(parseArgs(["--dev", "--hot-reload", "--devtools"]), {
     dev: true,
     hotReload: true,
+    devTools: true,
   });
 });
 
 test("parseArgs: defensive against missing/invalid argv", () => {
-  assert.deepEqual(parseArgs(), { dev: false, hotReload: false });
-  assert.deepEqual(parseArgs(null), { dev: false, hotReload: false });
+  assert.deepEqual(parseArgs(), {
+    dev: false,
+    hotReload: false,
+    devTools: false,
+  });
+  assert.deepEqual(parseArgs(null), {
+    dev: false,
+    hotReload: false,
+    devTools: false,
+  });
 });

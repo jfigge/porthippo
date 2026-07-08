@@ -24,13 +24,16 @@
  *
  * @param {string[]} argv - typically process.argv (the leading node/electron
  *   and script entries are ignored; we only look for known flags anywhere).
- * @returns {{ dev: boolean, hotReload: boolean }}
+ * @returns {{ dev: boolean, hotReload: boolean, devTools: boolean }}
  */
 function parseArgs(argv = []) {
   const args = Array.isArray(argv) ? argv : [];
   return {
     dev: args.includes("--dev"),
     hotReload: args.includes("--hot-reload"),
+    // Open DevTools on launch. Kept separate from --hot-reload so the primary
+    // dev workflow can reload without the panel popping open every time.
+    devTools: args.includes("--devtools"),
   };
 }
 

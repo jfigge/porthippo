@@ -57,6 +57,11 @@ debug:
 	@cd $(SRC_DIR) && npx electron app/main.js --hot-reload --user-data-dir=$(DATA_DIR)
 	@echo "--------------------------------"
 
+debug-inspect:
+	@echo "Starting Electron in debug mode (hot-reload + DevTools)..."
+	@cd $(SRC_DIR) && npx electron app/main.js --hot-reload --devtools --user-data-dir=$(DATA_DIR)
+	@echo "--------------------------------"
+
 # ─── Formatting ───────────────────────────────────────────────────────────────
 fmt:
 	@echo "Formatting JavaScript / CSS / HTML..."
@@ -145,7 +150,8 @@ help:
 	@echo ""
 	@echo "  Targets:"
 	@echo "    install       Install Node.js dependencies"
-	@echo "    debug         Run Electron with DevTools + hot-reload (primary dev workflow)"
+	@echo "    debug         Run Electron with hot-reload (primary dev workflow)"
+	@echo "    debug-inspect Run Electron with hot-reload + DevTools open"
 	@echo "    fmt           Format JS/CSS/HTML (prettier)"
 	@echo "    fmt-check     Check formatting without writing (prettier --check)"
 	@echo "    lint          Lint JS (eslint)"
@@ -160,6 +166,6 @@ help:
 	@echo "  (Signing, notarization, the full OS/arch matrix, release, and the"
 	@echo "   download site are added in Feature 70.)"
 
-.PHONY: version info install debug fmt fmt-check lint license-headers test \
+.PHONY: version info install debug debug-inspect fmt fmt-check lint license-headers test \
         test-license-headers test-js build build-mac dmg build-setup \
         build-install clean help

@@ -36,4 +36,33 @@ contextBridge.exposeInMainWorld("porthippo", {
   // App version comes from the main process (package.json), over IPC — this also
   // proves the ipcMain <-> preload bridge is wired correctly.
   getVersion: () => ipcRenderer.invoke("app:version"),
+
+  // ── Tunnel definitions (Feature 10 store) ─────────────────────────────────
+  // CRUD + reorder over the encrypted-at-rest store. Reads return secrets as a
+  // `hasSecret` flag only; a create/update writes a NEW secret as a plaintext
+  // string or keeps an existing one by sending the auth entry back with
+  // `hasSecret: true` and no value. Writes resolve to the record, or to a
+  // `{ __hippoError, code, errors }` envelope on failure.
+  tunnels: {
+    list: () => ipcRenderer.invoke("tunnels:list"),
+    get: (id) => ipcRenderer.invoke("tunnels:get", id),
+    create: (def) => ipcRenderer.invoke("tunnels:create", def),
+    update: (id, patch) => ipcRenderer.invoke("tunnels:update", id, patch),
+    delete: (id) => ipcRenderer.invoke("tunnels:delete", id),
+    reorder: (ids) => ipcRenderer.invoke("tunnels:reorder", ids),
+  },
+
+  // ── App settings ──────────────────────────────────────────────────────────
+  settings: {
+    get: () => ipcRenderer.invoke("settings:get"),
+    set: (patch) => ipcRenderer.invoke("settings:set", patch),
+  },
+
+  // ── Accepted SSH host keys (TOFU) ─────────────────────────────────────────
+  // The engine (Feature 20) records accepted keys in-process; the renderer can
+  // review the accepted set and revoke entries.
+  hostkeys: {
+    list: () => ipcRenderer.invoke("hostkeys:list"),
+    revoke: (hostPort) => ipcRenderer.invoke("hostkeys:revoke", hostPort),
+  },
 });

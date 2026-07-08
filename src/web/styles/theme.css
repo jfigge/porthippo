@@ -31,23 +31,23 @@
 :root {
   color-scheme: dark;
 
-  /* ── Palette (dark default) ──────────────────────────────────────────── */
-  --color-base: #1e1e2e; /* app background */
-  --color-mantle: #181825; /* header / sidebar background */
-  --color-crust: #11111b; /* deepest background */
-  --color-surface-0: #313244; /* panel background */
-  --color-surface-1: #45475a; /* raised elements */
-  --color-overlay: #6c7086; /* borders / muted lines */
+  /* ── Palette (neutral charcoal grey — dark default) ──────────────────── */
+  --color-base: #1c1c1c; /* app background */
+  --color-mantle: #161616; /* header / sidebar background */
+  --color-crust: #101010; /* deepest background */
+  --color-surface-0: #2a2a2a; /* panel background */
+  --color-surface-1: #383838; /* raised elements */
+  --color-overlay: #686868; /* borders / muted lines */
 
-  --color-text: #cdd6f4; /* primary text */
-  --color-subtext: #a6adc8; /* secondary text */
-  --color-muted: #7f849c; /* de-emphasized text */
+  --color-text: #e8e8e8; /* primary text */
+  --color-subtext: #b0b0b0; /* secondary text */
+  --color-muted: #808080; /* de-emphasized text */
 
-  --color-accent: #89b4fa; /* primary accent (blue) */
-  --color-accent-hover: #a4c6ff;
-  --color-success: #a6e3a1; /* connected / active */
-  --color-warning: #f9e2af; /* paused / caution */
-  --color-danger: #f38ba8; /* error */
+  --color-accent: #d0d0d0; /* primary accent (monochrome) */
+  --color-accent-hover: #e0e0e0;
+  --color-success: #80c080; /* connected / active */
+  --color-warning: #d4b060; /* paused / caution */
+  --color-danger: #e07070; /* error */
 
   /* ── Typography ──────────────────────────────────────────────────────── */
   --font-sans:
@@ -80,20 +80,20 @@
 @media (prefers-color-scheme: light) {
   :root {
     color-scheme: light;
-    --color-base: #eff1f5;
-    --color-mantle: #e6e9ef;
-    --color-crust: #dce0e8;
-    --color-surface-0: #ccd0da;
-    --color-surface-1: #bcc0cc;
-    --color-overlay: #9ca0b0;
-    --color-text: #4c4f69;
-    --color-subtext: #5c5f77;
-    --color-muted: #6c6f85;
-    --color-accent: #1e66f5;
-    --color-accent-hover: #1a56d0;
-    --color-success: #40a02b;
-    --color-warning: #df8e1d;
-    --color-danger: #d20f39;
+    --color-base: #f4f4f4;
+    --color-mantle: #ebebeb;
+    --color-crust: #dedede;
+    --color-surface-0: #d2d2d2;
+    --color-surface-1: #c2c2c2;
+    --color-overlay: #828282;
+    --color-text: #1e1e1e;
+    --color-subtext: #484848;
+    --color-muted: #686868;
+    --color-accent: #383838;
+    --color-accent-hover: #202020;
+    --color-success: #2a7a2a;
+    --color-warning: #9a6800;
+    --color-danger: #b82020;
     --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.12);
   }
 }

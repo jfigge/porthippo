@@ -23,13 +23,19 @@
 // the window.porthippo bridge in preload.js.
 "use strict";
 
-const { app, BrowserWindow, ipcMain } = require("electron");
+const { app, BrowserWindow, ipcMain, nativeImage } = require("electron");
 const path = require("path");
 const fs = require("fs");
 
 const { parseArgs } = require("./cli-args");
+const { Stores } = require("./store/stores");
+const { registerStoreIPC } = require("./ipc/store");
 
-const { dev: isDev, hotReload: isHotReload } = parseArgs(process.argv);
+const {
+  dev: isDev,
+  hotReload: isHotReload,
+  devTools: isDevTools,
+} = parseArgs(process.argv);
 
 // Resolve the app's own version. In a packaged build app.getVersion() returns
 // the productName version, but when running unpackaged (make debug) it falls
@@ -43,13 +49,80 @@ function resolveAppVersion() {
   }
 }
 
+// ─── Storage ──────────────────────────────────────────────────────────────────
+// The store factory owns all filesystem I/O + secret encryption. It is built
+// lazily on the first store IPC call (not at require time) so app.getPath is
+// resolvable and the keychain/app-key bootstrap runs after Electron is ready.
+
+let _stores = null;
+
+/**
+ * Return the shared Stores factory, creating it on first call.
+ * @returns {Stores}
+ */
+function getStores() {
+  if (!_stores) {
+    _stores = new Stores(app.getPath("userData"));
+  }
+  return _stores;
+}
+
+// ── Main-process error conventions ──────────────────────────────────────────
+// Thrown store errors advertise their kind on `.code` (INVALID_ID, NOT_FOUND,
+// INVALID_DEFINITION, INVALID_ARG, DecryptError codes). The IPC wrappers below
+// turn a throw into either a quiet fallback (reads) or a discriminable
+// `{ __hippoError }` envelope (writes) so a failure never becomes an unhandled
+// rejection in the renderer.
+
+/**
+ * Wrap a read store call: log + return a safe fallback on error.
+ * @param {string}   channel   IPC channel (for log context)
+ * @param {Function} fn        synchronous store call
+ * @param {*}        fallback  value returned on error
+ */
+function safeCall(channel, fn, fallback = null) {
+  try {
+    return fn();
+  } catch (err) {
+    console.error(`[main] ${channel} error:`, err && err.message);
+    return fallback;
+  }
+}
+
+/**
+ * Wrap a write store call. A failure returns a discriminable
+ * `{ __hippoError: true }` envelope (carrying `.code` and, for validation
+ * failures, the field-keyed `.errors`) so the renderer can tell a failed save
+ * from a successful one and show inline errors.
+ * @param {string}   channel  IPC channel (for log context)
+ * @param {Function} fn       synchronous store call
+ * @returns {*} the call's result on success, or an error envelope on failure
+ */
+function safeCallWrite(channel, fn) {
+  try {
+    const result = fn();
+    return result === undefined ? null : result;
+  } catch (err) {
+    console.error(`[main] ${channel} error:`, err && err.message);
+    return {
+      __hippoError: true,
+      channel,
+      message: err && err.message,
+      code: err && err.code,
+      errors: err && err.errors,
+    };
+  }
+}
+
 // ─── IPC handlers ─────────────────────────────────────────────────────────────
-// Keep every ipcMain.handle channel mirrored by a preload.js export (lockstep).
-// Feature 10 adds an automated parity test once there are channels worth
-// checking; for now the single round-trip proves the bridge works end-to-end.
+// Keep every ipcMain.handle channel mirrored by a preload.js export (lockstep);
+// the tests/ipc-parity.test.js guard fails the build on any drift.
 function registerIpc() {
   const version = resolveAppVersion();
   ipcMain.handle("app:version", () => version);
+
+  // Storage: tunnels:* / settings:* / hostkeys:* (see ipc/store.js).
+  registerStoreIPC({ ipcMain, getStores, safeCall, safeCallWrite });
 }
 
 // ─── Hot reload (dev only) ────────────────────────────────────────────────────
@@ -71,6 +144,21 @@ function installHotReload(win) {
   }
 }
 
+// ─── App icon ─────────────────────────────────────────────────────────────────
+// The bundled PNG icon set (src/web/icons/). A large source is loaded once and
+// Electron downscales it as needed. On Windows/Linux it becomes the window +
+// taskbar icon; on macOS the window `icon` option is ignored (the dock icon comes
+// from the packaged .app bundle), so we set the dock icon explicitly when running
+// unpackaged so `make debug` shows our icon instead of the default Electron one.
+function loadAppIcon() {
+  const icon = nativeImage.createFromPath(
+    path.join(__dirname, "..", "web", "icons", "512x512.png"),
+  );
+  return icon.isEmpty() ? undefined : icon;
+}
+
+const appIcon = loadAppIcon();
+
 // ─── Window ───────────────────────────────────────────────────────────────────
 function createWindow() {
   const win = new BrowserWindow({
@@ -78,7 +166,8 @@ function createWindow() {
     height: 720,
     minWidth: 720,
     minHeight: 480,
-    backgroundColor: "#1e1e2e",
+    backgroundColor: "#1c1c1c", // matches --color-base (theme.css) to avoid a launch flash
+    icon: appIcon, // used on Windows/Linux; ignored on macOS
     show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -92,8 +181,8 @@ function createWindow() {
 
   win.once("ready-to-show", () => win.show());
 
-  if (isDev || isHotReload) {
-    win.webContents.openDevTools({ mode: "detach" });
+  if (isDev || isDevTools) {
+    win.webContents.openDevTools({ mode: "bottom" });
   }
   if (isHotReload) {
     installHotReload(win);
@@ -104,6 +193,11 @@ function createWindow() {
 
 // ─── App lifecycle ────────────────────────────────────────────────────────────
 app.whenReady().then(() => {
+  // Show our icon in the dev dock (packaged macOS builds use the .app bundle icon).
+  if (process.platform === "darwin" && !app.isPackaged && app.dock && appIcon) {
+    app.dock.setIcon(appIcon);
+  }
+
   registerIpc();
   createWindow();
 
