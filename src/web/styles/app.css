@@ -40,6 +40,19 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  padding: var(--space-1);
+  margin: calc(var(--space-1) * -1);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.app-header-brand:hover {
+  background: var(--color-surface-0);
+}
+
+.app-header-brand:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
 }
 
 .app-header-icon {
@@ -60,16 +73,22 @@
   gap: var(--space-2);
 }
 
-/* Header settings (gear) button — Feature 60. */
+/* Header settings (gear) button — Feature 60. Centres the inline SVG glyph. */
 .app-header-settings {
-  font-size: 15px;
-  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.app-header-version {
-  color: var(--color-muted);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
+.app-header-settings svg {
+  display: block;
+}
+
+/* No box around the header gear — just the icon. It still brightens on hover
+   via the .btn--icon colour change; the keyboard focus ring is left intact. */
+.app-header-settings,
+.app-header-settings:hover {
+  background: transparent;
 }
 
 /* ── View toggle ─────────────────────────────────────────────────────────── */
@@ -108,15 +127,6 @@
   grid-template-columns: 1fr;
 }
 
-/* Split view lays the two panes side by side. */
-.app-content[data-view="split"] {
-  grid-template-columns: 1fr 1fr;
-}
-
-.app-content[data-view="split"] .pane-definition {
-  border-right: 1px solid var(--color-crust);
-}
-
 .pane {
   min-width: 0;
   overflow: auto;
@@ -142,11 +152,4 @@
   color: var(--color-subtext);
   font-size: 15px;
   font-weight: 600;
-}
-
-/* Stack panes on narrow widths even in split mode. */
-@media (max-width: 720px) {
-  .app-content[data-view="split"] {
-    grid-template-columns: 1fr;
-  }
 }

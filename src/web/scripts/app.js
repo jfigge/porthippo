@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-// app.js — renderer bootstrap. Wires the Definition / Monitoring / Split view
+// app.js — renderer bootstrap. Wires the Definition / Monitoring view
 // toggle (persisting the choice in settings), mounts the Feature 40 Definition
 // view, installs the app-wide SSH host-key trust prompt, and shows the app
 // version fetched over window.porthippo. The Monitoring pane is filled in by
@@ -29,13 +29,14 @@ import { DefinitionView } from "./components/definition-view.js";
 import { MonitoringView } from "./components/monitoring-view.js";
 import { HostKeyPrompt } from "./host-key-prompt.js";
 import { SettingsPopup } from "./components/settings-popup.js";
+import { AboutDialog } from "./components/about-dialog.js";
 import { init as initI18n, t } from "./i18n.js";
 
-const VIEWS = ["definition", "monitoring", "split"];
+const VIEWS = ["definition", "monitoring"];
 
 // The two panes are each mounted once and kept alive across view switches — so
-// the Monitoring view holds a single `porthippo:stats` subscription whether it is
-// shown alone or side-by-side in split mode. `applyView` only toggles visibility.
+// the Monitoring view holds a single `porthippo:stats` subscription whichever
+// view is active. `applyView` only toggles visibility.
 let definitionView = null;
 let monitoringView = null;
 let settingsPopup = null;
@@ -48,7 +49,7 @@ function applyView(view) {
 
   content.dataset.view = view;
 
-  // In split mode both panes are visible; otherwise show only the active one.
+  // Show only the active pane.
   definition.hidden = view === "monitoring";
   monitoring.hidden = view === "definition";
 
@@ -112,8 +113,8 @@ async function initMonitoringView() {
 }
 
 // A row's "Edit" affordance in the Monitoring view asks the shell to jump to the
-// Definition view for that tunnel. Stay put when already showing Definition (or
-// split); only flip away from the monitoring-only view.
+// Definition view for that tunnel. Stay put when already showing Definition;
+// only flip away from the Monitoring view.
 function initEditTunnelBridge() {
   window.addEventListener("porthippo:edit-tunnel", (event) => {
     const id = event.detail && event.detail.id;
@@ -127,17 +128,6 @@ function initEditTunnelBridge() {
     }
     definitionView?.selectById(id);
   });
-}
-
-async function initVersion() {
-  const el = document.getElementById("app-version");
-  if (!el || !window.porthippo) return;
-  try {
-    const version = await window.porthippo.getVersion();
-    el.textContent = `v${version} · ${window.porthippo.platform}/${window.porthippo.arch}`;
-  } catch {
-    // Non-fatal: the version label is informational only.
-  }
 }
 
 // App-shell wiring (Feature 60): the Settings panel + the commands the native
@@ -156,6 +146,23 @@ function initShell() {
   window.addEventListener("porthippo:open-settings", () =>
     settingsPopup.open(),
   );
+
+  // The top-left brand mark opens the in-app About dialog (also reachable from
+  // the Help ▸ About / macOS app menu, which arrives as porthippo:show-about).
+  const brand = document.getElementById("app-brand");
+  if (brand) {
+    brand.setAttribute("aria-label", t("header.about"));
+    brand.setAttribute("title", t("header.about"));
+    brand.addEventListener("click", () => AboutDialog.open());
+    brand.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        AboutDialog.open();
+      }
+    });
+  }
+
+  window.addEventListener("porthippo:show-about", () => AboutDialog.open());
 
   window.addEventListener("porthippo:new-tunnel", () => {
     const content = document.getElementById("app-content");
@@ -208,5 +215,4 @@ document.addEventListener("DOMContentLoaded", async () => {
   initShell();
   initDefinitionView();
   initMonitoringView();
-  initVersion();
 });

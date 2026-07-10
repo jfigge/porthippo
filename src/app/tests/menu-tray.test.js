@@ -90,6 +90,23 @@ test("installAppMenu builds and installs a menu and wires custom items", () => {
   ]);
 });
 
+test("the About item routes to the about action (in-app dialog)", () => {
+  const Menu = fakeMenu();
+  const fired = [];
+  const menu = installAppMenu({
+    app: { name: "Port Hippo" },
+    Menu,
+    label,
+    actions: { about: () => fired.push("about") },
+  });
+  const about = findItem(menu.template, "About Port Hippo");
+  assert.ok(about, "About item present");
+  assert.equal(typeof about.click, "function", "About uses a click handler");
+  assert.ok(!about.role, "About is not the native about role");
+  about.click();
+  assert.deepEqual(fired, ["about"]);
+});
+
 test("createTray sets a status tooltip and per-tunnel arm/disarm items", () => {
   const Menu = fakeMenu();
   let toolTip = null;
@@ -156,6 +173,42 @@ test("createTray sets a status tooltip and per-tunnel arm/disarm items", () => {
   // The tray click shows the window.
   clickHandlers.click();
   assert.ok(fired.includes("show"));
+});
+
+test("createTray rebuilds its icon from status so the badge tracks connections", () => {
+  const Menu = fakeMenu();
+  const images = [];
+  class FakeTray {
+    on() {}
+    setToolTip() {}
+    setContextMenu() {}
+    setImage(img) {
+      images.push(img);
+    }
+  }
+  const status = { tunnels: [], total: 3, active: 3, connected: 2 };
+  const seenCounts = [];
+  const renderImage = (s) => {
+    seenCounts.push(s.connected);
+    return { badge: s.connected };
+  };
+
+  const tray = createTray({
+    Tray: FakeTray,
+    Menu,
+    image: renderImage(status),
+    renderImage,
+    t,
+    getStatus: () => status,
+    actions: {},
+  });
+
+  // Built once on construction; update() re-renders from the latest status.
+  assert.deepEqual(images.at(-1), { badge: 2 });
+  status.connected = 0;
+  tray.update();
+  assert.deepEqual(images.at(-1), { badge: 0 });
+  assert.deepEqual(seenCounts.slice(-1), [0]);
 });
 
 test("createTray shows the empty hint and disarm-all only when active", () => {

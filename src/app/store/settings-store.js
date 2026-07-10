@@ -37,7 +37,7 @@ const DEFAULTS = Object.freeze({
   defaultKeepAlive: false, // hold SSH open while armed, by default
 
   // ── Shell / view state ────────────────────────────────────────────────────
-  viewMode: "definition", // "definition" | "monitoring" | "split" (Feature 40 shell)
+  viewMode: "definition", // "definition" | "monitoring" (Feature 40 shell)
   monitorFilter: "all", // "all" | "active" — Monitoring view list filter (Feature 50)
 
   // ── Feature 60 behaviour ──────────────────────────────────────────────────

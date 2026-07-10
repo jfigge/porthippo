@@ -32,6 +32,8 @@ contextBridge.exposeInMainWorld("porthippo", {
   // process shim, so no IPC round-trip is needed.
   platform: process.platform,
   arch: process.arch,
+  // Electron runtime version, shown in the About dialog's build details.
+  electron: process.versions?.electron,
 
   // App version comes from the main process (package.json), over IPC — this also
   // proves the ipcMain <-> preload bridge is wired correctly.
@@ -206,6 +208,7 @@ const MENU_EVENT_MAP = {
   "menu:open-settings": "porthippo:open-settings",
   "menu:new-tunnel": "porthippo:new-tunnel",
   "menu:set-view": "porthippo:set-view",
+  "menu:show-about": "porthippo:show-about",
 };
 for (const [channel, domEvent] of Object.entries(MENU_EVENT_MAP)) {
   ipcRenderer.on(channel, (_event, payload) => {

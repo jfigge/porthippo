@@ -57,11 +57,6 @@ function installAppMenu({ app, Menu, label, actions, isDev = false }) {
       accelerator: "CmdOrCtrl+2",
       click: () => a.setView?.("monitoring"),
     },
-    {
-      label: label("menu.viewSplit", "Split"),
-      accelerator: "CmdOrCtrl+3",
-      click: () => a.setView?.("split"),
-    },
     { type: "separator" },
     ...(isDev
       ? [
@@ -106,7 +101,10 @@ function installAppMenu({ app, Menu, label, actions, isDev = false }) {
           {
             label: app.name || "Port Hippo",
             submenu: [
-              { role: "about", label: label("menu.about", "About Port Hippo") },
+              {
+                label: label("menu.about", "About Port Hippo"),
+                click: () => a.about?.(),
+              },
               { type: "separator" },
               {
                 label: label("menu.settings", "Settings…"),

@@ -35,13 +35,16 @@ const LIVE_STATES = new Set(["listening", "connecting", "connected", "paused"]);
  * @param {object} deps
  * @param {typeof Electron.Tray} deps.Tray
  * @param {typeof Electron.Menu} deps.Menu
- * @param {Electron.NativeImage} deps.image  the tray image (see tray-icon.js)
+ * @param {Electron.NativeImage} deps.image  the initial tray image (see tray-icon.js)
+ * @param {(status: object) => Electron.NativeImage} [deps.renderImage]  builds the
+ *        tray image from the current status, so the badge tracks the connected
+ *        count; omitted → the initial image is kept for the tray's lifetime.
  * @param {(key: string, params?: object) => string} deps.t  label resolver
  * @param {() => {tunnels: Array, total: number, active: number}} deps.getStatus
  * @param {object} deps.actions  { showWindow, armAll, disarmAll, arm, disarm,
  *        openSettings, copyDiagnostics, quit }
  */
-function createTray({ Tray, Menu, image, t, getStatus, actions }) {
+function createTray({ Tray, Menu, image, renderImage, t, getStatus, actions }) {
   const a = actions || {};
   const tray = new Tray(image);
 
@@ -73,8 +76,22 @@ function createTray({ Tray, Menu, image, t, getStatus, actions }) {
   }
 
   function build() {
-    const status = getStatus?.() || { tunnels: [], total: 0, active: 0 };
+    const status = getStatus?.() || {
+      tunnels: [],
+      total: 0,
+      active: 0,
+      connected: 0,
+    };
     const { tunnels, total, active } = status;
+
+    // Refresh the icon so its connected-count badge reflects the latest status.
+    if (renderImage) {
+      try {
+        tray.setImage(renderImage(status));
+      } catch {
+        // Keep the current image if rebuilding it fails.
+      }
+    }
 
     const tunnelSection =
       tunnels.length === 0

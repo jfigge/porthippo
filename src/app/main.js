@@ -280,7 +280,8 @@ function getStatus() {
     state: states.get(d.id) || "disarmed",
   }));
   const active = tunnels.filter((x) => LIVE_STATES.has(x.state)).length;
-  return { tunnels, total: tunnels.length, active };
+  const connected = tunnels.filter((x) => x.state === "connected").length;
+  return { tunnels, total: tunnels.length, active, connected };
 }
 
 const armAll = () =>
@@ -296,12 +297,20 @@ const disarmAll = () =>
     );
 
 function createTrayPresence() {
-  const colorIconPath = path.join(__dirname, "..", "web", "icons", "32x32.png");
-  const image = buildTrayImage({ nativeImage, colorIconPath });
+  const colorIconPath = path.join(__dirname, "..", "web", "icons", "64x64.png");
+  // Rebuild the tray image from the current status so its badge tracks the
+  // connected-tunnel count on every state change.
+  const renderImage = (status) =>
+    buildTrayImage({
+      nativeImage,
+      colorIconPath,
+      count: (status && status.connected) || 0,
+    });
   _tray = createTray({
     Tray,
     Menu,
-    image,
+    image: renderImage(getStatus()),
+    renderImage,
     t,
     getStatus,
     actions: {
@@ -355,15 +364,11 @@ function refreshMenu() {
   });
 }
 
+// Open the in-app About dialog (Rest Hippo style): show the window, then ask the
+// renderer to mount it. The native About panel / message box is retired.
 function showAbout() {
-  dialog.showMessageBox(mainWindow ?? undefined, {
-    type: "info",
-    title: label("menu.about", "About Port Hippo"),
-    message: "Port Hippo",
-    detail: `v${resolveAppVersion()}\n${process.platform}/${process.arch} · Electron ${process.versions.electron}`,
-    buttons: [label("common.close", "Close")],
-    defaultId: 0,
-  });
+  showWindow();
+  sendToRenderer("menu:show-about");
 }
 
 // ─── IPC handlers ─────────────────────────────────────────────────────────────

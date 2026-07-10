@@ -182,6 +182,18 @@ export const EN = {
 
   // ── App shell / header (Feature 60) ─────────────────────────────────────
   "header.settings": "Settings",
+  "header.about": "About Port Hippo",
+
+  // ── About dialog (Feature 60) ───────────────────────────────────────────
+  "about.name": "Port Hippo",
+  "about.subtitle": "SSH Tunnel Manager",
+  "about.description": "On-demand SSH tunnels for your desktop.",
+  "about.credit": "Created by Jason, coded by Claude",
+  "about.versionInfo": "Version information",
+  "about.version": "Version",
+  "about.platform": "Platform",
+  "about.electron": "Electron",
+  "about.devBuild": "dev build",
 
   // ── Settings panel (Feature 60) ─────────────────────────────────────────
   "settings.title": "Settings",
@@ -268,7 +280,6 @@ export const EN = {
   "menu.view": "View",
   "menu.viewDefinition": "Definition",
   "menu.viewMonitoring": "Monitoring",
-  "menu.viewSplit": "Split",
   "menu.copyDiagnostics": "Copy Diagnostics",
   "menu.showLogs": "Show Logs Folder",
   "menu.about": "About Port Hippo",
