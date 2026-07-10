@@ -34,6 +34,8 @@ const io = require("./io");
 const { Paths } = require("./paths");
 const { SecretStorage } = require("./secret-storage");
 const { TunnelStore } = require("./tunnel-store");
+const { CredentialStore } = require("./credential-store");
+const { JumpHostStore } = require("./jump-host-store");
 const { KnownHostsStore } = require("./known-hosts-store");
 const { SettingsStore } = require("./settings-store");
 
@@ -52,13 +54,25 @@ class Stores {
     io.gcOrphanTempFiles(this._paths.dataDir);
 
     this._tunnelStore = new TunnelStore(this._paths);
+    this._credentialStore = new CredentialStore(this._paths);
+    this._jumpHostStore = new JumpHostStore(this._paths);
     this._knownHostsStore = new KnownHostsStore(this._paths);
     this._settingsStore = new SettingsStore(this._paths);
   }
 
-  /** Ordered collection of tunnel definitions (secrets sealed at rest). */
+  /** Ordered collection of tunnel definitions (reference records, no secrets). */
   tunnelStore() {
     return this._tunnelStore;
+  }
+
+  /** Reusable, named SSH credentials (secrets sealed at rest). */
+  credentialStore() {
+    return this._credentialStore;
+  }
+
+  /** Reusable, named SSH jump hosts (each references a credential). */
+  jumpHostStore() {
+    return this._jumpHostStore;
   }
 
   /** Port-Hippo-accepted SSH host-key fingerprints (TOFU). */

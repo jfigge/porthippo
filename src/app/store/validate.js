@@ -15,21 +15,25 @@
  */
 
 /**
- * validate.js — Pure structural validation of a tunnel definition.
+ * validate.js — Pure structural validation of the stored record types.
  *
- * `validateDefinition(def)` returns `{ valid, errors }` where `errors` is keyed
- * by a dotted field path (e.g. `"localPort"`, `"destination.host"`,
- * `"sshServer.auth[0].privateKeyPath"`, `"jumps[1].port"`) so Feature 40 can show
- * each message inline against its field. No I/O, no mutation — safe to call from
- * anywhere (the store gates create/update on it; the renderer can pre-flight).
+ * Feature 45 splits the old self-contained tunnel definition into three records:
+ * a `tunnel` that references a `credential` by id and an ordered list of
+ * `jumpHost`s by id. Each has its own validator returning `{ valid, errors }`
+ * where `errors` is keyed by a dotted field path (e.g. `"localPort"`,
+ * `"destination.host"`, `"credentialId"`, `"jumpHostIds[1]"`) so the Definition
+ * editor can show each message inline against its field. No I/O, no mutation —
+ * safe to call from anywhere (the stores gate writes on it; the renderer
+ * pre-flights). Referential integrity (does a referenced id actually exist?) is a
+ * store-level concern, not a structural one, and lives in the stores.
  *
  * This module also owns the auth taxonomy — which auth `type`s exist and which
- * secret field (if any) each one carries — so the validator and the store agree
- * on where a hop's secret lives.
+ * secret field (if any) each one carries — so the credential store and validator
+ * agree on where a credential's secret lives.
  */
 "use strict";
 
-/** The auth methods a hop may offer, tried by the engine in array order. */
+/** The auth methods a credential may use. */
 const AUTH_TYPES = ["agent", "key", "password"];
 
 /**
@@ -58,62 +62,12 @@ function isValidPort(v) {
 }
 
 /**
- * Validate one hop (the SSH server, or a jump host — same shape) into `errors`.
- * @param {*} hop
- * @param {string} prefix  dotted path prefix, e.g. "sshServer" or "jumps[0]"
- * @param {Object<string,string>} errors  accumulator (mutated)
- */
-function validateHop(hop, prefix, errors) {
-  if (!hop || typeof hop !== "object") {
-    errors[prefix] = "hop must be an object";
-    return;
-  }
-  if (!isNonEmptyString(hop.host)) {
-    errors[`${prefix}.host`] = "host is required";
-  }
-  if (!isValidPort(hop.port)) {
-    errors[`${prefix}.port`] =
-      `port must be an integer ${MIN_PORT}–${MAX_PORT}`;
-  }
-  if (!isNonEmptyString(hop.user)) {
-    errors[`${prefix}.user`] = "user is required";
-  }
-  if (!Array.isArray(hop.auth) || hop.auth.length === 0) {
-    errors[`${prefix}.auth`] = "at least one auth method is required";
-    return;
-  }
-  hop.auth.forEach((entry, i) =>
-    validateAuth(entry, `${prefix}.auth[${i}]`, errors),
-  );
-}
-
-/**
- * Validate one auth entry (a member of the discriminated union) into `errors`.
- * Secret values (`password`, `passphrase`) are write-only and may legitimately be
- * absent in an update patch that keeps the existing secret, so their presence is
- * NOT required here — only their surrounding structure is checked.
+ * Validate a tunnel definition (reference shape).
  *
- * @param {*} entry
- * @param {string} prefix  dotted path, e.g. "sshServer.auth[0]"
- * @param {Object<string,string>} errors
- */
-function validateAuth(entry, prefix, errors) {
-  if (!entry || typeof entry !== "object") {
-    errors[prefix] = "auth entry must be an object";
-    return;
-  }
-  if (!AUTH_TYPES.includes(entry.type)) {
-    errors[`${prefix}.type`] = `type must be one of ${AUTH_TYPES.join(", ")}`;
-    return;
-  }
-  if (entry.type === "key" && !isNonEmptyString(entry.privateKeyPath)) {
-    errors[`${prefix}.privateKeyPath`] =
-      "privateKeyPath is required for key auth";
-  }
-}
-
-/**
- * Validate a full tunnel definition.
+ * The SSH server is implied from the destination unless `sshHost` overrides it
+ * (a bastion forwarding onward), so only the destination, the local port, and a
+ * `credentialId` are structurally required; `sshHost` / `sshPort` are optional.
+ *
  * @param {*} def
  * @returns {{ valid: boolean, errors: Object<string,string> }}
  */
@@ -147,19 +101,30 @@ function validateDefinition(def) {
     }
   }
 
-  // The tunnel-terminating SSH server.
-  if (!def.sshServer) {
-    errors.sshServer = "sshServer is required";
-  } else {
-    validateHop(def.sshServer, "sshServer", errors);
+  // SSH server override — blank means "same box as the destination". Only its
+  // structure is checked when present; it defaults in the resolver.
+  if (def.sshHost !== undefined && !isNonEmptyString(def.sshHost)) {
+    errors.sshHost = "sshHost must be a non-empty string when set";
+  }
+  if (def.sshPort !== undefined && !isValidPort(def.sshPort)) {
+    errors.sshPort = `sshPort must be an integer ${MIN_PORT}–${MAX_PORT}`;
   }
 
-  // Ordered jump-host chain (optional; empty = direct).
-  if (def.jumps !== undefined) {
-    if (!Array.isArray(def.jumps)) {
-      errors.jumps = "jumps must be an array";
+  // The SSH server's credential (by id). Existence is checked by the store.
+  if (!isNonEmptyString(def.credentialId)) {
+    errors.credentialId = "a credential is required";
+  }
+
+  // Ordered jump-host chain (optional; empty = direct). Each entry is an id.
+  if (def.jumpHostIds !== undefined) {
+    if (!Array.isArray(def.jumpHostIds)) {
+      errors.jumpHostIds = "jumpHostIds must be an array";
     } else {
-      def.jumps.forEach((hop, i) => validateHop(hop, `jumps[${i}]`, errors));
+      def.jumpHostIds.forEach((id, i) => {
+        if (!isNonEmptyString(id)) {
+          errors[`jumpHostIds[${i}]`] = "jump host reference must be a string";
+        }
+      });
     }
   }
 
@@ -185,8 +150,71 @@ function validateDefinition(def) {
   return { valid: Object.keys(errors).length === 0, errors };
 }
 
+/**
+ * Validate a reusable credential record. The secret value (`password` /
+ * `passphrase`) is write-only and may legitimately be absent in an update patch
+ * that keeps the existing secret, so its presence is NOT required — only the
+ * surrounding structure is checked.
+ *
+ * @param {*} cred
+ * @returns {{ valid: boolean, errors: Object<string,string> }}
+ */
+function validateCredential(cred) {
+  const errors = {};
+
+  if (!cred || typeof cred !== "object" || Array.isArray(cred)) {
+    return { valid: false, errors: { _: "credential must be an object" } };
+  }
+
+  if (!isNonEmptyString(cred.label)) {
+    errors.label = "label is required";
+  }
+  if (!isNonEmptyString(cred.user)) {
+    errors.user = "user is required";
+  }
+  if (!AUTH_TYPES.includes(cred.authType)) {
+    errors.authType = `authType must be one of ${AUTH_TYPES.join(", ")}`;
+  } else if (cred.authType === "key" && !isNonEmptyString(cred.keyPath)) {
+    errors.keyPath = "keyPath is required for key auth";
+  }
+
+  return { valid: Object.keys(errors).length === 0, errors };
+}
+
+/**
+ * Validate a reusable jump-host record. It references a credential by id (whose
+ * existence the store checks).
+ *
+ * @param {*} jump
+ * @returns {{ valid: boolean, errors: Object<string,string> }}
+ */
+function validateJumpHost(jump) {
+  const errors = {};
+
+  if (!jump || typeof jump !== "object" || Array.isArray(jump)) {
+    return { valid: false, errors: { _: "jump host must be an object" } };
+  }
+
+  if (!isNonEmptyString(jump.label)) {
+    errors.label = "label is required";
+  }
+  if (!isNonEmptyString(jump.host)) {
+    errors.host = "host is required";
+  }
+  if (!isValidPort(jump.port)) {
+    errors.port = `port must be an integer ${MIN_PORT}–${MAX_PORT}`;
+  }
+  if (!isNonEmptyString(jump.credentialId)) {
+    errors.credentialId = "a credential is required";
+  }
+
+  return { valid: Object.keys(errors).length === 0, errors };
+}
+
 module.exports = {
   AUTH_TYPES,
   secretFieldForAuthType,
   validateDefinition,
+  validateCredential,
+  validateJumpHost,
 };

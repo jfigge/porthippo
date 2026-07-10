@@ -57,8 +57,9 @@ const DEFAULT_MODE = "app-key";
 const VERIFIER_PLAINTEXT = "porthippo:secret-storage:verifier:v1";
 const MASTER_SALT_LEN = 16;
 
-// tunnels.json is Port Hippo's only secret-bearing file; a hop's auth secret
-// lives at `auth[].{password|passphrase}` as `{ enc: "<ciphertext>" }`.
+// tunnels.json is Port Hippo's only secret-bearing file; since Feature 45 a
+// credential's auth secret lives at `credentials[].{password|passphrase}` as
+// `{ enc: "<ciphertext>" }` (tunnels + jump hosts carry no secret of their own).
 const SECRET_FIELDS = ["password", "passphrase"];
 
 /**
@@ -85,63 +86,38 @@ function defaultModeFor(platform, keystoreAvailable) {
 
 // ── Secret taxonomy over a tunnels.json document ───────────────────────────────
 // A `collect`/`transform` pair sharing one traversal so the two migration passes
-// (validate then convert) can never drift over which values are secrets.
-
-/** Every hop (sshServer + jumps) of a tunnel definition. */
-function hopsOf(t) {
-  if (!t || typeof t !== "object") return [];
-  return [t.sshServer, ...(Array.isArray(t.jumps) ? t.jumps : [])];
-}
+// (validate then convert) can never drift over which values are secrets. Secrets
+// live only on credential records; the document is read post-migration, so the
+// walkers always see the reference (v2) shape.
 
 /** Yield each sealed ciphertext string in a tunnels.json document. */
-function collectTunnels(doc) {
+function collectSecrets(doc) {
   const out = [];
-  const tunnels = Array.isArray(doc?.tunnels) ? doc.tunnels : [];
-  for (const t of tunnels) {
-    for (const hop of hopsOf(t)) {
-      for (const entry of Array.isArray(hop?.auth) ? hop.auth : []) {
-        if (!entry || typeof entry !== "object") continue;
-        for (const field of SECRET_FIELDS) {
-          const enc = entry[field]?.enc;
-          if (typeof enc === "string") out.push(enc);
-        }
-      }
+  const credentials = Array.isArray(doc?.credentials) ? doc.credentials : [];
+  for (const cred of credentials) {
+    if (!cred || typeof cred !== "object") continue;
+    for (const field of SECRET_FIELDS) {
+      const enc = cred[field]?.enc;
+      if (typeof enc === "string") out.push(enc);
     }
   }
   return out;
 }
 
-/** A hop with `fn` applied to each of its sealed ciphertext strings. */
-function mapHopSecrets(hop, fn) {
-  if (!hop || typeof hop !== "object" || !Array.isArray(hop.auth)) return hop;
-  return {
-    ...hop,
-    auth: hop.auth.map((entry) => {
-      if (!entry || typeof entry !== "object") return entry;
-      const next = { ...entry };
-      for (const field of SECRET_FIELDS) {
-        const enc = entry[field]?.enc;
-        if (typeof enc === "string") {
-          next[field] = { ...entry[field], enc: fn(enc) };
-        }
-      }
-      return next;
-    }),
-  };
-}
-
 /** A copy of a tunnels.json document with `fn` applied to every ciphertext. */
-function mapTunnels(doc, fn) {
+function mapSecrets(doc, fn) {
   if (!doc || typeof doc !== "object") return doc;
-  const tunnels = Array.isArray(doc.tunnels) ? doc.tunnels : [];
+  const credentials = Array.isArray(doc.credentials) ? doc.credentials : [];
   return {
     ...doc,
-    tunnels: tunnels.map((t) => {
-      if (!t || typeof t !== "object") return t;
-      const next = { ...t };
-      next.sshServer = mapHopSecrets(t.sshServer, fn);
-      if (Array.isArray(t.jumps)) {
-        next.jumps = t.jumps.map((hop) => mapHopSecrets(hop, fn));
+    credentials: credentials.map((cred) => {
+      if (!cred || typeof cred !== "object") return cred;
+      const next = { ...cred };
+      for (const field of SECRET_FIELDS) {
+        const enc = cred[field]?.enc;
+        if (typeof enc === "string") {
+          next[field] = { ...cred[field], enc: fn(enc) };
+        }
       }
       return next;
     }),
@@ -360,7 +336,7 @@ class SecretStorage {
    */
   _anySealedSecret(isHit) {
     const doc = io.readJSON(this._paths.tunnelsPath());
-    return collectTunnels(doc).some(isHit);
+    return collectSecrets(doc).some(isHit);
   }
 
   // ── Migration marker (durable, brackets a mode switch) ──────────────────────
@@ -456,8 +432,8 @@ class SecretStorage {
       {
         path: this._paths.tunnelsPath(),
         label: "tunnels",
-        collect: collectTunnels,
-        transform: mapTunnels,
+        collect: collectSecrets,
+        transform: mapSecrets,
       },
     ];
   }

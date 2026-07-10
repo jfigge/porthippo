@@ -14,11 +14,11 @@
  * limitations under the License.
  */
 
-// validate-parity.test.js — the renderer's validator (web/scripts/validate.js) is
-// a hand-kept copy of the authoritative store validator (app/store/validate.js).
-// This guards against drift: both must return identical {valid, errors} for every
-// fixture, and expose the same AUTH_TYPES / secretFieldForAuthType. If this fails,
-// the two copies diverged — reconcile them.
+// validate-parity.test.js — the renderer's validators (web/scripts/validate.js)
+// are a hand-kept copy of the authoritative store validators
+// (app/store/validate.js). This guards against drift: both must return identical
+// {valid, errors} for every fixture, and expose the same AUTH_TYPES /
+// secretFieldForAuthType. If this fails, the two copies diverged — reconcile them.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -26,23 +26,16 @@ import assert from "node:assert/strict";
 import * as renderer from "../validate.js";
 import main from "../../../app/store/validate.js"; // CJS module.exports (default)
 
-const hop = (over = {}) => ({
-  host: "h",
-  port: 22,
-  user: "u",
-  auth: [{ type: "agent" }],
-  ...over,
-});
 const def = (over = {}) => ({
   name: "n",
   localPort: 8080,
   destination: { host: "d", port: 80 },
-  sshServer: hop(),
-  jumps: [],
+  credentialId: "cred-1",
+  jumpHostIds: [],
   ...over,
 });
 
-const FIXTURES = [
+const DEF_FIXTURES = [
   def(), // fully valid
   {}, // everything missing
   null,
@@ -59,16 +52,15 @@ const FIXTURES = [
   def({ destination: undefined }),
   def({ destination: { host: "", port: 80 } }),
   def({ destination: { host: "d", port: -1 } }),
-  def({ sshServer: undefined }),
-  def({ sshServer: hop({ auth: [] }) }),
-  def({ sshServer: hop({ auth: [{ type: "key" }] }) }),
-  def({ sshServer: hop({ auth: [{ type: "key", privateKeyPath: "/k" }] }) }),
-  def({ sshServer: hop({ auth: [{ type: "password", password: "pw" }] }) }),
-  def({ sshServer: hop({ auth: [{ type: "bogus" }] }) }),
-  def({ sshServer: hop({ host: "", port: 0, user: "" }) }),
-  def({ jumps: "nope" }),
-  def({ jumps: [hop(), hop({ host: "", auth: [] })] }),
-  def({ jumps: [hop({ auth: [{ type: "key", privateKeyPath: "/id" }] })] }),
+  def({ sshHost: "bastion", sshPort: 2222 }),
+  def({ sshHost: "" }),
+  def({ sshPort: 0 }),
+  def({ sshPort: 70000 }),
+  def({ credentialId: undefined }),
+  def({ credentialId: "" }),
+  def({ jumpHostIds: "nope" }),
+  def({ jumpHostIds: ["a", "b"] }),
+  def({ jumpHostIds: ["a", 5, ""] }),
   def({ lingerMs: -5 }),
   def({ lingerMs: 1.5 }),
   def({ lingerMs: 0 }),
@@ -77,14 +69,57 @@ const FIXTURES = [
   def({ autoReconnect: "no" }),
 ];
 
-test("renderer and store validators agree on {valid, errors} for every fixture", () => {
-  FIXTURES.forEach((fixture, i) => {
-    const a = renderer.validateDefinition(fixture);
-    const b = main.validateDefinition(fixture);
+const CRED_FIXTURES = [
+  { label: "L", user: "u", authType: "agent" },
+  { label: "L", user: "u", authType: "key", keyPath: "/k" },
+  { label: "L", user: "u", authType: "key" },
+  { label: "L", user: "u", authType: "password" },
+  { label: "", user: "u", authType: "agent" },
+  { label: "L", user: "", authType: "agent" },
+  { label: "L", user: "u", authType: "totp" },
+  {},
+  null,
+  [],
+  "nope",
+];
+
+const JUMP_FIXTURES = [
+  { label: "relay", host: "h", port: 22, credentialId: "cred-1" },
+  { label: "", host: "h", port: 22, credentialId: "cred-1" },
+  { label: "relay", host: "", port: 22, credentialId: "cred-1" },
+  { label: "relay", host: "h", port: 0, credentialId: "cred-1" },
+  { label: "relay", host: "h", port: 22, credentialId: "" },
+  {},
+  null,
+  [],
+];
+
+test("renderer and store validateDefinition agree for every fixture", () => {
+  DEF_FIXTURES.forEach((fixture, i) => {
     assert.deepEqual(
-      a,
-      b,
-      `fixture #${i} diverged: ${JSON.stringify(fixture)}`,
+      renderer.validateDefinition(fixture),
+      main.validateDefinition(fixture),
+      `def fixture #${i} diverged: ${JSON.stringify(fixture)}`,
+    );
+  });
+});
+
+test("renderer and store validateCredential agree for every fixture", () => {
+  CRED_FIXTURES.forEach((fixture, i) => {
+    assert.deepEqual(
+      renderer.validateCredential(fixture),
+      main.validateCredential(fixture),
+      `credential fixture #${i} diverged: ${JSON.stringify(fixture)}`,
+    );
+  });
+});
+
+test("renderer and store validateJumpHost agree for every fixture", () => {
+  JUMP_FIXTURES.forEach((fixture, i) => {
+    assert.deepEqual(
+      renderer.validateJumpHost(fixture),
+      main.validateJumpHost(fixture),
+      `jump host fixture #${i} diverged: ${JSON.stringify(fixture)}`,
     );
   });
 });

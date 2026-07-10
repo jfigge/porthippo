@@ -17,40 +17,32 @@
 /**
  * tunnel-store.js — Durable, ordered collection of tunnel definitions.
  *
- * One JSON document (`tunnels.json` = `{ schemaVersion, tunnels: [...] }`) holds
- * every definition in display order (array position IS the order — the `order`
- * field on a returned view is derived from the index, so it can never drift). All
- * mutations read-modify-write the whole file through io.js's atomic, synchronous
- * writes (which serialize by virtue of being synchronous).
+ * Since Feature 45 a tunnel is a REFERENCE record: it holds a `credentialId` (its
+ * SSH server's credential) and an ordered list of `jumpHostIds`, and carries no
+ * secret of its own — secrets live only in the credential store. Tunnels,
+ * credentials and jump hosts share one JSON document (definitions-doc.js); array
+ * position IS display order (the `order` field on a returned view is derived from
+ * the index, so it can never drift). All mutations read-modify-write the whole
+ * document through io.js's atomic, synchronous writes.
  *
- * Secrets are write-only across the IPC boundary. On disk a hop's auth secret
- * lives at `auth[i].{password|passphrase}` as `{ enc: "<ciphertext>" }` (sealed by
- * crypto.js). There are three read shapes:
- *   - list() / get()        renderer-facing: secret objects are stripped and
- *                           replaced with a `hasSecret` boolean — the plaintext
- *                           never crosses IPC.
- *   - listDecrypted() / getDecrypted()  in-process (the Feature 20 engine): secret
- *                           objects are decrypted back to plaintext strings.
- *
- * On write the renderer sends a NEW secret as a plaintext string (encrypted here)
- * or, to keep an existing secret it never received, sends the auth entry back with
- * `hasSecret: true` and no value (the on-disk ciphertext is retained). Sending
- * `hasSecret: false` / omitting it clears the secret. This is what lets an edit
- * that never touches a password avoid clobbering it.
+ * Two read shapes:
+ *   - list() / get()        renderer-facing: the stored reference record plus a
+ *                           derived `order` and `routeSummary` (built by the
+ *                           resolver so display and behaviour can't drift). No
+ *                           secrets exist on a tunnel record to strip.
+ *   - listDecrypted() / getDecrypted()  in-process (the Feature 20 engine): each
+ *                           tunnel is RESOLVED — its referenced credential and
+ *                           jump hosts are decrypted and inlined into the engine's
+ *                           `{ destination, sshServer, jumps }` shape (resolve.js),
+ *                           so the engine is unchanged by the reference model.
  */
 "use strict";
 
 const io = require("./io");
-const crypto = require("./crypto");
-const { validateDefinition, secretFieldForAuthType } = require("./validate");
-
-/** Auth secret field names — the union of every secretFieldForAuthType result. */
-const SECRET_FIELDS = ["password", "passphrase"];
-
-/** True when `v` is a sealed secret object `{ enc: "<ciphertext>" }`. */
-function isSealed(v) {
-  return Boolean(v) && typeof v === "object" && typeof v.enc === "string";
-}
+const { readDoc, writeDoc } = require("./definitions-doc");
+const { validateDefinition } = require("./validate");
+const { decryptCredential } = require("./credential-secrets");
+const { resolveDefinition, summariseRoute } = require("./resolve");
 
 /** Build the tagged error the IPC layer turns into a field-keyed envelope. */
 function invalidDefinitionError(errors) {
@@ -60,125 +52,22 @@ function invalidDefinitionError(errors) {
   return err;
 }
 
-// ── Secret transforms over a single auth entry ─────────────────────────────────
-
-/**
- * Produce the on-disk form of an incoming auth entry, sealing its secret.
- * `existing` is the positionally-matched prior on-disk entry (or undefined),
- * consulted only to retain a secret the caller asked to keep.
- */
-function sealAuthEntry(incoming, existing) {
-  if (!incoming || typeof incoming !== "object") return incoming;
-  const out = { ...incoming };
-  delete out.hasSecret; // a read-side marker; never persisted
-  delete out.decryptError; // a read-side marker; never persisted
-
-  const field = secretFieldForAuthType(incoming.type);
-  // Drop any secret field that doesn't belong to this auth type (e.g. a stray
-  // password on a `key` entry) so a type switch can't leave an orphan secret.
-  for (const f of SECRET_FIELDS) {
-    if (f !== field) delete out[f];
-  }
-  if (!field) return out;
-
-  const val = incoming[field];
-  if (typeof val === "string" && val.length > 0) {
-    out[field] = { enc: crypto.encryptString(val) }; // new secret → seal it
-  } else if (isSealed(val)) {
-    out[field] = val; // already sealed (idempotent re-write)
-  } else if (incoming.hasSecret === true && isSealed(existing?.[field])) {
-    out[field] = existing[field]; // keep the existing on-disk ciphertext
-  } else {
-    delete out[field]; // no secret / cleared
-  }
-  return out;
-}
-
-/** Renderer-facing form: strip the secret, expose only whether one exists. */
-function stripAuthEntry(entry) {
-  if (!entry || typeof entry !== "object") return entry;
-  const out = { ...entry };
-  const field = secretFieldForAuthType(entry.type);
-  for (const f of SECRET_FIELDS) delete out[f];
-  delete out.decryptError;
-  if (field) out.hasSecret = isSealed(entry[field]);
-  return out;
-}
-
-/** In-process (engine) form: decrypt the secret back to a plaintext string. */
-function decryptAuthEntry(entry) {
-  if (!entry || typeof entry !== "object") return entry;
-  const out = { ...entry };
-  const field = secretFieldForAuthType(entry.type);
-  if (field && isSealed(entry[field])) {
-    try {
-      out[field] = crypto.decryptString(entry[field].enc);
-    } catch (err) {
-      if (!(err instanceof crypto.DecryptError)) throw err;
-      // A secret that can't be decrypted (keystore unavailable, rotated key) is
-      // blanked and flagged rather than surfaced as stale ciphertext; the engine
-      // treats a flagged entry as "no usable secret" and moves to the next method.
-      out[field] = "";
-      out.decryptError = err.code;
-    }
-  }
-  return out;
-}
-
-// ── Secret transforms over a whole definition ──────────────────────────────────
-
-function mapHopAuth(hop, fn) {
-  if (!hop || typeof hop !== "object" || !Array.isArray(hop.auth)) {
-    return hop && typeof hop === "object" ? { ...hop } : hop;
-  }
-  return { ...hop, auth: hop.auth.map(fn) };
-}
-
-function sealHop(incomingHop, existingHop) {
-  if (!incomingHop || typeof incomingHop !== "object") return incomingHop;
-  if (!Array.isArray(incomingHop.auth)) return { ...incomingHop };
-  const existingAuth = Array.isArray(existingHop?.auth) ? existingHop.auth : [];
-  return {
-    ...incomingHop,
-    auth: incomingHop.auth.map((entry, i) =>
-      sealAuthEntry(entry, existingAuth[i]),
-    ),
-  };
-}
-
-/** Seal every secret in a definition, retaining kept secrets from `existing`. */
-function sealDefinition(incoming, existing) {
-  const out = { ...incoming };
-  out.sshServer = sealHop(incoming.sshServer, existing?.sshServer);
-  if (Array.isArray(incoming.jumps)) {
-    const existingJumps = Array.isArray(existing?.jumps) ? existing.jumps : [];
-    out.jumps = incoming.jumps.map((hop, i) => sealHop(hop, existingJumps[i]));
-  }
-  return out;
-}
-
-function transformDefinition(def, fn) {
-  const out = { ...def };
-  out.sshServer = mapHopAuth(def.sshServer, fn);
-  if (Array.isArray(def.jumps)) {
-    out.jumps = def.jumps.map((hop) => mapHopAuth(hop, fn));
-  }
-  return out;
-}
-
-const stripDefinition = (def) => transformDefinition(def, stripAuthEntry);
-const decryptDefinition = (def) => transformDefinition(def, decryptAuthEntry);
-
 /** Apply store-level defaults to an incoming definition (post-validation). */
 function applyDefaults(def) {
   return {
     ...def,
     enabled: def.enabled ?? true,
-    bindHost: def.bindHost ?? "127.0.0.1",
     keepAlive: def.keepAlive ?? false,
     autoReconnect: def.autoReconnect ?? false,
-    jumps: Array.isArray(def.jumps) ? def.jumps : [],
+    jumpHostIds: Array.isArray(def.jumpHostIds) ? def.jumpHostIds : [],
   };
+}
+
+/** Index an array of `{ id }` records into a Map for O(1) reference lookup. */
+function indexById(records) {
+  const map = new Map();
+  for (const r of records) if (r && r.id) map.set(r.id, r);
+  return map;
 }
 
 class TunnelStore {
@@ -189,99 +78,123 @@ class TunnelStore {
     this._paths = paths;
   }
 
-  /** Raw sealed definitions in stored (display) order. */
-  _readAll() {
-    const doc = io.readJSON(this._paths.tunnelsPath());
-    return Array.isArray(doc?.tunnels) ? doc.tunnels : [];
+  _read() {
+    return readDoc(this._paths);
   }
 
-  _writeAll(tunnels) {
-    io.writeJSON(this._paths.tunnelsPath(), { tunnels });
+  _writeTunnels(doc, tunnels) {
+    writeDoc(this._paths, { ...doc, tunnels });
   }
 
-  // ── Renderer-facing reads (secrets stripped to hasSecret) ────────────────────
+  /** Renderer view of a stored tunnel: reference record + derived order/summary. */
+  _view(def, order, jumpHostsById) {
+    return {
+      ...def,
+      order,
+      routeSummary: summariseRoute(def, { jumpHostsById }),
+    };
+  }
 
-  /** Every definition, in order, secrets stripped. */
+  // ── Renderer-facing reads (reference shape; no secrets on a tunnel) ───────────
+
+  /** Every definition, in order, with a derived route summary. */
   list() {
-    return this._readAll().map((def, i) =>
-      stripDefinition({ ...def, order: i }),
-    );
+    const doc = this._read();
+    const jumpHostsById = indexById(doc.jumpHosts);
+    return doc.tunnels.map((def, i) => this._view(def, i, jumpHostsById));
   }
 
-  /** One definition by id, secrets stripped, or null if absent. */
+  /** One definition by id, or null if absent. */
   get(id) {
-    const list = this._readAll();
-    const i = list.findIndex((d) => d && d.id === id);
-    return i === -1 ? null : stripDefinition({ ...list[i], order: i });
+    const doc = this._read();
+    const i = doc.tunnels.findIndex((d) => d && d.id === id);
+    if (i === -1) return null;
+    return this._view(doc.tunnels[i], i, indexById(doc.jumpHosts));
   }
 
-  // ── In-process reads (secrets decrypted — engine only, never over IPC) ───────
+  // ── In-process reads (resolved + decrypted — engine only, never over IPC) ─────
 
-  /** Every definition, in order, secrets decrypted to plaintext. */
+  /** Every definition, resolved into the engine shape with secrets decrypted. */
   listDecrypted() {
-    return this._readAll().map((def, i) =>
-      decryptDefinition({ ...def, order: i }),
-    );
+    const doc = this._read();
+    const refs = this._decryptedRefs(doc);
+    return doc.tunnels.map((def, i) => ({
+      ...resolveDefinition(def, refs),
+      order: i,
+    }));
   }
 
-  /** One definition by id, secrets decrypted, or null if absent. */
+  /** One definition by id, resolved + decrypted, or null if absent. */
   getDecrypted(id) {
-    const list = this._readAll();
-    const i = list.findIndex((d) => d && d.id === id);
-    return i === -1 ? null : decryptDefinition({ ...list[i], order: i });
+    const doc = this._read();
+    const i = doc.tunnels.findIndex((d) => d && d.id === id);
+    if (i === -1) return null;
+    return {
+      ...resolveDefinition(doc.tunnels[i], this._decryptedRefs(doc)),
+      order: i,
+    };
+  }
+
+  /** Reference maps for the resolver: credentials decrypted, jump hosts as-is. */
+  _decryptedRefs(doc) {
+    const credentialsById = new Map();
+    for (const c of doc.credentials) {
+      if (c && c.id) credentialsById.set(c.id, decryptCredential(c));
+    }
+    return { credentialsById, jumpHostsById: indexById(doc.jumpHosts) };
   }
 
   // ── Mutations ────────────────────────────────────────────────────────────────
 
   /**
-   * Create a new definition (plaintext secrets are sealed on write). Returns the
-   * renderer-facing view of the created record. Throws INVALID_DEFINITION (with a
-   * field-keyed `.errors`) on a bad definition.
+   * Create a new definition. Returns the renderer-facing view. Throws
+   * INVALID_DEFINITION (with a field-keyed `.errors`) on a bad definition or a
+   * dangling credential / jump-host reference.
    */
   create(def) {
     const { valid, errors } = validateDefinition(def);
     if (!valid) throw invalidDefinitionError(errors);
 
-    const list = this._readAll();
-    const sealed = sealDefinition(applyDefaults(def), null);
-    sealed.id = io.newUUID();
-    delete sealed.order; // order is derived from array position, never stored
-    list.push(sealed);
-    this._writeAll(list);
-    return stripDefinition({ ...sealed, order: list.length - 1 });
+    const doc = this._read();
+    this._assertRefs(doc, def);
+
+    const record = applyDefaults(def);
+    record.id = io.newUUID();
+    delete record.order; // derived from array position, never stored
+    delete record.routeSummary; // derived, never stored
+    doc.tunnels.push(record);
+    this._writeTunnels(doc, doc.tunnels);
+    return this._view(record, doc.tunnels.length - 1, indexById(doc.jumpHosts));
   }
 
   /**
-   * Patch an existing definition. The patch shallow-overrides top-level fields
-   * (a provided `sshServer` / `jumps` replaces the old one wholesale). Secrets in
-   * the merged result are sealed, retaining kept secrets from the prior record.
-   * Throws NOT_FOUND for an unknown id, INVALID_DEFINITION on a bad merged result.
+   * Patch an existing definition (shallow top-level override). Throws NOT_FOUND
+   * for an unknown id, INVALID_DEFINITION on a bad merged result or dangling ref.
    */
   update(id, patch) {
-    const list = this._readAll();
-    const i = list.findIndex((d) => d && d.id === id);
+    const doc = this._read();
+    const i = doc.tunnels.findIndex((d) => d && d.id === id);
     if (i === -1) throw io.notFoundError(`tunnel not found: ${id}`);
 
-    const existing = list[i];
-    const merged = applyDefaults({ ...existing, ...patch, id });
+    const merged = applyDefaults({ ...doc.tunnels[i], ...patch, id });
     const { valid, errors } = validateDefinition(merged);
     if (!valid) throw invalidDefinitionError(errors);
+    this._assertRefs(doc, merged);
 
-    const sealed = sealDefinition(merged, existing);
-    sealed.id = id;
-    delete sealed.order;
-    list[i] = sealed;
-    this._writeAll(list);
-    return stripDefinition({ ...sealed, order: i });
+    delete merged.order;
+    delete merged.routeSummary;
+    doc.tunnels[i] = merged;
+    this._writeTunnels(doc, doc.tunnels);
+    return this._view(merged, i, indexById(doc.jumpHosts));
   }
 
   /** Remove a definition. Throws NOT_FOUND for an unknown id. */
   delete(id) {
-    const list = this._readAll();
-    const i = list.findIndex((d) => d && d.id === id);
+    const doc = this._read();
+    const i = doc.tunnels.findIndex((d) => d && d.id === id);
     if (i === -1) throw io.notFoundError(`tunnel not found: ${id}`);
-    list.splice(i, 1);
-    this._writeAll(list);
+    doc.tunnels.splice(i, 1);
+    this._writeTunnels(doc, doc.tunnels);
     return { id };
   }
 
@@ -292,9 +205,9 @@ class TunnelStore {
    * renderer-facing list.
    */
   reorder(ids) {
-    const list = this._readAll();
+    const doc = this._read();
     const order = Array.isArray(ids) ? ids : [];
-    const byId = new Map(list.map((d) => [d && d.id, d]));
+    const byId = new Map(doc.tunnels.map((d) => [d && d.id, d]));
 
     const next = [];
     const placed = new Set();
@@ -305,12 +218,35 @@ class TunnelStore {
         placed.add(id);
       }
     }
-    for (const def of list) {
+    for (const def of doc.tunnels) {
       if (def && !placed.has(def.id)) next.push(def);
     }
 
-    this._writeAll(next);
-    return next.map((def, i) => stripDefinition({ ...def, order: i }));
+    this._writeTunnels(doc, next);
+    const jumpHostsById = indexById(doc.jumpHosts);
+    return next.map((def, i) => this._view(def, i, jumpHostsById));
+  }
+
+  /**
+   * Reject a `credentialId` / `jumpHostIds` that doesn't resolve, as a field-keyed
+   * INVALID_DEFINITION — the referential-integrity half of validation, which the
+   * pure structural validator can't check without the sibling records.
+   */
+  _assertRefs(doc, def) {
+    const errors = {};
+    const credExists = doc.credentials.some(
+      (c) => c && c.id === def.credentialId,
+    );
+    if (!credExists) {
+      errors.credentialId = "referenced credential does not exist";
+    }
+    const jumpIds = Array.isArray(def.jumpHostIds) ? def.jumpHostIds : [];
+    jumpIds.forEach((id, i) => {
+      if (!doc.jumpHosts.some((j) => j && j.id === id)) {
+        errors[`jumpHostIds[${i}]`] = "referenced jump host does not exist";
+      }
+    });
+    if (Object.keys(errors).length > 0) throw invalidDefinitionError(errors);
   }
 }
 

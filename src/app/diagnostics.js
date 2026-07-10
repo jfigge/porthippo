@@ -22,11 +22,12 @@
  * testable and keeps it off the filesystem.
  *
  * SECURITY — two layers, so a report can NEVER carry a secret:
- *   1. Containment. The tunnel summary is built from the store's SEALED list
- *      (`tunnelStore().list()`), which returns a `hasSecret` boolean per auth
- *      method and never a password/passphrase/key value. Auth is reported as a
- *      list of method *types* only — never key-file paths (which can leak
- *      usernames/home directories).
+ *   1. Containment. The summaries are built from the stores' SEALED lists
+ *      (`tunnelStore().list()` / `credentialStore().list()`), which carry no
+ *      secret value — only a `hasSecret` boolean. A tunnel holds no secret at all
+ *      (secrets live in credentials); credentials are reported as their auth
+ *      method *type* only — never key-file paths (which can leak usernames / home
+ *      directories) or the secret itself.
  *   2. Redaction. The log tail is passed through `redact()` as defense in depth —
  *      even though secrets are never logged, we scrub PEM private-key blocks,
  *      `password:`/`passphrase:`-style key/values, and inline `user:pass@host`
@@ -70,7 +71,9 @@ function redact(text) {
 
 /**
  * Summarize one SEALED tunnel definition to a single secret-free line. Accepts
- * the shape returned by `tunnelStore().list()` (secrets already stripped).
+ * the reference shape returned by `tunnelStore().list()` — a tunnel carries no
+ * secret; its SSH server is implied from the destination unless `sshHost`
+ * overrides it (a bastion), and it references a credential + jump hosts by id.
  * @param {object} def
  * @returns {string}
  */
@@ -78,25 +81,34 @@ function summarizeTunnel(def) {
   const d = def || {};
   const name = d.name || "(unnamed)";
   const dest = d.destination || {};
-  const server = d.sshServer || {};
-  const jumps = Array.isArray(d.jumps) ? d.jumps.length : 0;
+  const jumps = Array.isArray(d.jumpHostIds) ? d.jumpHostIds.length : 0;
 
-  // Auth is reported as method TYPES only (agent/key/password) — never values or
-  // key-file paths. Collect across the SSH server + every jump hop.
-  const types = new Set();
-  const collect = (hop) => {
-    for (const a of (hop && hop.auth) || []) if (a && a.type) types.add(a.type);
-  };
-  collect(server);
-  for (const j of d.jumps || []) collect(j);
+  const hasBastion = typeof d.sshHost === "string" && d.sshHost.trim() !== "";
+  const via = hasBastion ? ` via ${d.sshHost}:${d.sshPort ?? 22}` : " (direct)";
+  const credential = d.credentialId ? "set" : "none";
 
-  const authList = types.size ? [...types].join("/") : "none";
   return (
     `- ${name}: local :${d.localPort ?? "?"} → ${dest.host ?? "?"}:${
       dest.port ?? "?"
-    } via ${server.host ?? "?"}:${server.port ?? "?"}` +
-    ` (jumps: ${jumps}, auth: ${authList}, enabled: ${d.enabled ? "yes" : "no"})`
+    }${via}` +
+    ` (jumps: ${jumps}, credential: ${credential}, enabled: ${
+      d.enabled ? "yes" : "no"
+    })`
   );
+}
+
+/**
+ * Summarize one SEALED credential to a single secret-free line: its label and
+ * auth method TYPE only (never the secret value or a key-file path).
+ * @param {object} cred
+ * @returns {string}
+ */
+function summarizeCredential(cred) {
+  const c = cred || {};
+  const label = c.label || "(unnamed)";
+  const type = c.authType || "?";
+  const secret = c.hasSecret ? " (secret set)" : "";
+  return `- ${label}: ${type}${secret}`;
 }
 
 /**
@@ -104,11 +116,18 @@ function summarizeTunnel(def) {
  * @param {object} opts
  * @param {Object<string,string|number>} [opts.app]  version/platform metadata
  * @param {Array<object>} [opts.tunnels]  SEALED tunnel definitions
+ * @param {Array<object>} [opts.credentials]  SEALED credential records
  * @param {Array<{name:string,content:string}>} [opts.logs]  oldest-first
  * @param {string} [opts.generatedAt]  ISO timestamp (injected; kept out of here)
  * @returns {string}
  */
-function buildReport({ app = {}, tunnels = [], logs = [], generatedAt } = {}) {
+function buildReport({
+  app = {},
+  tunnels = [],
+  credentials = [],
+  logs = [],
+  generatedAt,
+} = {}) {
   const lines = [];
   lines.push("Port Hippo diagnostics report");
   lines.push("=============================");
@@ -124,6 +143,15 @@ function buildReport({ app = {}, tunnels = [], logs = [], generatedAt } = {}) {
     lines.push("(none defined)");
   } else {
     for (const def of tunnels) lines.push(summarizeTunnel(def));
+  }
+
+  // ── Credentials (secret-free summary) ──────────────────────────────────────
+  lines.push("");
+  lines.push(`--- credentials (${credentials.length}) ---`);
+  if (credentials.length === 0) {
+    lines.push("(none defined)");
+  } else {
+    for (const cred of credentials) lines.push(summarizeCredential(cred));
   }
 
   // ── Log tail (redacted) ────────────────────────────────────────────────────
@@ -142,4 +170,4 @@ function buildReport({ app = {}, tunnels = [], logs = [], generatedAt } = {}) {
   return `${lines.join("\n")}\n`;
 }
 
-module.exports = { buildReport, redact, summarizeTunnel };
+module.exports = { buildReport, redact, summarizeTunnel, summarizeCredential };

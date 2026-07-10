@@ -35,61 +35,136 @@ function readRawTunnels(dir) {
   return fs.readFileSync(path.join(dir, "tunnels.json"), "utf8");
 }
 
-function makeDef(over = {}) {
+function makeCred(cs, over = {}) {
+  return cs.create({
+    label: "prod",
+    user: "jason",
+    authType: "password",
+    password: "s3cr3t",
+    ...over,
+  });
+}
+
+function makeDef(credentialId, over = {}) {
   return {
     name: "prod db",
     localPort: 5432,
     destination: { host: "db.internal", port: 5432 },
-    sshServer: {
-      host: "bastion.example.com",
-      port: 22,
-      user: "jason",
-      auth: [{ type: "password", password: "s3cr3t" }],
-    },
-    jumps: [],
+    credentialId,
     ...over,
   };
 }
 
-test("create stamps id + defaults and returns a secret-free view", () => {
+test("create stamps id + defaults and returns a view with order + summary", () => {
   const dir = freshDir();
   try {
-    const ts = new Stores(dir).tunnelStore();
-    const created = ts.create(makeDef());
+    const stores = new Stores(dir);
+    const cred = makeCred(stores.credentialStore());
+    const created = stores.tunnelStore().create(makeDef(cred.id));
 
     assert.ok(created.id, "assigned an id");
     assert.equal(created.order, 0);
     assert.equal(created.enabled, true); // default
-    assert.equal(created.bindHost, "127.0.0.1"); // default loopback
-    assert.equal(created.keepAlive, false); // default
-
-    const authEntry = created.sshServer.auth[0];
-    assert.equal(authEntry.hasSecret, true, "renderer sees hasSecret");
-    assert.equal(authEntry.password, undefined, "plaintext never crosses IPC");
+    assert.deepEqual(created.jumpHostIds, []); // default
+    assert.equal(created.credentialId, cred.id);
+    assert.ok(
+      created.routeSummary.includes("db.internal:5432"),
+      "route summary built from the destination",
+    );
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("a password is stored encrypted and only decrypts in-process", () => {
+test("a tunnel record carries no secret; the credential holds the sealed one", () => {
   const dir = freshDir();
   try {
-    const ts = new Stores(dir).tunnelStore();
-    const created = ts.create(makeDef());
+    const stores = new Stores(dir);
+    const cred = makeCred(stores.credentialStore());
+    const created = stores.tunnelStore().create(makeDef(cred.id));
 
-    // On disk: ciphertext, never the plaintext.
     const raw = readRawTunnels(dir);
     assert.ok(!raw.includes("s3cr3t"), "no plaintext secret on disk");
     assert.ok(raw.includes("enck:v1:"), "sealed with the app-key backend");
-    assert.ok(raw.includes('"enc"'), "stored under the { enc } shape");
 
-    // Renderer read: hasSecret, no value.
-    assert.equal(ts.get(created.id).sshServer.auth[0].hasSecret, true);
-    assert.equal(ts.get(created.id).sshServer.auth[0].password, undefined);
+    const view = stores.tunnelStore().get(created.id);
+    assert.equal(view.password, undefined, "a tunnel has no secret field");
+    assert.equal(view.credentialId, cred.id);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
 
-    // Engine read (in-process): decrypted plaintext.
-    const decrypted = ts.getDecrypted(created.id);
-    assert.equal(decrypted.sshServer.auth[0].password, "s3cr3t");
+test("getDecrypted resolves an implied SSH server (blank sshHost)", () => {
+  const dir = freshDir();
+  try {
+    const stores = new Stores(dir);
+    const cred = makeCred(stores.credentialStore());
+    const created = stores.tunnelStore().create(makeDef(cred.id));
+
+    const dec = stores.tunnelStore().getDecrypted(created.id);
+    // SSH into the destination box itself, forward to loopback on it.
+    assert.equal(dec.sshServer.host, "db.internal");
+    assert.equal(dec.sshServer.port, 22);
+    assert.equal(dec.sshServer.user, "jason");
+    assert.equal(dec.sshServer.auth[0].type, "password");
+    assert.equal(dec.sshServer.auth[0].password, "s3cr3t"); // decrypted in-process
+    assert.deepEqual(dec.destination, { host: "127.0.0.1", port: 5432 });
+    assert.equal(dec.bindHost, "127.0.0.1");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("getDecrypted resolves a bastion (sshHost set) forwarding to the dest host", () => {
+  const dir = freshDir();
+  try {
+    const stores = new Stores(dir);
+    const cred = makeCred(stores.credentialStore());
+    const t = stores
+      .tunnelStore()
+      .create(
+        makeDef(cred.id, { sshHost: "bastion.example.com", sshPort: 2222 }),
+      );
+
+    const dec = stores.tunnelStore().getDecrypted(t.id);
+    assert.equal(dec.sshServer.host, "bastion.example.com");
+    assert.equal(dec.sshServer.port, 2222);
+    assert.deepEqual(dec.destination, { host: "db.internal", port: 5432 });
+    // The list summary flags the bastion.
+    assert.ok(
+      stores
+        .tunnelStore()
+        .get(t.id)
+        .routeSummary.includes("via bastion.example.com"),
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("jump hosts resolve into the chain in order, decrypted", () => {
+  const dir = freshDir();
+  try {
+    const stores = new Stores(dir);
+    const cred = makeCred(stores.credentialStore());
+    const jh = stores.jumpHostStore().create({
+      label: "relay",
+      host: "relay1",
+      port: 22,
+      credentialId: cred.id,
+    });
+    const t = stores
+      .tunnelStore()
+      .create(makeDef(cred.id, { jumpHostIds: [jh.id] }));
+
+    const dec = stores.tunnelStore().getDecrypted(t.id);
+    assert.equal(dec.jumps.length, 1);
+    assert.equal(dec.jumps[0].host, "relay1");
+    assert.equal(dec.jumps[0].auth[0].password, "s3cr3t");
+    assert.ok(
+      stores.tunnelStore().get(t.id).routeSummary.includes("jump: relay"),
+    );
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -98,15 +173,16 @@ test("a password is stored encrypted and only decrypts in-process", () => {
 test("definitions survive an app restart (new Stores over the same dir)", () => {
   const dir = freshDir();
   try {
-    const created = new Stores(dir).tunnelStore().create(makeDef());
+    const stores = new Stores(dir);
+    const cred = makeCred(stores.credentialStore());
+    const created = stores.tunnelStore().create(makeDef(cred.id));
 
-    // Simulate a restart: a brand-new factory re-reads the same app key file.
-    const ts2 = new Stores(dir).tunnelStore();
-    const list = ts2.list();
+    const stores2 = new Stores(dir);
+    const list = stores2.tunnelStore().list();
     assert.equal(list.length, 1);
     assert.equal(list[0].id, created.id);
     assert.equal(
-      ts2.getDecrypted(created.id).sshServer.auth[0].password,
+      stores2.tunnelStore().getDecrypted(created.id).sshServer.auth[0].password,
       "s3cr3t",
     );
   } finally {
@@ -114,120 +190,18 @@ test("definitions survive an app restart (new Stores over the same dir)", () => 
   }
 });
 
-test("a key passphrase is sealed and round-trips just like a password", () => {
+test("an update that changes only the name keeps its references", () => {
   const dir = freshDir();
   try {
-    const ts = new Stores(dir).tunnelStore();
-    const created = ts.create(
-      makeDef({
-        sshServer: {
-          host: "h",
-          port: 22,
-          user: "u",
-          auth: [
-            {
-              type: "key",
-              privateKeyPath: "/home/u/.ssh/id",
-              passphrase: "phr@se",
-            },
-          ],
-        },
-      }),
-    );
+    const stores = new Stores(dir);
+    const cred = makeCred(stores.credentialStore());
+    const created = stores.tunnelStore().create(makeDef(cred.id));
 
-    const raw = readRawTunnels(dir);
-    assert.ok(!raw.includes("phr@se"), "no plaintext passphrase on disk");
-    assert.ok(raw.includes("/home/u/.ssh/id"), "the key PATH is not a secret");
-    assert.equal(created.sshServer.auth[0].hasSecret, true);
-    assert.equal(created.sshServer.auth[0].passphrase, undefined);
-    assert.equal(
-      ts.getDecrypted(created.id).sshServer.auth[0].passphrase,
-      "phr@se",
-    );
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("an update that never touches the secret keeps it (no clobber)", () => {
-  const dir = freshDir();
-  try {
-    const ts = new Stores(dir).tunnelStore();
-    const created = ts.create(makeDef());
-
-    const updated = ts.update(created.id, { name: "renamed" });
+    const updated = stores
+      .tunnelStore()
+      .update(created.id, { name: "renamed" });
     assert.equal(updated.name, "renamed");
-    assert.equal(updated.sshServer.auth[0].hasSecret, true);
-    assert.equal(
-      ts.getDecrypted(created.id).sshServer.auth[0].password,
-      "s3cr3t",
-    );
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("hasSecret:true with no value retains the on-disk ciphertext", () => {
-  const dir = freshDir();
-  try {
-    const ts = new Stores(dir).tunnelStore();
-    const created = ts.create(makeDef());
-
-    // Renderer sends the auth entry back exactly as it received it.
-    ts.update(created.id, {
-      sshServer: {
-        host: "bastion.example.com",
-        port: 2222, // an unrelated edit
-        user: "jason",
-        auth: [{ type: "password", hasSecret: true }],
-      },
-    });
-
-    assert.equal(ts.get(created.id).sshServer.port, 2222);
-    assert.equal(
-      ts.getDecrypted(created.id).sshServer.auth[0].password,
-      "s3cr3t",
-    );
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("re-entering a secret replaces it; omitting hasSecret clears it", () => {
-  const dir = freshDir();
-  try {
-    const ts = new Stores(dir).tunnelStore();
-    const created = ts.create(makeDef());
-
-    // Re-enter a new password.
-    ts.update(created.id, {
-      sshServer: {
-        host: "h",
-        port: 22,
-        user: "jason",
-        auth: [{ type: "password", password: "rotated" }],
-      },
-    });
-    assert.equal(
-      ts.getDecrypted(created.id).sshServer.auth[0].password,
-      "rotated",
-    );
-
-    // Clear it (no hasSecret, no value).
-    ts.update(created.id, {
-      sshServer: {
-        host: "h",
-        port: 22,
-        user: "jason",
-        auth: [{ type: "password" }],
-      },
-    });
-    assert.equal(ts.get(created.id).sshServer.auth[0].hasSecret, false);
-    assert.equal(
-      ts.getDecrypted(created.id).sshServer.auth[0].password,
-      undefined,
-    );
-    assert.ok(!readRawTunnels(dir).includes("rotated"));
+    assert.equal(updated.credentialId, cred.id);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -236,10 +210,12 @@ test("re-entering a secret replaces it; omitting hasSecret clears it", () => {
 test("list is ordered, reorder rewrites order, delete reindexes", () => {
   const dir = freshDir();
   try {
-    const ts = new Stores(dir).tunnelStore();
-    const a = ts.create(makeDef({ name: "a" }));
-    const b = ts.create(makeDef({ name: "b" }));
-    const c = ts.create(makeDef({ name: "c" }));
+    const stores = new Stores(dir);
+    const ts = stores.tunnelStore();
+    const cred = makeCred(stores.credentialStore());
+    const a = ts.create(makeDef(cred.id, { name: "a" }));
+    const b = ts.create(makeDef(cred.id, { name: "b" }));
+    const c = ts.create(makeDef(cred.id, { name: "c" }));
 
     assert.deepEqual(
       ts.list().map((t) => t.name),
@@ -276,13 +252,39 @@ test("list is ordered, reorder rewrites order, delete reindexes", () => {
 test("create rejects an invalid definition with field-keyed errors", () => {
   const dir = freshDir();
   try {
-    const ts = new Stores(dir).tunnelStore();
+    const stores = new Stores(dir);
+    const cred = makeCred(stores.credentialStore());
     assert.throws(
-      () => ts.create(makeDef({ localPort: 99999 })),
+      () => stores.tunnelStore().create(makeDef(cred.id, { localPort: 99999 })),
       (err) =>
         err.code === "INVALID_DEFINITION" && Boolean(err.errors.localPort),
     );
-    assert.equal(ts.list().length, 0, "nothing was written");
+    assert.equal(stores.tunnelStore().list().length, 0, "nothing was written");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("create rejects a dangling credential / jump-host reference", () => {
+  const dir = freshDir();
+  try {
+    const stores = new Stores(dir);
+    const cred = makeCred(stores.credentialStore());
+
+    assert.throws(
+      () => stores.tunnelStore().create(makeDef("no-such-cred")),
+      (err) =>
+        err.code === "INVALID_DEFINITION" && Boolean(err.errors.credentialId),
+    );
+    assert.throws(
+      () =>
+        stores
+          .tunnelStore()
+          .create(makeDef(cred.id, { jumpHostIds: ["no-such-jump"] })),
+      (err) =>
+        err.code === "INVALID_DEFINITION" &&
+        Boolean(err.errors["jumpHostIds[0]"]),
+    );
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

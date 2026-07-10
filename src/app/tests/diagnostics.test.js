@@ -34,19 +34,17 @@ test("the header carries generatedAt and every app field", () => {
   assert.ok(report.endsWith("\n"));
 });
 
-test("tunnels are summarized without any auth values", () => {
+test("tunnels are summarized without any secret material", () => {
   const report = buildReport({
     tunnels: [
       {
         name: "Prod DB",
         localPort: 5432,
         destination: { host: "db.internal", port: 5432 },
-        sshServer: {
-          host: "bastion",
-          port: 22,
-          auth: [{ type: "password", hasSecret: true }],
-        },
-        jumps: [{ host: "jump1", auth: [{ type: "agent" }] }],
+        sshHost: "bastion",
+        sshPort: 22,
+        credentialId: "cred-1",
+        jumpHostIds: ["jump-1"],
         enabled: true,
       },
     ],
@@ -54,8 +52,32 @@ test("tunnels are summarized without any auth values", () => {
   assert.ok(report.includes("--- tunnels (1) ---"));
   assert.ok(report.includes("Prod DB"));
   assert.ok(report.includes("local :5432 → db.internal:5432 via bastion:22"));
-  assert.ok(report.includes("auth: password/agent"));
   assert.ok(report.includes("jumps: 1"));
+  assert.ok(report.includes("credential: set"));
+});
+
+test("credentials are summarized by label + type, never their secret", () => {
+  const report = buildReport({
+    credentials: [
+      {
+        id: "c1",
+        label: "Prod key",
+        user: "jason",
+        authType: "key",
+        hasSecret: true,
+      },
+      {
+        id: "c2",
+        label: "Agent",
+        user: "jason",
+        authType: "agent",
+        hasSecret: false,
+      },
+    ],
+  });
+  assert.ok(report.includes("--- credentials (2) ---"));
+  assert.ok(report.includes("Prod key: key (secret set)"));
+  assert.ok(report.includes("Agent: agent"));
 });
 
 test("no logs and empty logs render their placeholders", () => {
@@ -111,12 +133,12 @@ test("a report never leaks a secret that slipped into a log line", () => {
   assert.ok(report.includes("[redacted]"));
 });
 
-test("summarizeTunnel reports 'none' when there is no auth", () => {
+test("summarizeTunnel marks a tunnel with no bastion as direct", () => {
   const line = summarizeTunnel({
     name: "x",
     localPort: 1,
     destination: { host: "h", port: 2 },
-    sshServer: { host: "s", port: 22 },
   });
-  assert.ok(line.includes("auth: none"));
+  assert.ok(line.includes("(direct)"));
+  assert.ok(line.includes("credential: none"));
 });

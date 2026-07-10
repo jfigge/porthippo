@@ -28,30 +28,166 @@
  * documents are always current; the upgraded shape is persisted lazily on the
  * next normal save (we do NOT eagerly rewrite files on load).
  *
- * Feature 10 ships schema v1, so `MIGRATIONS` is empty; later shape changes append
- * one type-guarded transform each (see Rest Hippo's migrations.js for the pattern).
+ * Feature 10 ships schema v1; Feature 45 adds the v1→v2 transform that lifts each
+ * tunnel's embedded auth into reusable `credentials[]` and its inline jump hosts
+ * into reusable `jumpHosts[]`, rewriting the tunnel to reference them by id.
  *
  * Rules for migration functions:
  *   - Pure and synchronous — no I/O, no mutation of the input (return a new object).
  *   - Each bumps the schema by exactly one version; `migrate` handles stamping.
+ *   - Type-guarded and idempotent: `migrate()` runs on EVERY stored document (and
+ *     on every write, before the version stamp), so a transform must inspect a
+ *     discriminating field, pass unrelated shapes through untouched, and be a
+ *     no-op when applied to an already-migrated document.
  */
 "use strict";
 
 /** The version assumed for any document lacking a valid `schemaVersion`. */
 const BASE_SCHEMA_VERSION = 1;
 
+const AUTH_TYPES = ["agent", "key", "password"];
+const DEFAULT_SSH_PORT = 22;
+
+/**
+ * Extract the single primary auth method + user of an old-shape hop into a
+ * credential body `{ user, authType, keyPath?, <sealed secret> }`. Only `auth[0]`
+ * (the highest-priority method) is carried — Feature 45 credentials hold one
+ * method — so a hop that listed several methods keeps its first. Sealed secret
+ * objects (`{ enc }`) are relocated verbatim, never decrypted.
+ */
+function credentialFromHop(hop) {
+  const h = hop && typeof hop === "object" ? hop : {};
+  const entry = (Array.isArray(h.auth) ? h.auth : [])[0] || { type: "agent" };
+  const authType = AUTH_TYPES.includes(entry.type) ? entry.type : "agent";
+  const cred = { user: typeof h.user === "string" ? h.user : "", authType };
+  if (authType === "key") {
+    if (typeof entry.privateKeyPath === "string")
+      cred.keyPath = entry.privateKeyPath;
+    if (entry.passphrase !== undefined) cred.passphrase = entry.passphrase;
+  } else if (authType === "password") {
+    if (entry.password !== undefined) cred.password = entry.password;
+  }
+  return cred;
+}
+
+/** Dedupe key over a credential's CONTENT (never its id/label). */
+function credentialKey(c) {
+  return JSON.stringify({
+    user: c.user ?? "",
+    authType: c.authType,
+    keyPath: c.keyPath,
+    password: c.password,
+    passphrase: c.passphrase,
+  });
+}
+
+/** Dedupe key over a jump host's endpoint + credential. */
+function jumpKey(j) {
+  return JSON.stringify({
+    host: j.host,
+    port: j.port,
+    credentialId: j.credentialId,
+  });
+}
+
+/**
+ * v1 → v2: promote embedded auth / inline jump hosts to reusable, referenced
+ * records. Type-guarded to the tunnels document and idempotent (a tunnel already
+ * in reference shape has no `sshServer`, so it is passed through untouched).
+ */
+function extractCredentialsAndJumpHosts(doc) {
+  if (!doc || typeof doc !== "object" || !Array.isArray(doc.tunnels)) {
+    return doc; // not the tunnels document — nothing to do
+  }
+
+  const embedded = doc.tunnels.some((t) => t && t.sshServer);
+  if (!embedded) {
+    // Already reference-shaped: just guarantee the sibling arrays exist.
+    if (Array.isArray(doc.credentials) && Array.isArray(doc.jumpHosts)) {
+      return doc;
+    }
+    return {
+      ...doc,
+      credentials: Array.isArray(doc.credentials) ? doc.credentials : [],
+      jumpHosts: Array.isArray(doc.jumpHosts) ? doc.jumpHosts : [],
+    };
+  }
+
+  const credentials = Array.isArray(doc.credentials)
+    ? [...doc.credentials]
+    : [];
+  const jumpHosts = Array.isArray(doc.jumpHosts) ? [...doc.jumpHosts] : [];
+  const credByKey = new Map();
+  const jumpByKey = new Map();
+  for (const c of credentials)
+    if (c && c.id) credByKey.set(credentialKey(c), c.id);
+  for (const j of jumpHosts) if (j && j.id) jumpByKey.set(jumpKey(j), j.id);
+  let credSeq = credentials.length;
+  let jumpSeq = jumpHosts.length;
+
+  const internCredential = (hop) => {
+    const body = credentialFromHop(hop);
+    const key = credentialKey(body);
+    if (credByKey.has(key)) return credByKey.get(key);
+    const id = `cred-${credSeq++}`;
+    credentials.push({ id, label: body.user || "credential", ...body });
+    credByKey.set(key, id);
+    return id;
+  };
+
+  const internJumpHost = (hop) => {
+    const h = hop && typeof hop === "object" ? hop : {};
+    const credentialId = internCredential(h);
+    const jh = {
+      label: (typeof h.host === "string" && h.host) || "jump host",
+      host: typeof h.host === "string" ? h.host : "",
+      port: Number.isInteger(h.port) ? h.port : DEFAULT_SSH_PORT,
+      credentialId,
+    };
+    const key = jumpKey(jh);
+    if (jumpByKey.has(key)) return jumpByKey.get(key);
+    const id = `jump-${jumpSeq++}`;
+    jumpHosts.push({ id, ...jh });
+    jumpByKey.set(key, id);
+    return id;
+  };
+
+  const tunnels = doc.tunnels.map((t) => {
+    if (!t || typeof t !== "object" || !t.sshServer) return t;
+    const server = t.sshServer;
+    const out = {
+      id: t.id,
+      name: t.name,
+      localPort: t.localPort,
+      destination: t.destination,
+      // Behaviour-preserving: the old relay forwarded to destHost:destPort AS THE
+      // SSH SERVER RESOLVED IT, which is exactly what a NON-BLANK sshHost means in
+      // v2. So set sshHost explicitly (never blank) even when the server was the
+      // destination box — blank is reserved for newly-authored v2 tunnels.
+      sshHost: server.host,
+      sshPort: Number.isInteger(server.port) ? server.port : DEFAULT_SSH_PORT,
+      credentialId: internCredential(server),
+      jumpHostIds: (Array.isArray(t.jumps) ? t.jumps : []).map(internJumpHost),
+      enabled: t.enabled,
+      keepAlive: t.keepAlive,
+      autoReconnect: t.autoReconnect,
+    };
+    if (t.bindHost !== undefined) out.bindHost = t.bindHost;
+    if (t.lingerMs !== undefined) out.lingerMs = t.lingerMs;
+    return out;
+  });
+
+  return { ...doc, tunnels, credentials, jumpHosts };
+}
+
 /**
  * Ordered migration functions. `MIGRATIONS[i]` upgrades a document from
  * version `i + BASE_SCHEMA_VERSION` to version `i + BASE_SCHEMA_VERSION + 1`.
  * Each is a pure `(doc) => doc` transform — no I/O, no input mutation.
  *
- * `migrate()` runs on EVERY stored document, so a future transform MUST be
- * type-guarded (inspect a discriminating field and pass unrelated shapes through
- * untouched).
- *
  * @type {Array<(doc: object) => object>}
  */
-const MIGRATIONS = [];
+const MIGRATIONS = [extractCredentialsAndJumpHosts];
 
 /** The version every freshly written / migrated document is stamped with. */
 const CURRENT_SCHEMA_VERSION = BASE_SCHEMA_VERSION + MIGRATIONS.length;

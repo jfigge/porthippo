@@ -50,36 +50,46 @@ function keychainMock() {
   };
 }
 
-// A tunnels.json document carrying two sealed secrets: an sshServer password and
-// a jump-host key passphrase (the two secret-bearing shapes Port Hippo stores).
+// A tunnels.json document carrying two sealed secrets on credential records: a
+// password credential and a key-passphrase credential (the two secret-bearing
+// shapes Port Hippo stores since Feature 45). A tunnel + jump host reference them
+// but hold no secret themselves.
 function tunnelsDoc(passwordEnc, passphraseEnc) {
   return {
+    credentials: [
+      {
+        id: "c1",
+        label: "db",
+        user: "u",
+        authType: "password",
+        password: { enc: passwordEnc },
+      },
+      {
+        id: "c2",
+        label: "key",
+        user: "u",
+        authType: "key",
+        keyPath: "/k",
+        passphrase: { enc: passphraseEnc },
+      },
+    ],
+    jumpHosts: [
+      {
+        id: "j1",
+        label: "bastion",
+        host: "bastion",
+        port: 22,
+        credentialId: "c2",
+      },
+    ],
     tunnels: [
       {
         id: "t1",
         name: "one",
         localPort: 5432,
-        sshServer: {
-          host: "db",
-          port: 22,
-          user: "u",
-          auth: [{ type: "password", password: { enc: passwordEnc } }],
-        },
-        jumps: [
-          {
-            host: "bastion",
-            port: 22,
-            user: "u",
-            auth: [
-              { type: "agent" },
-              {
-                type: "key",
-                privateKeyPath: "/k",
-                passphrase: { enc: passphraseEnc },
-              },
-            ],
-          },
-        ],
+        destination: { host: "db", port: 5432 },
+        credentialId: "c1",
+        jumpHostIds: ["j1"],
       },
     ],
   };
@@ -88,14 +98,10 @@ function tunnelsDoc(passwordEnc, passphraseEnc) {
 // Every sealed ciphertext string in a tunnels.json document (test-local walker).
 function sealedValues(doc) {
   const out = [];
-  for (const t of doc.tunnels || []) {
-    for (const hop of [t.sshServer, ...(t.jumps || [])]) {
-      for (const entry of (hop && hop.auth) || []) {
-        for (const field of ["password", "passphrase"]) {
-          if (entry[field] && typeof entry[field].enc === "string") {
-            out.push(entry[field].enc);
-          }
-        }
+  for (const cred of doc.credentials || []) {
+    for (const field of ["password", "passphrase"]) {
+      if (cred[field] && typeof cred[field].enc === "string") {
+        out.push(cred[field].enc);
       }
     }
   }

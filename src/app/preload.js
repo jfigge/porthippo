@@ -65,6 +65,31 @@ contextBridge.exposeInMainWorld("porthippo", {
     resume: (id) => ipcRenderer.invoke("tunnels:resume", id),
   },
 
+  // ── Reusable credentials (Feature 45) ─────────────────────────────────────
+  // Named SSH credentials a tunnel / jump host references by id. Reads return
+  // the secret as a `hasSecret` flag only; a create/update writes a NEW secret
+  // as a plaintext string or keeps an existing one by sending the record back
+  // with `hasSecret: true` and no value. Delete resolves to a `{ __hippoError,
+  // code: "IN_USE", references }` envelope when the credential is still in use.
+  credentials: {
+    list: () => ipcRenderer.invoke("credentials:list"),
+    get: (id) => ipcRenderer.invoke("credentials:get", id),
+    create: (cred) => ipcRenderer.invoke("credentials:create", cred),
+    update: (id, patch) => ipcRenderer.invoke("credentials:update", id, patch),
+    delete: (id) => ipcRenderer.invoke("credentials:delete", id),
+  },
+
+  // ── Reusable jump hosts (Feature 45) ──────────────────────────────────────
+  // Named SSH jump hosts (each references a credential); a tunnel holds an
+  // ordered list of their ids. Delete is guarded the same way as credentials.
+  jumpHosts: {
+    list: () => ipcRenderer.invoke("jumphosts:list"),
+    get: (id) => ipcRenderer.invoke("jumphosts:get", id),
+    create: (jump) => ipcRenderer.invoke("jumphosts:create", jump),
+    update: (id, patch) => ipcRenderer.invoke("jumphosts:update", id, patch),
+    delete: (id) => ipcRenderer.invoke("jumphosts:delete", id),
+  },
+
   // ── App settings ──────────────────────────────────────────────────────────
   settings: {
     get: () => ipcRenderer.invoke("settings:get"),

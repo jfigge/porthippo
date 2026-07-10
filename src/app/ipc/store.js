@@ -34,6 +34,9 @@
  * @param {(id: string) => void} [deps.afterWrite]  notified with the affected id
  *        after a successful definition create/update/delete so the Feature 20 engine
  *        can reconcile the running tunnel.
+ * @param {() => void} [deps.afterRefsWrite]  notified after a successful credential
+ *        / jump-host write so the engine can reconcile every tunnel that resolves
+ *        through the changed record.
  * @param {(settings: object) => void} [deps.afterSettingsWrite]  notified with the
  *        merged settings after a successful settings:set so main can apply platform
  *        side-effects (Feature 60 launch-at-login).
@@ -44,11 +47,19 @@ function registerStoreIPC({
   safeCall,
   safeCallWrite,
   afterWrite,
+  afterRefsWrite,
   afterSettingsWrite,
 }) {
   // Fire the reconcile hook only after a write that actually succeeded.
   const notify = (result, id) => {
     if (result && !result.__hippoError && id) afterWrite?.(id);
+    return result;
+  };
+
+  // A credential / jump-host write can change the resolved plan of many tunnels,
+  // so reconcile broadly (never scoped to one id) after a successful write.
+  const notifyRefs = (result) => {
+    if (result && !result.__hippoError) afterRefsWrite?.();
     return result;
   };
 
@@ -86,6 +97,82 @@ function registerStoreIPC({
   ipcMain.handle("tunnels:reorder", (_event, ids) =>
     safeCallWrite("tunnels:reorder", () =>
       getStores().tunnelStore().reorder(ids),
+    ),
+  );
+
+  // ── Reusable credentials (Feature 45) ───────────────────────────────────────
+
+  ipcMain.handle("credentials:list", () =>
+    safeCall(
+      "credentials:list",
+      () => getStores().credentialStore().list(),
+      [],
+    ),
+  );
+
+  ipcMain.handle("credentials:get", (_event, id) =>
+    safeCall(
+      "credentials:get",
+      () => getStores().credentialStore().get(id),
+      null,
+    ),
+  );
+
+  ipcMain.handle("credentials:create", (_event, cred) =>
+    notifyRefs(
+      safeCallWrite("credentials:create", () =>
+        getStores().credentialStore().create(cred),
+      ),
+    ),
+  );
+
+  ipcMain.handle("credentials:update", (_event, id, patch) =>
+    notifyRefs(
+      safeCallWrite("credentials:update", () =>
+        getStores().credentialStore().update(id, patch),
+      ),
+    ),
+  );
+
+  ipcMain.handle("credentials:delete", (_event, id) =>
+    notifyRefs(
+      safeCallWrite("credentials:delete", () =>
+        getStores().credentialStore().delete(id),
+      ),
+    ),
+  );
+
+  // ── Reusable jump hosts (Feature 45) ────────────────────────────────────────
+
+  ipcMain.handle("jumphosts:list", () =>
+    safeCall("jumphosts:list", () => getStores().jumpHostStore().list(), []),
+  );
+
+  ipcMain.handle("jumphosts:get", (_event, id) =>
+    safeCall("jumphosts:get", () => getStores().jumpHostStore().get(id), null),
+  );
+
+  ipcMain.handle("jumphosts:create", (_event, jump) =>
+    notifyRefs(
+      safeCallWrite("jumphosts:create", () =>
+        getStores().jumpHostStore().create(jump),
+      ),
+    ),
+  );
+
+  ipcMain.handle("jumphosts:update", (_event, id, patch) =>
+    notifyRefs(
+      safeCallWrite("jumphosts:update", () =>
+        getStores().jumpHostStore().update(id, patch),
+      ),
+    ),
+  );
+
+  ipcMain.handle("jumphosts:delete", (_event, id) =>
+    notifyRefs(
+      safeCallWrite("jumphosts:delete", () =>
+        getStores().jumpHostStore().delete(id),
+      ),
     ),
   );
 

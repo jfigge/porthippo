@@ -23,6 +23,8 @@ const {
   AUTH_TYPES,
   secretFieldForAuthType,
   validateDefinition,
+  validateCredential,
+  validateJumpHost,
 } = require("../validate");
 
 function validDef(over = {}) {
@@ -31,13 +33,8 @@ function validDef(over = {}) {
     localPort: 5432,
     bindHost: "127.0.0.1",
     destination: { host: "db.internal", port: 5432 },
-    sshServer: {
-      host: "bastion.example.com",
-      port: 22,
-      user: "jason",
-      auth: [{ type: "agent" }],
-    },
-    jumps: [],
+    credentialId: "cred-1",
+    jumpHostIds: [],
     lingerMs: 10000,
     keepAlive: false,
     ...over,
@@ -48,6 +45,19 @@ test("a well-formed definition validates clean", () => {
   const { valid, errors } = validateDefinition(validDef());
   assert.equal(valid, true);
   assert.deepEqual(errors, {});
+});
+
+test("sshHost / sshPort are optional (implied SSH server)", () => {
+  // Absent is fine — the resolver implies the SSH server from the destination.
+  assert.equal(validateDefinition(validDef()).valid, true);
+  // Present and well-formed is fine (a bastion override).
+  assert.equal(
+    validateDefinition(validDef({ sshHost: "bastion", sshPort: 2222 })).valid,
+    true,
+  );
+  // Present but malformed is rejected against its own key.
+  assert.ok(validateDefinition(validDef({ sshHost: "" })).errors.sshHost);
+  assert.ok(validateDefinition(validDef({ sshPort: 0 })).errors.sshPort);
 });
 
 test("localPort out of range is rejected with a field-keyed error", () => {
@@ -82,60 +92,27 @@ test("a missing / malformed destination is rejected", () => {
   assert.ok(badHost.errors["destination.host"]);
 });
 
-test("sshServer is required and validated as a hop", () => {
+test("a credentialId is structurally required", () => {
   assert.ok(
-    validateDefinition(validDef({ sshServer: undefined })).errors.sshServer,
+    validateDefinition(validDef({ credentialId: undefined })).errors
+      .credentialId,
   );
-  const noUser = validateDefinition(
-    validDef({ sshServer: { host: "h", port: 22, auth: [{ type: "agent" }] } }),
+  assert.ok(
+    validateDefinition(validDef({ credentialId: "" })).errors.credentialId,
   );
-  assert.ok(noUser.errors["sshServer.user"]);
 });
 
-test("a hop must offer at least one auth method", () => {
-  const { errors } = validateDefinition(
-    validDef({ sshServer: { host: "h", port: 22, user: "u", auth: [] } }),
+test("jumpHostIds must be an array of strings when present", () => {
+  assert.ok(
+    validateDefinition(validDef({ jumpHostIds: "nope" })).errors.jumpHostIds,
   );
-  assert.ok(errors["sshServer.auth"]);
-});
-
-test("auth entries are validated per type", () => {
-  const badType = validateDefinition(
-    validDef({
-      sshServer: { host: "h", port: 22, user: "u", auth: [{ type: "totp" }] },
-    }),
+  const badEntry = validateDefinition(validDef({ jumpHostIds: ["a", 5, ""] }));
+  assert.ok(badEntry.errors["jumpHostIds[1]"]);
+  assert.ok(badEntry.errors["jumpHostIds[2]"]);
+  assert.equal(
+    validateDefinition(validDef({ jumpHostIds: ["a", "b"] })).valid,
+    true,
   );
-  assert.ok(badType.errors["sshServer.auth[0].type"]);
-
-  const keyNoPath = validateDefinition(
-    validDef({
-      sshServer: { host: "h", port: 22, user: "u", auth: [{ type: "key" }] },
-    }),
-  );
-  assert.ok(keyNoPath.errors["sshServer.auth[0].privateKeyPath"]);
-
-  // A password auth with no value is fine (write-only secret may be set later).
-  const pwNoValue = validateDefinition(
-    validDef({
-      sshServer: {
-        host: "h",
-        port: 22,
-        user: "u",
-        auth: [{ type: "password" }],
-      },
-    }),
-  );
-  assert.equal(pwNoValue.valid, true);
-});
-
-test("the jump chain is validated element by element", () => {
-  assert.ok(validateDefinition(validDef({ jumps: "nope" })).errors.jumps);
-  const badJump = validateDefinition(
-    validDef({
-      jumps: [{ host: "", port: 22, user: "u", auth: [{ type: "agent" }] }],
-    }),
-  );
-  assert.ok(badJump.errors["jumps[0].host"]);
 });
 
 test("lingerMs / keepAlive / name are type-checked", () => {
@@ -147,14 +124,9 @@ test("lingerMs / keepAlive / name are type-checked", () => {
 });
 
 test("autoReconnect is an optional boolean", () => {
-  // Absent is fine (it defaults to false in the store).
   assert.equal(validateDefinition(validDef()).valid, true);
   assert.equal(
     validateDefinition(validDef({ autoReconnect: true })).valid,
-    true,
-  );
-  assert.equal(
-    validateDefinition(validDef({ autoReconnect: false })).valid,
     true,
   );
   assert.ok(
@@ -167,6 +139,70 @@ test("a non-object definition is rejected wholesale", () => {
   assert.equal(validateDefinition([]).valid, false);
   assert.equal(validateDefinition("x").valid, false);
 });
+
+// ── Credentials ────────────────────────────────────────────────────────────
+
+test("a well-formed credential validates clean per auth type", () => {
+  assert.equal(
+    validateCredential({ label: "L", user: "u", authType: "agent" }).valid,
+    true,
+  );
+  assert.equal(
+    validateCredential({
+      label: "L",
+      user: "u",
+      authType: "key",
+      keyPath: "/k",
+    }).valid,
+    true,
+  );
+  // A password auth with no value is fine (write-only secret set later).
+  assert.equal(
+    validateCredential({ label: "L", user: "u", authType: "password" }).valid,
+    true,
+  );
+});
+
+test("credential label / user / authType are required, keyPath for key auth", () => {
+  assert.ok(validateCredential({ user: "u", authType: "agent" }).errors.label);
+  assert.ok(validateCredential({ label: "L", authType: "agent" }).errors.user);
+  assert.ok(
+    validateCredential({ label: "L", user: "u", authType: "totp" }).errors
+      .authType,
+  );
+  assert.ok(
+    validateCredential({ label: "L", user: "u", authType: "key" }).errors
+      .keyPath,
+  );
+});
+
+// ── Jump hosts ─────────────────────────────────────────────────────────────
+
+test("a well-formed jump host validates clean", () => {
+  const { valid, errors } = validateJumpHost({
+    label: "relay",
+    host: "relay.internal",
+    port: 22,
+    credentialId: "cred-1",
+  });
+  assert.equal(valid, true);
+  assert.deepEqual(errors, {});
+});
+
+test("jump host label / host / port / credentialId are checked", () => {
+  const bad = validateJumpHost({
+    label: "",
+    host: "",
+    port: 0,
+    credentialId: "",
+  });
+  assert.ok(bad.errors.label);
+  assert.ok(bad.errors.host);
+  assert.ok(bad.errors.port);
+  assert.ok(bad.errors.credentialId);
+});
+
+// ── Auth taxonomy ──────────────────────────────────────────────────────────
 
 test("the auth taxonomy maps types to their secret field", () => {
   assert.deepEqual(AUTH_TYPES, ["agent", "key", "password"]);

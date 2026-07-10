@@ -232,6 +232,11 @@ function copyDiagnostics() {
       () => getStores().tunnelStore().list(),
       [],
     ),
+    credentials: safeCall(
+      "diagnostics:credentials",
+      () => getStores().credentialStore().list(),
+      [],
+    ),
     logs: logger.readFiles(),
     generatedAt: new Date().toISOString(),
   });
@@ -376,6 +381,15 @@ function registerIpc() {
         ?.reconcile(id)
         .catch((err) =>
           console.error(`[main] reconcile ${id} error:`, err && err.message),
+        );
+    },
+    // A credential / jump-host edit can change the resolved plan of many tunnels;
+    // reconcile the whole engine so every referencing tunnel re-reads it.
+    afterRefsWrite: () => {
+      getEngine()
+        ?.reconcileAll()
+        .catch((err) =>
+          console.error("[main] reconcileAll error:", err && err.message),
         );
     },
     // After a settings change, apply the platform side-effects the renderer
