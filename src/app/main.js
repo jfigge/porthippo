@@ -297,13 +297,14 @@ const disarmAll = () =>
     );
 
 function createTrayPresence() {
-  const colorIconPath = path.join(__dirname, "..", "web", "icons", "64x64.png");
   // Rebuild the tray image from the current status so its badge tracks the
-  // connected-tunnel count on every state change.
+  // connected-tunnel count on every state change. The glyph is monochrome; on
+  // macOS it is a template image the menu bar tints for the active appearance.
+  const template = process.platform === "darwin";
   const renderImage = (status) =>
     buildTrayImage({
       nativeImage,
-      colorIconPath,
+      template,
       count: (status && status.connected) || 0,
     });
   _tray = createTray({
