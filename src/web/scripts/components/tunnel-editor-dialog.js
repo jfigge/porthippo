@@ -187,7 +187,9 @@ export class TunnelEditorDialog {
         host: this.#form.destHost.trim(),
         port: toPort(this.#form.destPort),
       },
-      credentialId: this.#form.credentialId,
+      // Read the live picker (like jumpHostIds) — it drops a since-deleted id to
+      // "", whereas #form.credentialId can retain a stale id the picker rejected.
+      credentialId: this.#credPicker.value,
       jumpHostIds: this.#jumpPicker.value,
       keepAlive: this.#form.keepAlive,
       enabled: this.#form.enabled,

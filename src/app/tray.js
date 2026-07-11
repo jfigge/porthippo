@@ -145,4 +145,4 @@ function createTray({ Tray, Menu, image, renderImage, t, getStatus, actions }) {
   };
 }
 
-module.exports = { createTray };
+module.exports = { createTray, LIVE_STATES };

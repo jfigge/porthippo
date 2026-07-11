@@ -134,6 +134,33 @@ test("a tunnel-state broadcast updates the badge", async () => {
   assert.ok(betaRow.querySelector(".def-badge--connected"));
 });
 
+test("a tunnel-state broadcast preserves keyboard focus on the arm button", async () => {
+  const view = await mount();
+  const row = view.element.querySelectorAll(".def-row")[0];
+  const armBtn = row.querySelector(".def-arm-btn");
+  armBtn.focus();
+  assert.equal(
+    document.activeElement,
+    armBtn,
+    "focus starts on the arm button",
+  );
+
+  window.dispatchEvent(
+    new CustomEvent("porthippo:tunnel-state", {
+      detail: { id: "a", state: "connected" },
+    }),
+  );
+
+  // The row updated in place, so the SAME button is still there and focused — a
+  // full re-render would have destroyed it and dropped focus to <body>.
+  const armBtnAfter = view.element
+    .querySelectorAll(".def-row")[0]
+    .querySelector(".def-arm-btn");
+  assert.equal(armBtnAfter, armBtn, "the arm button was not recreated");
+  assert.equal(document.activeElement, armBtn, "focus is preserved");
+  assert.ok(row.querySelector(".def-badge--connected"), "badge still updated");
+});
+
 test("deleting confirms then calls delete", async () => {
   const calls = {};
   const view = await mount(fixtureDefs(), calls);

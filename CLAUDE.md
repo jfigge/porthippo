@@ -60,7 +60,7 @@ Electron main process (src/app/main.js)
 - The main process owns all filesystem I/O, sockets, and SSH (via `ssh2`). The renderer is
   sandboxed and communicates exclusively via `window.porthippo.*`.
 - Request/response IPC channels are registered in `ipc/store.js` (CRUD + settings +
-  `hostkeys:list|revoke`), `ipc/engine.js` (`tunnels:arm|disarm|status|apply`,
+  `hostkeys:list|revoke`), `ipc/engine.js` (`tunnels:arm|disarm|status|pause|resume|apply`,
   `hostkeys:trust|reject`), `ipc/dialog.js` (`dialog:open-key-file`), `ipc/shell.js`
   (`i18n:load`, `diagnostics:copy`) and `ipc/secret-storage.js`
   (`secret-storage:get-mode|set-mode|unlock|lock`), and exposed through `preload.js`; **keep

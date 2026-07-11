@@ -20,8 +20,8 @@ import assert from "node:assert/strict";
 import { AboutDialog } from "../components/about-dialog.js";
 import { PopupManager } from "../popup-manager.js";
 
-// PopupManager caches one overlay in module state; keep a single DOM for the file
-// and just close the popup between tests (mirrors settings-popup.test.js).
+// PopupManager keeps its active popup in module state; keep a single DOM for the
+// file and just close the popup between tests (mirrors settings-popup.test.js).
 resetDom();
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
@@ -98,8 +98,8 @@ test("Close and mask click both dismiss the dialog", async () => {
 
   AboutDialog.open();
   await tick();
-  // A click on the overlay mask (target === overlay) dismisses via onMaskClick.
-  document.querySelector(".popup-overlay").click();
+  // A click on the backdrop (target === the dialog itself) dismisses via onMaskClick.
+  document.querySelector(".popup-dialog").click();
   assert.equal(
     document.querySelector(".about-dialog"),
     null,

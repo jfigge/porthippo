@@ -103,6 +103,9 @@ class Tunnel {
    * @param {(def: object) => number} deps.getLingerMs  effective linger for a def
    * @param {() => number} [deps.now]  injected clock for stats (ms epoch; tests)
    * @param {typeof import('fs').readFileSync} [deps.readFileSync]  key reads (tests)
+   * @param {number} [deps.baseBackoffMs]  reconnect backoff base (tests shrink it)
+   * @param {number} [deps.maxBackoffMs]  reconnect backoff ceiling (tests)
+   * @param {number} [deps.maxReconnectAttempts]  attempts before give-up (tests)
    */
   constructor(def, deps) {
     this.#def = def;
@@ -428,23 +431,35 @@ class Tunnel {
   #attemptReconnect() {
     if (this.#disposed || this.#reconnectTimer) return;
     this.#setState("connecting");
-    const delay = Math.min(
-      MAX_BACKOFF_MS,
-      BASE_BACKOFF_MS * 2 ** this.#reconnectAttempts,
-    );
+    const base = this.#deps.baseBackoffMs ?? BASE_BACKOFF_MS;
+    const max = this.#deps.maxBackoffMs ?? MAX_BACKOFF_MS;
+    const delay = Math.min(max, base * 2 ** this.#reconnectAttempts);
     this.#reconnectTimer = setTimeout(() => {
       this.#reconnectTimer = null;
       if (this.#disposed || !this.#listener) return;
-      this.#ensureConnected().catch(() => {
-        this.#reconnectAttempts += 1;
-        if (this.#reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-          this.#reconnectAttempts = 0;
-          this.#setState("error");
-        } else {
-          this.#attemptReconnect();
-        }
-      });
+      this.#ensureConnected().catch(() => this.#onReconnectFailed());
     }, delay);
+  }
+
+  /** A backoff reconnect attempt failed: retry, hold, or (finally) give up. */
+  #onReconnectFailed() {
+    const maxAttempts =
+      this.#deps.maxReconnectAttempts ?? MAX_RECONNECT_ATTEMPTS;
+    this.#reconnectAttempts += 1;
+    if (this.#reconnectAttempts < maxAttempts) {
+      this.#attemptReconnect();
+      return;
+    }
+    if (this.#def.keepAlive) {
+      // keepAlive has no clients to trigger a later retry, so it must never give
+      // up: pin the delay at the max backoff and keep trying until it reconnects
+      // or is disarmed. (autoReconnect, below, can stop and retry on next access.)
+      this.#reconnectAttempts = maxAttempts;
+      this.#attemptReconnect();
+      return;
+    }
+    this.#reconnectAttempts = 0;
+    this.#setState("error"); // next local access re-establishes the chain
   }
 
   /** A connect attempt failed (lazy connect, eager keepAlive, or reconnect). */

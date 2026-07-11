@@ -180,6 +180,18 @@ export const EN = {
   "hostkey.changed.message":
     "The key for {host}:{port} has CHANGED since you last connected. This can indicate a machine-in-the-middle attack, so the connection was refused.",
 
+  // ── Auto-update (Feature 70) ────────────────────────────────────────────
+  "update.title": "Software update",
+  "update.available": "Update {version} found — downloading in the background…",
+  "update.upToDate": "You’re on the latest version.",
+  "update.devBuild": "This is a development build; updates are disabled.",
+  "update.error": "Update check failed: {message}",
+  "update.ready.title": "Update ready",
+  "update.ready.message":
+    "Version {version} has been downloaded. Restart now to install it?",
+  "update.ready.restart": "Restart & install",
+  "update.ready.later": "Later",
+
   // ── App shell / header (Feature 60) ─────────────────────────────────────
   "header.settings": "Settings",
   "header.about": "About Port Hippo",

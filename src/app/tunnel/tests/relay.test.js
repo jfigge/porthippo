@@ -125,7 +125,11 @@ test("local socket closing during the channel-open window fires onClose exactly 
 
   // With the fix, onClose fired immediately from the socket-close handler wired
   // before forwardOut; the old code missed this close entirely (0 calls).
-  assert.equal(closeCount, 1, "onClose fired once when the socket closed early");
+  assert.equal(
+    closeCount,
+    1,
+    "onClose fired once when the socket closed early",
+  );
   assert.equal(stats.opened, 0, "the channel never opened, so no connOpened");
   assert.equal(stats.closed, 0, "and no connClosed to balance a never-open");
 

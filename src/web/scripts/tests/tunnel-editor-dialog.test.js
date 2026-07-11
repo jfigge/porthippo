@@ -164,6 +164,21 @@ test("editing a tunnel that uses advanced fields opens Advanced", async () => {
   assert.equal(q(dlg, ".editor-input-sshHost").value, "bastion");
 });
 
+test("editing a tunnel whose credential was deleted drops the stale id from the payload", async () => {
+  const dlg = mount(); // the stub's credential list only has "c1"
+  await dlg.openEdit({
+    id: "t1",
+    name: "Orphaned",
+    localPort: 5432,
+    destination: { host: "db.internal", port: 5432 },
+    credentialId: "gone", // references a credential that no longer exists
+    jumpHostIds: [],
+  });
+  // The picker rejected the missing id, so buildPayload must send "" (the live
+  // picker value), not the stale #form.credentialId the store would reject.
+  assert.equal(dlg.buildPayload().credentialId, "");
+});
+
 test("a store __hippoError maps back onto the fields", async () => {
   const dlg = mount({
     onSubmit: () => ({

@@ -70,6 +70,13 @@ function registerEngineIPC({ ipcMain, getEngine }) {
     wrap("tunnels:status", () => getEngine().status()),
   );
 
+  // Force-apply a pending (connection-affecting) edit now, dropping live
+  // connections, instead of waiting for the tunnel to go idle.
+  ipcMain.handle(
+    "tunnels:apply",
+    wrap("tunnels:apply", (id) => getEngine().apply(id)),
+  );
+
   // Pause / resume: freeze (or restore) traffic without touching SSH or the store.
   ipcMain.handle(
     "tunnels:pause",

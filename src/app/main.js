@@ -54,7 +54,7 @@ const i18n = require("./i18n");
 const { createLogger } = require("./logger");
 const { buildReport } = require("./diagnostics");
 const { installAppMenu } = require("./menu");
-const { createTray } = require("./tray");
+const { createTray, LIVE_STATES } = require("./tray");
 const { buildTrayImage } = require("./tray-icon");
 const { createLoginItem } = require("./login-item");
 const updater = require("./updater");
@@ -63,8 +63,9 @@ const updater = require("./updater");
 // creation / first paint. A manual check (Settings/menu) runs immediately.
 const STARTUP_UPDATE_CHECK_DELAY_MS = 10_000;
 
-// States that count as "live" (SSH is or may be established) for the tray.
-const LIVE_STATES = new Set(["listening", "connecting", "connected", "paused"]);
+// Upper bound on how long quit waits for SSH sessions to close cleanly before
+// exiting anyway — a graceful teardown that hangs must never wedge the exit.
+const QUIT_DISARM_TIMEOUT_MS = 3_000;
 
 const {
   dev: isDev,
@@ -427,6 +428,18 @@ function registerIpc() {
     broadcast,
     safeCall,
   });
+
+  // Auto-update (Feature 70) intents. `check` runs a manual (noisy) check; the
+  // lifecycle events reach the renderer over the `updater:*` push channels.
+  // `install` restarts to apply a downloaded update (user-confirmed in the UI).
+  ipcMain.handle("updater:check", () => {
+    updater.checkForUpdates({ manual: true });
+    return { ok: true };
+  });
+  ipcMain.handle("updater:install", () => {
+    updater.quitAndInstall();
+    return { ok: true };
+  });
 }
 
 // ─── Hot reload (dev only) ────────────────────────────────────────────────────
@@ -631,8 +644,9 @@ function bootstrap() {
     refreshMenu();
     createTrayPresence();
 
-    // Auto-update (Feature 70): inert under `make debug`.
-    updater.initUpdater(() => mainWindow);
+    // Auto-update (Feature 70): inert under `make debug`. Route its logging into
+    // the app log so an update failure is recoverable from a diagnostics report.
+    updater.initUpdater(() => mainWindow, logger);
     setTimeout(
       () => updater.checkForUpdates({ manual: false }),
       STARTUP_UPDATE_CHECK_DELAY_MS,
@@ -656,11 +670,19 @@ function bootstrap() {
   // Tear every tunnel down on quit. Set isQuitting so a window `close` fired as
   // part of shutdown proceeds instead of hiding.
   let _disarmed = false;
-  app.on("before-quit", () => {
+  app.on("before-quit", (event) => {
     isQuitting = true;
-    if (_disarmed || !_engine) return;
-    _disarmed = true;
-    _engine.disarmAll().catch(() => {});
+    if (_disarmed) return; // second pass, after teardown → let the quit proceed
     _tray?.destroy();
+    if (!_engine) return;
+    // Hold the quit until SSH sessions close cleanly, then re-issue it — so remote
+    // servers see a graceful close, not an abrupt TCP drop. Bounded by a timeout
+    // so a hung teardown can never wedge the exit.
+    event.preventDefault();
+    _disarmed = true;
+    Promise.race([
+      _engine.disarmAll().catch(() => {}),
+      new Promise((resolve) => setTimeout(resolve, QUIT_DISARM_TIMEOUT_MS)),
+    ]).finally(() => app.quit());
   });
 }

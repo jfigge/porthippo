@@ -141,7 +141,10 @@ export class DefinitionView {
       type: "button",
       text: armed ? t("def.list.disarm") : t("def.list.arm"),
       title: armed ? t("def.list.disarm") : t("def.list.arm"),
-      onClick: () => this.#toggleArm(def, armed),
+      // Read the CURRENT state at click time — the row updates in place, so a
+      // captured `armed` would go stale after a state change.
+      onClick: () =>
+        this.#toggleArm(def, isArmed(this.#states.get(def.id) || "disarmed")),
     });
 
     const tools = el("div", { class: "def-row-tools" }, [
@@ -165,21 +168,63 @@ export class DefinitionView {
       ),
     ]);
 
-    return el("div", { class: "def-row", role: "listitem" }, [
-      el("div", { class: "def-row-main" }, [
-        el("span", {
-          class: "def-row-name",
-          text: def.name || t("def.unnamed"),
-        }),
-        el("span", {
-          class: "def-row-summary",
-          text: def.routeSummary || "",
-        }),
-      ]),
-      badge,
-      armBtn,
-      tools,
-    ]);
+    return el(
+      "div",
+      { class: "def-row", role: "listitem", dataset: { id: def.id } },
+      [
+        el("div", { class: "def-row-main" }, [
+          el("span", {
+            class: "def-row-name",
+            text: def.name || t("def.unnamed"),
+          }),
+          el("span", {
+            class: "def-row-summary",
+            text: def.routeSummary || "",
+          }),
+        ]),
+        badge,
+        armBtn,
+        tools,
+      ],
+    );
+  }
+
+  #rowFor(id) {
+    for (const row of this.#listEl.children) {
+      if (row.dataset && row.dataset.id === id) return row;
+    }
+    return null;
+  }
+
+  /**
+   * Refresh one row's badge + arm button IN PLACE (like MonitoringView), so a
+   * state broadcast or an arm toggle never clears the list and steals keyboard
+   * focus from the control the user is on. Falls back to a full render only when
+   * the row is missing (a definition was added or removed).
+   */
+  #updateRow(id) {
+    const row = this.#rowFor(id);
+    if (!row) {
+      this.#renderList();
+      return;
+    }
+    const state = this.#states.get(id) || "disarmed";
+    const armed = isArmed(state);
+
+    const badge = row.querySelector(".def-badge");
+    if (badge) {
+      badge.className = `def-badge def-badge--${state}`;
+      badge.textContent = t(`state.${state}`);
+      badge.title =
+        state === "error" ? this.#states.get(`${id}:error`) || "" : "";
+    }
+    const armBtn = row.querySelector(".def-arm-btn");
+    if (armBtn) {
+      armBtn.className =
+        `btn btn--secondary def-arm-btn ${armed ? "def-arm-btn--armed" : ""}`.trim();
+      armBtn.textContent = armed ? t("def.list.disarm") : t("def.list.arm");
+      armBtn.title = armBtn.textContent;
+    }
   }
 
   #toolBtn(label, glyph, onClick, extraClass = "") {
@@ -242,7 +287,7 @@ export class DefinitionView {
       : this.#porthippo.tunnels.arm(def.id);
     // Optimistic: reflect the intent immediately; the broadcast will correct it.
     this.#states.set(def.id, armed ? "disarmed" : "listening");
-    this.#renderList();
+    this.#updateRow(def.id);
     const result = await call;
     if (result && result.__hippoError) {
       PopupManager.notify({ message: result.message || "Engine error" });
@@ -259,7 +304,7 @@ export class DefinitionView {
       this.#states.set(detail.id, detail.state);
       if (detail.error) this.#states.set(`${detail.id}:error`, detail.error);
     }
-    if (this.#defs.some((d) => d.id === detail.id)) this.#renderList();
+    if (this.#defs.some((d) => d.id === detail.id)) this.#updateRow(detail.id);
   }
 
   #notifyChanged() {

@@ -146,25 +146,20 @@
 }
 
 /* ── Popups ───────────────────────────────────────────────────────────────── */
-.popup-overlay {
-  position: fixed;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+/* A bare top-layer host: the native <dialog> centres its .popup card (via the UA
+   margin:auto) and paints the scrim through ::backdrop. The card keeps its own
+   surface styling below. */
+.popup-dialog {
   padding: var(--space-4);
-  background: rgba(0, 0, 0, 0.5);
-  z-index: 1000;
-  opacity: 0;
-  visibility: hidden;
-  transition:
-    opacity 120ms ease,
-    visibility 120ms ease;
+  border: none;
+  background: transparent;
+  max-width: 100vw;
+  max-height: 100vh;
+  overflow: visible;
 }
 
-.popup-overlay--visible {
-  opacity: 1;
-  visibility: visible;
+.popup-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.5);
 }
 
 .popup {

@@ -28,6 +28,7 @@ import "./stats-store.js";
 import { DefinitionView } from "./components/definition-view.js";
 import { MonitoringView } from "./components/monitoring-view.js";
 import { HostKeyPrompt } from "./host-key-prompt.js";
+import { UpdateNotifier } from "./update-notifier.js";
 import { SettingsPopup } from "./components/settings-popup.js";
 import { AboutDialog } from "./components/about-dialog.js";
 import { init as initI18n, t } from "./i18n.js";
@@ -211,6 +212,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     VIEWS.includes(settings.viewMode) ? settings.viewMode : "definition",
   );
   new HostKeyPrompt().install();
+  new UpdateNotifier().install();
   initEditTunnelBridge();
   initShell();
   initDefinitionView();

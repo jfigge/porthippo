@@ -63,6 +63,9 @@ contextBridge.exposeInMainWorld("porthippo", {
     status: () => ipcRenderer.invoke("tunnels:status"),
     pause: (id) => ipcRenderer.invoke("tunnels:pause", id),
     resume: (id) => ipcRenderer.invoke("tunnels:resume", id),
+    // Force-apply a stashed connection-affecting edit now (drops live connections)
+    // instead of waiting for the tunnel to go idle.
+    apply: (id) => ipcRenderer.invoke("tunnels:apply", id),
   },
 
   // ── Reusable credentials (Feature 45) ─────────────────────────────────────
@@ -141,6 +144,16 @@ contextBridge.exposeInMainWorld("porthippo", {
       ipcRenderer.invoke("secret-storage:unlock", { password }),
     lock: () => ipcRenderer.invoke("secret-storage:lock"),
   },
+
+  // ── Auto-update (Feature 70) ──────────────────────────────────────────────
+  // The renderer only sends intents; lifecycle events arrive one-way over the
+  // `porthippo:update-*` events (re-dispatched below). `check` runs a manual
+  // update check; `install` restarts to apply a downloaded update (user-confirmed
+  // from the "update ready" prompt). Neither carries any secret.
+  updater: {
+    check: () => ipcRenderer.invoke("updater:check"),
+    install: () => ipcRenderer.invoke("updater:install"),
+  },
 });
 
 // ── Main → renderer push events ───────────────────────────────────────────────
@@ -176,6 +189,25 @@ const MENU_EVENT_MAP = {
   "menu:show-about": "porthippo:show-about",
 };
 for (const [channel, domEvent] of Object.entries(MENU_EVENT_MAP)) {
+  ipcRenderer.on(channel, (_event, payload) => {
+    window.dispatchEvent(new CustomEvent(domEvent, { detail: payload }));
+  });
+}
+
+// ── Auto-update lifecycle (Feature 70) ────────────────────────────────────────
+// updater.js pushes each electron-updater event over an `updater:*` channel; we
+// re-dispatch as a `porthippo:update-*` CustomEvent (same one-way convention) so
+// the renderer's UpdateNotifier can surface toasts + the "restart to install"
+// prompt. Payloads carry only version / progress / message — never a secret.
+const UPDATE_EVENT_MAP = {
+  "updater:checking": "porthippo:update-checking",
+  "updater:available": "porthippo:update-available",
+  "updater:not-available": "porthippo:update-not-available",
+  "updater:progress": "porthippo:update-progress",
+  "updater:downloaded": "porthippo:update-downloaded",
+  "updater:error": "porthippo:update-error",
+};
+for (const [channel, domEvent] of Object.entries(UPDATE_EVENT_MAP)) {
   ipcRenderer.on(channel, (_event, payload) => {
     window.dispatchEvent(new CustomEvent(domEvent, { detail: payload }));
   });

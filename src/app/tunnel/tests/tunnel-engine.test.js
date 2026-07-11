@@ -187,6 +187,45 @@ test("keepAlive connects eagerly on arm and never idle-tears-down", async () => 
   }
 });
 
+test("keepAlive keeps retrying after backoff exhaustion instead of giving up", async () => {
+  const echo = await startEcho();
+  const ssh = await startSsh();
+  const localPort = await freePort();
+  const { tunnel } = makeTunnel(
+    makeDef({
+      localPort,
+      echoPort: echo.port,
+      sshPort: ssh.port,
+      keepAlive: true,
+    }),
+    // Tiny backoff so several attempts (and exhaustion) elapse well under 200ms.
+    {
+      lingerMs: 60000,
+      baseBackoffMs: 5,
+      maxBackoffMs: 15,
+      maxReconnectAttempts: 3,
+    },
+  );
+  try {
+    await tunnel.arm();
+    await waitFor(() => tunnel.state === "connected"); // eager keepAlive connect
+
+    // Kill the SSH server: the live connection drops and the reconnect loop
+    // begins, then exhausts its attempts against the now-closed port.
+    await ssh.close();
+
+    // Old behaviour latched to a permanent "error" after exhaustion; keepAlive
+    // must instead keep trying, so it stays in the reconnect loop ("connecting").
+    await delay(200);
+    assert.notEqual(tunnel.state, "error", "keepAlive never latches to error");
+    assert.equal(tunnel.state, "connecting", "keepAlive is still retrying");
+  } finally {
+    await tunnel.dispose();
+    await ssh.close();
+    await echo.close();
+  }
+});
+
 test("a two-hop jump chain relays end-to-end", async () => {
   const echo = await startEcho();
   const jump = await startSsh();

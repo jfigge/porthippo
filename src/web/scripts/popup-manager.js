@@ -27,69 +27,76 @@ import { el } from "./dom.js";
 import { t } from "./i18n.js";
 
 const state = {
-  overlay: null, // the mask element (lazily created, lives on <body>)
-  active: null, // the current popup object, or null
-  onKeyDown: null, // the Escape handler currently installed
+  active: null, // { popup, dialogEl } currently shown, or null
+  queue: [], // popups waiting behind the active one — QUEUED, never dropped
 };
 
-function ensureOverlay() {
-  if (state.overlay) return state.overlay;
-  const overlay = el("div", {
-    class: "popup-overlay",
-    onClick: (event) => {
-      // Only a click on the mask itself (not inside the popup) dismisses.
-      if (event.target === overlay && state.active) {
-        (state.active.onMaskClick || PopupManager.close)();
-      }
-    },
+function dismiss(popup) {
+  (popup.onMaskClick || PopupManager.close)();
+}
+
+// Mount a popup as a native modal <dialog>. showModal() puts it in the browser
+// TOP LAYER, so a popup raised while an editor <dialog> is open stacks ABOVE it
+// (the old plain-overlay popup was occluded by any open editor dialog and left
+// inert). Escape → native `cancel`; a click landing on the dialog itself (not its
+// content) is a backdrop click.
+function mount(popup) {
+  const dialogEl = el("dialog", { class: "popup-dialog" }, [popup.element]);
+  dialogEl.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    dismiss(popup);
   });
-  document.body.appendChild(overlay);
-  state.overlay = overlay;
-  return overlay;
+  dialogEl.addEventListener("click", (event) => {
+    if (event.target === dialogEl) dismiss(popup);
+  });
+  document.body.appendChild(dialogEl);
+  state.active = { popup, dialogEl };
+  dialogEl.showModal();
+
+  const focusTarget =
+    popup.element.querySelector("[data-autofocus]") ||
+    popup.element.querySelector("button");
+  focusTarget?.focus();
 }
 
 export const PopupManager = {
   /**
-   * Mount a popup. Any currently-open popup is closed first. Focuses the first
+   * Mount a popup. If one is already open the new popup is QUEUED (shown when the
+   * current one closes) rather than replacing it — so a second host-key prompt
+   * can't silently strand the first's pending SSH connection. Focuses the first
    * `[data-autofocus]` control, or the first button, so Enter/Escape work at once.
    * @param {{ element: HTMLElement, onMaskClick?: () => void }} popup
    */
   open(popup) {
     if (!popup || !popup.element) return;
-    if (state.active) this.close();
-
-    const overlay = ensureOverlay();
-    overlay.appendChild(popup.element);
-    overlay.classList.add("popup-overlay--visible");
-    state.active = popup;
-
-    state.onKeyDown = (event) => {
-      if (event.key === "Escape" && state.active) {
-        event.preventDefault();
-        (state.active.onMaskClick || PopupManager.close)();
-      }
-    };
-    document.addEventListener("keydown", state.onKeyDown);
-
-    const focusTarget =
-      popup.element.querySelector("[data-autofocus]") ||
-      popup.element.querySelector("button");
-    focusTarget?.focus();
+    // Defensive: a detached active dialog means the previous popup is gone (e.g.
+    // the DOM was reset under tests) — treat the host as idle, don't queue behind
+    // a ghost.
+    if (state.active && !state.active.dialogEl.isConnected) {
+      state.active = null;
+      state.queue = [];
+    }
+    if (state.active) {
+      state.queue.push(popup);
+      return;
+    }
+    mount(popup);
   },
 
-  /** Tear down the active popup and hide the mask. Safe to call when idle. */
+  /** Close the active popup, then show the next queued one. Safe to call idle. */
   close() {
-    if (state.onKeyDown) {
-      document.removeEventListener("keydown", state.onKeyDown);
-      state.onKeyDown = null;
-    }
-    if (state.overlay) {
-      state.overlay.classList.remove("popup-overlay--visible");
-      while (state.overlay.firstChild) {
-        state.overlay.removeChild(state.overlay.firstChild);
-      }
-    }
+    const active = state.active;
     state.active = null;
+    if (active) {
+      try {
+        active.dialogEl.close();
+      } catch {
+        // already closed
+      }
+      active.dialogEl.remove();
+    }
+    const next = state.queue.shift();
+    if (next) mount(next);
   },
 
   /**

@@ -212,13 +212,22 @@ const trustAll = () => (_key, verify) => verify(true);
 
 function makeTunnel(
   def,
-  { lingerMs = 60, hostVerifierFactory = trustAll } = {},
+  {
+    lingerMs = 60,
+    hostVerifierFactory = trustAll,
+    baseBackoffMs,
+    maxBackoffMs,
+    maxReconnectAttempts,
+  } = {},
 ) {
   const states = [];
   const tunnel = new Tunnel(def, {
     hostVerifierFactory,
     getLingerMs: () => lingerMs,
     onStateChange: (s) => states.push(s.state),
+    baseBackoffMs,
+    maxBackoffMs,
+    maxReconnectAttempts,
   });
   return { tunnel, states };
 }

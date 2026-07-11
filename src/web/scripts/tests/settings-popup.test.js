@@ -20,9 +20,9 @@ import assert from "node:assert/strict";
 import { SettingsPopup } from "../components/settings-popup.js";
 import { PopupManager } from "../popup-manager.js";
 
-// PopupManager caches one overlay in module state; resetting the DOM per test
+// PopupManager keeps its active popup in module state; resetting the DOM per test
 // would strand the popup in a detached document. Use a single DOM for the file
-// and just close the popup between tests.
+// and just close the popup between tests (each test starts from an idle host).
 const window = resetDom();
 
 // Flush the microtasks a not-awaited async handler (e.g. #loadSecurityState)
@@ -105,6 +105,7 @@ const clickEvent = () => new window.Event("click", { bubbles: true });
 const changeEvent = () => new window.Event("change", { bubbles: true });
 
 test("open populates controls from the loaded settings", async () => {
+  PopupManager.close(); // start from an idle host (popups now queue, not replace)
   const { porthippo } = stubBridge({ theme: "dark", defaultLingerMs: 2500 });
   const popup = new SettingsPopup({ porthippo });
   await popup.open();
@@ -138,6 +139,7 @@ test("changing a control persists the full settings and broadcasts", async () =>
 });
 
 test("switching tabs shows the matching panel", async () => {
+  PopupManager.close(); // start from an idle host (popups now queue, not replace)
   const { porthippo } = stubBridge();
   const popup = new SettingsPopup({ porthippo });
   await popup.open();
