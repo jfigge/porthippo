@@ -123,6 +123,32 @@ test("os-keychain: seals via safeStorage and decrypts back", () => {
   );
 });
 
+test("os-keychain refuses to ENCRYPT (no plaintext downgrade) when the keystore is unavailable", () => {
+  // Deliberately configured into os-keychain mode — as production always does, so
+  // _modeConfigured is set. (The unconfigured plaintext no-op only exists for a
+  // plain unit-test process that never calls configure().)
+  crypto._setSafeStorage({
+    isEncryptionAvailable: () => true,
+    encryptString: (s) => Buffer.from(`KS:${s}`, "utf8"),
+    decryptString: (buf) => buf.toString("utf8").slice(3),
+  });
+  crypto.configure({ mode: "os-keychain", appKey: null, masterKey: null });
+
+  // The keystore then goes away mid-session (e.g. a Linux Secret Service provider
+  // stops). Sealing MUST refuse rather than silently write plaintext at rest — the
+  // decrypt side already refuses; this guards the encrypt side of the guarantee.
+  crypto._setSafeStorage(null);
+
+  let returned = "sentinel";
+  assert.throws(
+    () => {
+      returned = crypto.encryptString("s3cr3t");
+    },
+    (err) => err.code === "encryption-unavailable",
+  );
+  assert.equal(returned, "sentinel", "never returns the plaintext value");
+});
+
 test("either backend can decrypt the other's ciphertext when both keys are loaded", () => {
   // Seal one value with the app key, another via the keystore mock, then load
   // both and confirm prefix-dispatch decrypts each.

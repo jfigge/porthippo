@@ -241,9 +241,43 @@ function createLogger(opts = {}) {
           return { name: path.basename(p), content };
         });
     },
+
+    /**
+     * The TAIL of the rotating log as `{ name, content }`, OLDEST-first, capped at
+     * `maxBytes` total. The diagnostics report uses this so it never puts the full
+     * (up to 5 × 1 MB) log on the clipboard: we walk newest→oldest keeping whole
+     * files until the budget runs out, then truncate the front of the oldest
+     * included file (a `…(truncated)…` marker) so the report still ends at "now".
+     * @param {number} [maxBytes=65536]
+     */
+    readTail(maxBytes = 64 * 1024) {
+      const picked = [];
+      let budget = maxBytes;
+      for (const p of this.listFiles()) {
+        // listFiles() is newest-first.
+        if (budget <= 0) break;
+        let content = "";
+        try {
+          content = fs.readFileSync(p, "utf8");
+        } catch {
+          content = "";
+        }
+        if (Buffer.byteLength(content) > budget) {
+          content = content.slice(-budget); // keep the most recent bytes
+          const nl = content.indexOf("\n");
+          if (nl >= 0) content = content.slice(nl + 1); // drop a partial first line
+          content = `…(truncated)…\n${content}`;
+          budget = 0;
+        } else {
+          budget -= Buffer.byteLength(content);
+        }
+        picked.push({ name: path.basename(p), content });
+      }
+      return picked.reverse(); // oldest-first, to match the report's render order
+    },
   };
 
   return api;
 }
 
-module.exports = { createLogger, formatArg, LEVELS };
+module.exports = { createLogger, formatArg };

@@ -127,4 +127,4 @@ function format(str, params) {
   );
 }
 
-module.exports = { LOCALES_DIR, readCatalog, loadCatalog, label, format };
+module.exports = { readCatalog, loadCatalog, label, format };

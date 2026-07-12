@@ -310,6 +310,52 @@ test("resumeMigration leaves the marker in place when re-encryption fails", () =
 
 // ── setMode / unlock (the IPC-facing operations) ───────────────────────────────
 
+test("unlock reports migrationIncomplete when a crash-resumed switch can't finish", () => {
+  const { dir, paths, sec } = fresh();
+  try {
+    // Establish master-password mode with two encm: secrets (writes kdf+verifier).
+    const appKey = sec.ensureAppKey();
+    crypto.configure({ mode: "app-key", appKey, masterKey: null });
+    const pw = crypto.encryptString("db-pass");
+    io.writeJSON(paths.tunnelsPath(), tunnelsDoc(pw, pw));
+    sec.writeConfig({ mode: "app-key" });
+    assert.deepEqual(sec.setMode("master-password", "open sesame"), {
+      ok: true,
+    });
+
+    // A crash-interrupted switch master-password → os-keychain: the marker is
+    // written but the mode was never flipped. The keystore is then unavailable, so
+    // resume can't re-seal the encm: stragglers to os-keychain.
+    sec.markMigration("master-password", "os-keychain");
+    crypto._setSafeStorage(null);
+    crypto.lock(); // a fresh, locked boot
+
+    const res = new SecretStorage(paths).unlock("open sesame");
+
+    // The unlock SUCCEEDED (password valid, session usable) but the switch is stuck
+    // — the bug was that this returned a bare { ok: true }, hiding the failure.
+    assert.equal(res.ok, true);
+    assert.equal(res.migrationIncomplete, true);
+    assert.ok(res.failures.length >= 1);
+    assert.equal(
+      crypto.isLocked(),
+      false,
+      "session is unlocked despite the stuck switch",
+    );
+    assert.ok(
+      sec.pendingMigration(),
+      "marker survives so the switch retries next launch",
+    );
+
+    // Secrets remain readable in the source (master-password) mode.
+    const values = sealedValues(io.readJSON(paths.tunnelsPath()));
+    assert.ok(values[0].startsWith("encm:v1:"));
+    assert.equal(crypto.decryptString(values[0]), "db-pass");
+  } finally {
+    cleanup(dir);
+  }
+});
+
 test("setMode re-encrypts to master-password, boots locked next launch, unlock reads again", () => {
   const { dir, paths, sec } = fresh();
   try {

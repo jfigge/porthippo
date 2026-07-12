@@ -109,4 +109,4 @@ function createLoginItem({
   };
 }
 
-module.exports = { createLoginItem, APP_ID };
+module.exports = { createLoginItem };

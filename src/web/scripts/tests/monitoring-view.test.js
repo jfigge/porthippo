@@ -207,6 +207,43 @@ test("arm/disarm control sends the right intent for the live state", async () =>
   assert.deepEqual(calls.arm, ["b"]);
 });
 
+test("a refused arm reverts the optimistic badge instead of leaving it wrong", async () => {
+  resetDom();
+  const view = new MonitoringView({
+    porthippo: {
+      tunnels: {
+        list: async () => [{ id: "a", name: "alpha", routeSummary: "" }],
+        status: async () => [{ id: "a", state: "disarmed" }],
+        arm: async () => ({ __hippoError: true, message: "engine refused" }),
+        disarm: async () => ({ id: "a" }),
+        pause: async () => ({}),
+        resume: async () => ({}),
+      },
+      settings: {
+        get: async () => ({ monitorFilter: "all" }),
+        set: async () => ({}),
+      },
+    },
+    now: () => NOW,
+  });
+  document.body.appendChild(view.element);
+  await view.load();
+
+  const row = () => view.element.querySelector(".mon-row");
+  assert.ok(row().querySelector(".def-badge--disarmed"), "starts disarmed");
+
+  // Click Arm; the engine refuses (no correcting state broadcast follows). The
+  // badge must revert to disarmed, not stick on the optimistic "listening".
+  row().querySelector(".mon-arm-btn").click();
+  await new Promise((r) => setTimeout(r, 0));
+
+  assert.ok(
+    row().querySelector(".def-badge--disarmed"),
+    "badge reverts after the refused arm",
+  );
+  assert.ok(!row().querySelector(".def-badge--listening"));
+});
+
 test("pause/resume is enabled only when connected/paused", async () => {
   const calls = {};
   const view = await mount({

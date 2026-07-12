@@ -161,6 +161,41 @@ test("a tunnel-state broadcast preserves keyboard focus on the arm button", asyn
   assert.ok(row.querySelector(".def-badge--connected"), "badge still updated");
 });
 
+test("a refused arm reverts the optimistic badge in the Definition list", async () => {
+  resetDom();
+  const defs = fixtureDefs();
+  const view = new DefinitionView({
+    porthippo: {
+      tunnels: {
+        list: async () => defs,
+        status: async () => [],
+        arm: async () => ({ __hippoError: true, message: "engine refused" }),
+        disarm: async () => ({ state: "disarmed" }),
+        create: async () => ({}),
+        update: async () => ({}),
+        delete: async () => ({}),
+      },
+      credentials: { list: async () => [] },
+      jumpHosts: { list: async () => [] },
+    },
+  });
+  document.body.appendChild(view.element);
+  await view.load();
+
+  const row = () => view.element.querySelectorAll(".def-row")[0];
+  assert.ok(row().querySelector(".def-badge--disarmed"), "starts disarmed");
+
+  // Arm is refused and no correcting state broadcast follows; the badge must revert.
+  row().querySelector(".def-arm-btn").click();
+  await new Promise((r) => setTimeout(r, 0));
+
+  assert.ok(
+    row().querySelector(".def-badge--disarmed"),
+    "badge reverts after the refused arm",
+  );
+  assert.ok(!row().querySelector(".def-badge--listening"));
+});
+
 test("deleting confirms then calls delete", async () => {
   const calls = {};
   const view = await mount(fixtureDefs(), calls);

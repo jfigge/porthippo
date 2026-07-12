@@ -58,12 +58,6 @@ function applyView(view) {
     btn.classList.toggle("view-toggle-btn--active", btn.dataset.view === view);
     btn.setAttribute("aria-selected", String(btn.dataset.view === view));
   }
-
-  // App-wide notification so later panes can react (e.g. start/stop live
-  // subscriptions when they become visible).
-  window.dispatchEvent(
-    new CustomEvent("porthippo:view-changed", { detail: { view } }),
-  );
 }
 
 function initViewToggle() {

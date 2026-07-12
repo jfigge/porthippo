@@ -110,6 +110,44 @@ test("listFiles is newest-first and readFiles is oldest-first", () => {
   }
 });
 
+test("readTail caps total bytes yet keeps the most recent activity", () => {
+  const dir = freshDir();
+  try {
+    const log = createLogger({ dir, maxBytes: 400, maxFiles: 5 });
+    for (let i = 0; i < 200; i++) {
+      log.info("bulk", `line number ${i} padding padding`);
+    }
+    const lastLine = "FINAL-MARKER-LINE";
+    log.info("bulk", lastLine);
+
+    const tail = log.readTail(500);
+    const total = tail.reduce((n, f) => n + Buffer.byteLength(f.content), 0);
+    const full = log
+      .readFiles()
+      .reduce((n, f) => n + Buffer.byteLength(f.content), 0);
+
+    // Bounded near the budget (a truncation marker adds a little slack)…
+    assert.ok(total <= 600, `expected tail ≤ ~budget, got ${total}`);
+    // …and strictly smaller than the full log, proving we actually capped it.
+    assert.ok(full > total, `full ${full} should exceed tail ${total}`);
+    // The tail still ends at "now": the newest line survives.
+    assert.ok(
+      tail
+        .map((f) => f.content)
+        .join("")
+        .includes(lastLine),
+      "tail keeps the newest line",
+    );
+    // The oldest included file is front-truncated with a marker.
+    assert.ok(
+      tail.some((f) => f.content.startsWith("…(truncated)…")),
+      "oldest included file is front-truncated",
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("install tees console into the file and still calls the original", () => {
   const dir = freshDir();
   try {

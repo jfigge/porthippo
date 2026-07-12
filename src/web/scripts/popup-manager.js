@@ -71,8 +71,14 @@ export const PopupManager = {
     if (!popup || !popup.element) return;
     // Defensive: a detached active dialog means the previous popup is gone (e.g.
     // the DOM was reset under tests) — treat the host as idle, don't queue behind
-    // a ghost.
-    if (state.active && !state.active.dialogEl.isConnected) {
+    // a ghost. A node still attached to a *different* (orphaned) document counts as
+    // gone too, since it's no longer in the live tree. In production there is only
+    // ever one document, so this only fires when the DOM is swapped under tests.
+    if (
+      state.active &&
+      (!state.active.dialogEl.isConnected ||
+        state.active.dialogEl.ownerDocument !== document)
+    ) {
       state.active = null;
       state.queue = [];
     }

@@ -118,7 +118,7 @@ async function startEcho({ transform } = {}) {
   return { port, close: () => closeServer(server) };
 }
 
-async function startSsh() {
+async function startSsh({ rejectForward = false } = {}) {
   const clients = new Set();
   let total = 0;
   const server = new Server({ hostKeys: [HOST_KEY] }, (client) => {
@@ -139,6 +139,12 @@ async function startSsh() {
     });
     client.on("ready", () => {
       client.on("tcpip", (accept, reject, info) => {
+        if (rejectForward) {
+          // Refuse the direct-tcpip channel so the client's forwardOut rejects —
+          // the harness stand-in for a destination that's refused/unreachable.
+          reject();
+          return;
+        }
         const ch = accept();
         const conn = net.connect(info.destPort, info.destIP, () => {
           ch.pipe(conn);

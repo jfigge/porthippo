@@ -381,13 +381,19 @@ export class MonitoringView {
 
   async #toggleArm(id) {
     const armed = isArmed(this.#stateOf(id));
-    // Optimistic: reflect the intent immediately; the broadcast will correct it.
+    // Optimistic: reflect the intent immediately; a state broadcast corrects it on
+    // success. A refused intent produces NO broadcast, so capture the prior state
+    // and restore it on error — otherwise the badge sticks on the wrong value.
+    const prev = this.#stateOf(id);
     this.#states.set(id, armed ? "disarmed" : "listening");
     this.#render();
     const result = await (armed
       ? this.#porthippo?.tunnels?.disarm?.(id)
       : this.#porthippo?.tunnels?.arm?.(id));
-    this.#reportError(result);
+    if (this.#reportError(result)) {
+      this.#states.set(id, prev);
+      this.#render();
+    }
   }
 
   async #togglePause(id) {
@@ -408,6 +414,8 @@ export class MonitoringView {
   #reportError(result) {
     if (result && result.__hippoError) {
       PopupManager.notify({ message: result.message || "Engine error" });
+      return true;
     }
+    return false;
   }
 }

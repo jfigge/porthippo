@@ -131,6 +131,11 @@ license-headers:
 	@echo "--------------------------------"
 
 # ─── Testing ──────────────────────────────────────────────────────────────────
+# Per-test timeout so a leaked handle / never-resolving promise fails the run
+# loudly instead of hanging the suite (and CI) forever. Individual tests finish in
+# well under a second; the ssh2 integration tests are the slowest and still < 1s.
+TEST_TIMEOUT ?= 30000
+
 test: test-license-headers test-js test-tunnel test-renderer
 
 # Guard: every first-party src/ JS+CSS file and build script must carry the
@@ -144,20 +149,20 @@ test-license-headers:
 # under test-tunnel so it isn't executed twice).
 test-js:
 	@echo "Running JavaScript unit tests..."
-	@cd $(SRC_DIR) && node --test "app/tests/**/*.test.js" "app/store/**/*.test.js"
+	@cd $(SRC_DIR) && node --test --test-timeout=$(TEST_TIMEOUT) "app/tests/**/*.test.js" "app/store/**/*.test.js"
 	@echo "--------------------------------"
 
 # Integration tests for the SSH tunnel engine (in-process ssh2 server + echo dest).
 test-tunnel:
 	@echo "Running SSH tunnel engine integration tests..."
-	@cd $(SRC_DIR) && node --test "app/tunnel/**/*.test.js"
+	@cd $(SRC_DIR) && node --test --test-timeout=$(TEST_TIMEOUT) "app/tunnel/**/*.test.js"
 	@echo "--------------------------------"
 
 # Renderer component tests (jsdom). Node auto-detects ESM in these .js files, so
 # they import the real ES-module components and exercise them against a jsdom DOM.
 test-renderer:
 	@echo "Running renderer component tests (jsdom)..."
-	@cd $(SRC_DIR) && node --test "web/scripts/tests/**/*.test.js"
+	@cd $(SRC_DIR) && node --test --test-timeout=$(TEST_TIMEOUT) "web/scripts/tests/**/*.test.js"
 	@echo "--------------------------------"
 
 # ─── Build ────────────────────────────────────────────────────────────────────

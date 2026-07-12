@@ -285,11 +285,17 @@ export class DefinitionView {
     const call = armed
       ? this.#porthippo.tunnels.disarm(def.id)
       : this.#porthippo.tunnels.arm(def.id);
-    // Optimistic: reflect the intent immediately; the broadcast will correct it.
+    // Optimistic: reflect the intent immediately; a state broadcast corrects it on
+    // success. A refused intent (e.g. the engine can't arm) produces NO broadcast,
+    // so capture the prior state and restore it on error — otherwise the badge
+    // sticks on the wrong value, contradicting the error toast.
+    const prev = this.#states.get(def.id) || "disarmed";
     this.#states.set(def.id, armed ? "disarmed" : "listening");
     this.#updateRow(def.id);
     const result = await call;
     if (result && result.__hippoError) {
+      this.#states.set(def.id, prev);
+      this.#updateRow(def.id);
       PopupManager.notify({ message: result.message || "Engine error" });
     }
   }

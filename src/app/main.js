@@ -238,7 +238,7 @@ function copyDiagnostics() {
       () => getStores().credentialStore().list(),
       [],
     ),
-    logs: logger.readFiles(),
+    logs: logger.readTail(),
     generatedAt: new Date().toISOString(),
   });
   try {
@@ -389,15 +389,22 @@ function registerIpc() {
         .catch((err) =>
           console.error(`[main] reconcile ${id} error:`, err && err.message),
         );
+      // The tray renders the tunnel list; a create/rename/delete (or an edit to a
+      // disabled/disarmed tunnel, which emits no state broadcast) must refresh it,
+      // otherwise a deleted tunnel lingers and a new one is absent until some
+      // unrelated tunnel next changes state.
+      _tray?.update();
     },
     // A credential / jump-host edit can change the resolved plan of many tunnels;
-    // reconcile the whole engine so every referencing tunnel re-reads it.
+    // reconcile the whole engine so every referencing tunnel re-reads it. It can
+    // also change a tunnel's route summary, so refresh the tray too.
     afterRefsWrite: () => {
       getEngine()
         ?.reconcileAll()
         .catch((err) =>
           console.error("[main] reconcileAll error:", err && err.message),
         );
+      _tray?.update();
     },
     // After a settings change, apply the platform side-effects the renderer
     // can't (launch-at-login). Theme/language/defaults are live-applied in the

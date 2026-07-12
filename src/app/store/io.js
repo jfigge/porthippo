@@ -249,46 +249,6 @@ function remove(targetPath) {
   }
 }
 
-/**
- * List a directory's entries, returning `[]` when it is missing or unreadable.
- *
- * `opts` is forwarded verbatim to fs.readdirSync, so `{ withFileTypes: true }`
- * yields Dirent objects exactly as the underlying call would.
- *
- * @param {string} dir
- * @param {object} [opts] Options forwarded to fs.readdirSync.
- * @returns {string[]|import('fs').Dirent[]}
- */
-function listDir(dir, opts) {
-  try {
-    return fs.readdirSync(dir, opts);
-  } catch {
-    return []; // missing / unreadable dir — nothing to list
-  }
-}
-
-/**
- * @param {string} targetPath
- * @returns {boolean} True if the path exists.
- */
-function exists(targetPath) {
-  return fs.existsSync(targetPath);
-}
-
-/**
- * Rename (move) `src` to `dest` on the same filesystem.
- *
- * Unlike {@link remove}, this propagates errors: callers that move data aside
- * for a rollback need to know whether the move actually happened. A missing
- * `src` throws ENOENT, so guard optional sources with {@link exists}.
- *
- * @param {string} src
- * @param {string} dest
- */
-function move(src, dest) {
-  fs.renameSync(src, dest);
-}
-
 // ── Orphan temp-file GC ─────────────────────────────────────────────────────────
 
 /**
@@ -411,9 +371,6 @@ module.exports = {
   writeJSON,
   readJSON,
   remove,
-  listDir,
-  exists,
-  move,
   gcOrphanTempFiles,
   isTempFileName,
   isValidID,

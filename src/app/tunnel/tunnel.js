@@ -179,6 +179,16 @@ class Tunnel {
       return this.status();
     }
 
+    // A dispose()/disarm() that raced this bind ran #teardown() while #listener was
+    // still unassigned, so it couldn't stop the socket now finishing its bind.
+    // Re-check and stop it here rather than assign a live listener onto a torn-down
+    // tunnel — otherwise the port stays bound on a dead object and the next re-arm
+    // hits EADDRINUSE.
+    if (this.#disposed) {
+      await listener.stop();
+      return this.status();
+    }
+
     this.#listener = listener;
     this.#stats.onArmed(); // fresh measurement session (stamps armedAt, zeroes totals)
     this.#setState("listening");
@@ -309,6 +319,16 @@ class Tunnel {
       if (conn.relay) return; // the relay now owns the lifecycle
       if (this.#connections.delete(conn)) this.#onIdleCheck();
     });
+    // A socket `error` raised before the relay exists — a client reset mid-
+    // handshake, or a reset while an unknown host key sits at a (possibly minutes-
+    // long) TOFU prompt — would otherwise be an unhandled 'error' event that
+    // crashes the entire main process, killing every other tunnel. Absorb it here;
+    // the paired `close` above does the ref-count cleanup, and once the relay
+    // exists it wires its own `error` handling (`relay.js`).
+    socket.once("error", () => {
+      if (conn.relay) return; // the relay now owns the socket's error handling
+      socket.destroy();
+    });
 
     this.#ensureConnected()
       .then((sshConn) => {
@@ -321,8 +341,27 @@ class Tunnel {
           socket,
           destination: this.#def.destination,
           stats: this.#stats,
+          onOpen: () => {
+            // A forward succeeded → clear any stale forward error so a transient
+            // destination hiccup doesn't stick once traffic is flowing again.
+            if (this.#error) {
+              this.#error = null;
+              this.#emitState();
+            }
+          },
           onClose: () => {
             if (this.#connections.delete(conn)) this.#onIdleCheck();
+          },
+          onError: (err) => {
+            // The forwarded channel failed to open — destination refused/unreachable,
+            // or an ACL denial on the SSH server. The relay already tore the local
+            // socket down and will fire onClose; record the reason so a misconfigured
+            // destination is visible instead of the tunnel sitting silently
+            // "connected" while every forward fails.
+            this.#error = String(
+              (err && err.message) || err || "forward failed",
+            );
+            this.#emitState();
           },
         });
         // A pause that landed while this connection was still connecting applies

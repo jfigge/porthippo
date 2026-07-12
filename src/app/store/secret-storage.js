@@ -626,7 +626,20 @@ class SecretStorage {
 
     crypto.setMasterKey(key);
     // Finish an interrupted migration to/from master-password (no-op otherwise).
-    this.resumeMigration({ masterKey: key });
+    // The unlock itself has SUCCEEDED — the password verified and the session key
+    // is loaded, so source-mode secrets are now readable — but the crash-resumed
+    // backend switch can still fail to complete (e.g. the target keystore is
+    // unavailable). Surface that instead of swallowing it: the marker stays and
+    // the switch retries next launch, but the caller/UI must know the switch is
+    // stuck rather than believing the mode change finished.
+    const resume = this.resumeMigration({ masterKey: key });
+    if (resume.status === "failed") {
+      console.error(
+        "[secret-storage] unlock succeeded but the pending backend switch could " +
+          "not be finished; it will retry next launch.",
+      );
+      return { ok: true, migrationIncomplete: true, failures: resume.failures };
+    }
     return { ok: true };
   }
 

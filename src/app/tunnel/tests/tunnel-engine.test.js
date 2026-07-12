@@ -125,6 +125,104 @@ test("disarm during an in-flight connect never resurrects or leaks the SSH conne
   }
 });
 
+test("a local socket error during the connect/TOFU window is absorbed, not fatal", async () => {
+  const echo = await startEcho();
+  const ssh = await startSsh();
+  const localPort = await freePort();
+
+  // Gate the handshake at host verification so the relay is never created — the
+  // accepted socket therefore has no relay-owned `error` handler yet, which is the
+  // exact window the bug lived in.
+  const gate = gatedVerifier();
+  const { tunnel } = makeTunnel(
+    makeDef({ localPort, echoPort: echo.port, sshPort: ssh.port }),
+    { lingerMs: 60000, hostVerifierFactory: gate.factory },
+  );
+
+  try {
+    await tunnel.arm();
+    const client = await connectLocal(localPort); // triggers the lazy connect
+    await waitFor(() => tunnel.state === "connecting");
+
+    // Force an RST so the server-side accepted socket raises `error` (ECONNRESET),
+    // not a clean `close`. Before the fix this was an unhandled 'error' event that
+    // took down the whole main process (killing every other tunnel). Reaching the
+    // assertions below at all proves the error was absorbed.
+    client.resetAndDestroy();
+    await delay(60);
+
+    assert.ok(
+      ["connecting", "listening", "connected"].includes(tunnel.state),
+      "tunnel survives the pre-relay socket error",
+    );
+
+    // The tunnel is still fully usable afterwards: release the gate and a fresh
+    // client relays end-to-end.
+    gate.release();
+    const client2 = await connectLocalRetry(localPort);
+    assert.equal(await roundtrip(client2, "after-reset"), "after-reset");
+    client2.destroy();
+  } finally {
+    await tunnel.dispose();
+    await ssh.close();
+    await echo.close();
+  }
+});
+
+test("arm() racing dispose() never leaks a bound listener", async () => {
+  const echo = await startEcho();
+  const ssh = await startSsh();
+  const localPort = await freePort();
+  const { tunnel } = makeTunnel(
+    makeDef({ localPort, echoPort: echo.port, sshPort: ssh.port }),
+  );
+  try {
+    // Start the bind, then dispose while it is still in flight (#listener is not
+    // yet assigned, so #teardown can't see the socket now finishing its bind).
+    const arming = tunnel.arm();
+    await tunnel.dispose();
+    await arming;
+    assert.equal(tunnel.state, "disarmed");
+
+    // The port must be free — a leaked listener bound onto the disposed tunnel
+    // would still hold it and this rebind would throw EADDRINUSE.
+    const probe = net.createServer();
+    await new Promise((resolve, reject) => {
+      probe.once("error", reject);
+      probe.listen(localPort, "127.0.0.1", resolve);
+    });
+    await closeServer(probe);
+  } finally {
+    await tunnel.dispose();
+    await ssh.close();
+    await echo.close();
+  }
+});
+
+test("a failed forward surfaces an error instead of silently staying connected", async () => {
+  const echo = await startEcho();
+  const ssh = await startSsh({ rejectForward: true }); // every forward is refused
+  const localPort = await freePort();
+  const { tunnel } = makeTunnel(
+    makeDef({ localPort, echoPort: echo.port, sshPort: ssh.port }),
+    { lingerMs: 60000 }, // don't let idle teardown race the assertion
+  );
+  try {
+    await tunnel.arm();
+    const client = await connectLocal(localPort); // connects SSH, then the forward is rejected
+
+    // The forwarded channel fails to open → the relay reports it → the tunnel
+    // records a visible error rather than sitting silently "connected".
+    await waitFor(() => Boolean(tunnel.status().error));
+    assert.match(tunnel.status().error, /\S/);
+    client.destroy();
+  } finally {
+    await tunnel.dispose();
+    await ssh.close();
+    await echo.close();
+  }
+});
+
 test("idle teardown drops SSH after linger while the listener stays bound", async () => {
   const echo = await startEcho();
   const ssh = await startSsh();
@@ -408,9 +506,17 @@ test("re-arming a tunnel stuck in error (transient bind conflict) recovers it", 
   const blocker = net.createServer();
   const localPort = await listen(blocker); // occupy the port so the first arm fails
   const def = makeDef({ localPort, echoPort: echo.port, sshPort: ssh.port });
-  const engine = new TunnelEngine({
+  // The engine uses the real host-verifier against a nonexistent known_hosts, so
+  // the first byte access would hold pending on an unknown key. This test is about
+  // re-arm recovery, not TOFU, so auto-trust any unknown key the moment it prompts.
+  let engine;
+  engine = new TunnelEngine({
     getStores: () => fakeStores([def]),
-    broadcast: () => {},
+    broadcast: (channel, payload) => {
+      if (channel === "porthippo:hostkey-unknown") {
+        engine.trustHostKey(payload.promptId);
+      }
+    },
     knownHostsFile: "/nonexistent/known_hosts",
   });
   try {

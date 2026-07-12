@@ -67,16 +67,6 @@ export function field({
 }
 
 /**
- * Set the dotted validation path a field owns (used when a field's path shifts,
- * e.g. a jump host being reordered changes `jumps[0].host` → `jumps[1].host`).
- * @param {HTMLElement} fieldEl  a `.field` element
- * @param {string} errorKey
- */
-export function setFieldErrorKey(fieldEl, errorKey) {
-  if (fieldEl) fieldEl.dataset.errorKey = errorKey;
-}
-
-/**
  * Clear every field's error under `root`, then route each `errors` entry (keyed
  * by dotted path) to the field whose `data-error-key` matches. Fields whose key
  * has no error are left clean. Returns the number of messages placed.

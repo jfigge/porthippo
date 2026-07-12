@@ -47,10 +47,19 @@ const { forwardOut } = require("./ssh-chain");
  *        + connection open/close); omit in tests that don't assert on stats
  * @param {(counters: {bytesUp: number, bytesDown: number}) => void} [opts.onClose]
  * @param {(err: Error) => void} [opts.onError]  the forwarded channel failed to open
+ * @param {() => void} [opts.onOpen]  the forwarded channel opened (a forward succeeded)
  * @returns {{ counters: {bytesUp: number, bytesDown: number}, close: () => void,
  *             pause: () => void, resume: () => void }}
  */
-function startRelay({ client, socket, destination, stats, onClose, onError }) {
+function startRelay({
+  client,
+  socket,
+  destination,
+  stats,
+  onClose,
+  onError,
+  onOpen,
+}) {
   const counters = { bytesUp: 0, bytesDown: 0 };
   let stream = null;
   let closed = false;
@@ -124,6 +133,7 @@ function startRelay({ client, socket, destination, stats, onClose, onError }) {
       stream = s;
       opened = true;
       stats?.connOpened();
+      onOpen?.();
 
       // Up = client → destination (bytes the local socket sends).
       socket.on("data", (chunk) => {
