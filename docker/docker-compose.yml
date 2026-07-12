@@ -1,0 +1,67 @@
+# Port Hippo integration-test sandbox.
+#
+#   host ──2201──▶ [ jump 172.28.0.11 / 172.29.0.11 ] ──▶ [ dest 172.29.0.12 ]
+#                     sshd + echo(127.0.0.1:7000)            sshd + echo(127.0.0.1:7000)
+#
+# * jump   — reachable from THIS machine on 127.0.0.1:${JUMP_SSH_PORT}.
+# * dest   — attached ONLY to the internal back network, so it is reachable
+#            solely from jump: a true jump-host / bastion topology.
+# * Each container's echo service binds 127.0.0.1, so it is reachable only
+#            through an SSH forward, never directly.
+
+x-sandbox-common: &sandbox-common
+  build: .
+  image: porthippo-sandbox
+  restart: unless-stopped
+  volumes:
+    - ./keys:/keys:ro
+  # Fixed name → sshd host key change on recreate exercises the TOFU / changed-key flow.
+  init: true
+
+networks:
+  front:
+    name: porthippo-front
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${FRONT_SUBNET}
+  back:
+    name: porthippo-back
+    driver: bridge
+    internal: true # no route to the host or the internet — dest is sealed behind jump
+    ipam:
+      config:
+        - subnet: ${BACK_SUBNET}
+
+services:
+  jump:
+    <<: *sandbox-common
+    container_name: porthippo-jump
+    hostname: jump
+    environment:
+      SSH_USER: ${SSH_USER}
+      SSH_PASSWORD: ${SSH_PASSWORD}
+      ECHO_NAME: jump
+      ECHO_PORT: ${ECHO_PORT}
+    networks:
+      front:
+        ipv4_address: ${JUMP_FRONT_IP}
+      back:
+        ipv4_address: ${JUMP_BACK_IP}
+    ports:
+      # Bound to loopback on the host: reachable from THIS machine, not the LAN.
+      - "127.0.0.1:${JUMP_SSH_PORT}:22"
+
+  dest:
+    <<: *sandbox-common
+    container_name: porthippo-dest
+    hostname: dest
+    environment:
+      SSH_USER: ${SSH_USER}
+      SSH_PASSWORD: ${SSH_PASSWORD}
+      ECHO_NAME: dest
+      ECHO_PORT: ${ECHO_PORT}
+    networks:
+      back:
+        ipv4_address: ${DEST_BACK_IP}
+    # No `ports:` — dest publishes nothing, so the host can't reach it directly.

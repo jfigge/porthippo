@@ -436,6 +436,63 @@ clean:
 	@rm -rf $(BUILD_DIR) $(DIST_DIR)
 	@echo "--------------------------------"
 
+# ─── Integration-test sandbox (Docker) ────────────────────────────────────────
+# Two containers modelling Port Hippo's jump-host scenario: a host-reachable jump
+# host and a destination reachable ONLY through it, each running an SSH server
+# (password + key auth) and a loopback-only echo service. See docker/README.md.
+SANDBOX_DIR ?= $(WORKSPACE)/docker
+COMPOSE     ?= docker compose
+SANDBOX_KEY  = $(SANDBOX_DIR)/keys/id_porthippo
+
+# Generate the throwaway SSH keypair the containers authorise (idempotent).
+sandbox-keys:
+	@mkdir -p $(SANDBOX_DIR)/keys
+	@if [ ! -f $(SANDBOX_KEY) ]; then \
+	  echo "Generating sandbox SSH keypair ($(SANDBOX_KEY))..."; \
+	  ssh-keygen -t ed25519 -N '' -C porthippo-sandbox -f $(SANDBOX_KEY) >/dev/null; \
+	  cp $(SANDBOX_KEY).pub $(SANDBOX_DIR)/keys/authorized_keys; \
+	fi
+
+# Build the image and create the containers + networks (without starting them).
+sandbox-create: sandbox-keys
+	@echo "Building sandbox image + creating containers..."
+	@cd $(SANDBOX_DIR) && $(COMPOSE) build
+	@cd $(SANDBOX_DIR) && $(COMPOSE) up --no-start
+	@echo "Created. Run 'make sandbox-start' to start + print access details."
+
+# Start the containers (creating anything missing) and print access details.
+sandbox-start: sandbox-keys
+	@cd $(SANDBOX_DIR) && $(COMPOSE) up -d
+	@bash $(SANDBOX_DIR)/access.sh
+
+# Stop the containers but keep them (fast restart, state preserved).
+sandbox-stop:
+	@cd $(SANDBOX_DIR) && $(COMPOSE) stop
+
+# Remove the containers + networks (keeps the built image and the keys).
+sandbox-destroy:
+	@cd $(SANDBOX_DIR) && $(COMPOSE) down --remove-orphans
+
+# Seed Port Hippo's store (the `make debug` data dir) with definitions matching the
+# sandbox: two credentials (key + password), the jump host, and both tunnels.
+# Idempotent — re-running only adds what's missing.
+sandbox-seed:
+	@node $(SANDBOX_DIR)/seed-porthippo.js $(DATA_DIR)
+
+# Prove the topology end-to-end (direct to jump, and through the jump to dest).
+sandbox-verify:
+	@bash $(SANDBOX_DIR)/verify.sh
+
+# Re-print the access details.
+sandbox-access:
+	@bash $(SANDBOX_DIR)/access.sh
+
+sandbox-status:
+	@cd $(SANDBOX_DIR) && $(COMPOSE) ps
+
+sandbox-logs:
+	@cd $(SANDBOX_DIR) && $(COMPOSE) logs -f
+
 # ─── Help ─────────────────────────────────────────────────────────────────────
 help:
 	@echo ""
@@ -468,8 +525,20 @@ help:
 	@echo "    release       Bump version, tag, push to trigger a release (VERSION=x.y.z)"
 	@echo "    sync-mac      Push macOS signing creds from release.env → GitHub secrets"
 	@echo "    sync-win      Push Windows signing creds from release.env → GitHub secrets"
+	@echo ""
+	@echo "  Integration-test sandbox (Docker jump-host + destination):"
+	@echo "    sandbox-create  Build image + create containers/networks (not started)"
+	@echo "    sandbox-start   Start the containers and print access details"
+	@echo "    sandbox-stop    Stop the containers (keep state)"
+	@echo "    sandbox-destroy Remove containers + networks (keeps image + keys)"
+	@echo "    sandbox-seed    Seed Port Hippo with the sandbox tunnels/credentials"
+	@echo "    sandbox-verify  Prove both echo services are reachable over SSH"
+	@echo "    sandbox-access  Re-print the access details"
+	@echo "    sandbox-status  docker compose ps  ·  sandbox-logs  Follow logs"
 
 .PHONY: version info install debug debug-inspect fmt fmt-check lint license-headers test \
         test-license-headers test-js test-tunnel build build-mac build-linux build-win dmg \
         build-setup build-install icons sign-dmg sign-all dist dist-mac dist-linux dist-win \
-        staple-dmg release sync-mac sync-win clean help
+        staple-dmg release sync-mac sync-win clean help \
+        sandbox-keys sandbox-create sandbox-start sandbox-stop sandbox-destroy \
+        sandbox-seed sandbox-verify sandbox-access sandbox-status sandbox-logs

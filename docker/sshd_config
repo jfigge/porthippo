@@ -1,0 +1,24 @@
+# Port Hippo sandbox sshd config. Deliberately permissive for LOCAL TESTING ONLY.
+Port 22
+
+# Both auth methods are enabled so Port Hippo can be exercised against each.
+PasswordAuthentication yes
+PubkeyAuthentication yes
+AuthorizedKeysFile .ssh/authorized_keys
+
+PermitRootLogin no
+PermitEmptyPasswords no
+
+# TCP forwarding is what makes this a tunnel target: the jump host must forward a
+# direct-tcpip channel onward to the destination, and every hop must forward to
+# its own loopback echo service. Leave PermitOpen at the default (any) so both work.
+AllowTcpForwarding yes
+GatewayPorts no
+X11Forwarding no
+AllowAgentForwarding no
+
+# Fail fast + quietly for a throwaway container.
+LoginGraceTime 30
+MaxAuthTries 6
+PrintMotd no
+Subsystem sftp /usr/lib/ssh/sftp-server

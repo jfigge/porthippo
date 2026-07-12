@@ -45,3 +45,6 @@ keys/
 website/versions.json
 website/docs/
 website/sitemap.xml
+
+# Generated SSH keys for the local integration-test sandbox (docker/)
+docker/keys/
