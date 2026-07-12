@@ -1,6 +1,6 @@
 {
   "name": "porthippo",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "On-demand SSH tunnel manager",
   "homepage": "https://github.com/jfigge/porthippo",
   "repository": {
@@ -73,28 +73,42 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["arm64", "x64"]
+          "arch": [
+            "arm64",
+            "x64"
+          ]
         },
         {
           "target": "zip",
-          "arch": ["arm64", "x64"]
+          "arch": [
+            "arm64",
+            "x64"
+          ]
         }
       ]
     },
     "win": {
       "icon": "web/icons/256x256.png",
       "signtoolOptions": {
-        "signingHashAlgorithms": ["sha256"],
+        "signingHashAlgorithms": [
+          "sha256"
+        ],
         "rfc3161TimeStampServer": "http://timestamp.digicert.com"
       },
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64", "arm64"]
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         },
         {
           "target": "portable",
-          "arch": ["x64", "arm64"]
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         }
       ]
     },
@@ -107,11 +121,17 @@
       "target": [
         {
           "target": "AppImage",
-          "arch": ["x64", "arm64"]
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         },
         {
           "target": "deb",
-          "arch": ["x64", "arm64"]
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         }
       ]
     }
