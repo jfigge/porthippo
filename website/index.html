@@ -902,7 +902,7 @@
           </svg>
         </div>
         <h3>Local-Only by Default</h3>
-        <p>Listeners bind to <code style="font-size:0.8em;background:var(--surface-0);padding:1px 5px;border-radius:3px;color:var(--accent)">127.0.0.1</code> out of the box. Exposing a tunnel to your LAN is a deliberate, clearly-warned opt-in — never the default.</p>
+        <p>Listeners bind to <code style="font-size:0.8em;background:var(--surface-0);padding:1px 5px;border-radius:3px;color:var(--accent)">127.0.0.1</code> out of the box — reachable only from your own machine. Exposing a tunnel to your LAN is a deliberate opt-in: you enter an explicit <code style="font-size:0.8em;background:var(--surface-0);padding:1px 5px;border-radius:3px;color:var(--accent)">address:port</code>, never the default.</p>
       </div>
 
       <div class="feature-card">
@@ -931,8 +931,8 @@
             <line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.58 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/>
           </svg>
         </div>
-        <h3>No Phone-Home</h3>
-        <p>Fully offline. No accounts, no telemetry, no analytics. The one runtime dependency is <code style="font-size:0.8em;background:var(--surface-0);padding:1px 5px;border-radius:3px;color:var(--accent)">ssh2</code> — Port Hippo owns the local socket and relays the bytes itself.</p>
+        <h3>No Tracking</h3>
+        <p>No accounts, no telemetry, no analytics — nothing about you ever leaves your machine. The only outbound call is a background check to GitHub for updates. Its SSH transport (<code style="font-size:0.8em;background:var(--surface-0);padding:1px 5px;border-radius:3px;color:var(--accent)">ssh2</code>) is owned end-to-end: Port Hippo binds the local socket and relays the bytes itself.</p>
       </div>
 
       <div class="feature-card">
