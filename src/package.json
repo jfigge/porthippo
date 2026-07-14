@@ -1,6 +1,6 @@
 {
   "name": "porthippo",
-  "version": "0.2.0",
+  "version": "0.6.0",
   "description": "On-demand SSH tunnel manager",
   "homepage": "https://github.com/jfigge/porthippo",
   "repository": {
