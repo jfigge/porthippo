@@ -70,19 +70,15 @@ function initShell() {
     settingsPopup.open(),
   );
 
-  // The top-left brand mark opens the in-app About dialog (also reachable from
-  // the Help ▸ About / macOS app menu, which arrives as porthippo:show-about).
+  // The top-left brand ICON button opens the in-app About dialog (also reachable
+  // from the Help ▸ About / macOS app menu, which arrives as porthippo:show-about).
+  // It's a native <button>, so Enter/Space activation is handled for us; the logo
+  // + subtitle text beside it are intentionally not clickable.
   const brand = document.getElementById("app-brand");
   if (brand) {
     brand.setAttribute("aria-label", t("header.about"));
     brand.setAttribute("title", t("header.about"));
     brand.addEventListener("click", () => AboutDialog.open());
-    brand.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        AboutDialog.open();
-      }
-    });
   }
 
   window.addEventListener("porthippo:show-about", () => AboutDialog.open());

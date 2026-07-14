@@ -31,25 +31,28 @@
     <div id="app">
       <!-- ── App header ────────────────────────────────────────────────── -->
       <header id="app-header" aria-label="Application header">
-        <!-- Brand mark doubles as the About trigger (localized in app.js). -->
-        <div
-          class="app-header-brand"
-          id="app-brand"
-          role="button"
-          tabindex="0"
-          title="About Port Hippo"
-          aria-label="About Port Hippo"
-        >
-          <img
-            class="app-header-icon"
-            src="icons/48x48.png"
-            width="24"
-            height="24"
-            alt=""
-            aria-hidden="true"
-            draggable="false"
-          />
-          <span class="app-header-title">SSH Tunnel Manager</span>
+        <!-- Brand lockup: only the icon button opens About (localized in
+             app.js); the logo + subtitle text are not clickable. -->
+        <div class="app-header-brand">
+          <button
+            class="app-header-icon-btn"
+            id="app-brand"
+            type="button"
+            title="About Port Hippo"
+            aria-label="About Port Hippo"
+          >
+            <img
+              class="app-header-icon"
+              src="porthippo-icon.svg"
+              width="28"
+              height="28"
+              alt=""
+              aria-hidden="true"
+              draggable="false"
+            />
+          </button>
+          <span class="app-logo">Port Hippo</span>
+          <span class="app-subtitle">SSH Tunnel Manager</span>
         </div>
 
         <div class="app-header-meta">
