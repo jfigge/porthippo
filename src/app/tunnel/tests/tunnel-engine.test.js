@@ -364,6 +364,11 @@ test("EADDRINUSE surfaces as an error state, not a crash", async () => {
     const status = await tunnel.arm();
     assert.equal(status.state, "error");
     assert.match(status.error, /in use/);
+    // The bind failure is logged to the error history the "Errors" card opens.
+    const log = tunnel.events();
+    assert.equal(log.length, 1);
+    assert.equal(log[0].level, "error");
+    assert.match(log[0].message, /in use/);
   } finally {
     await tunnel.dispose();
     await closeServer(blocker);

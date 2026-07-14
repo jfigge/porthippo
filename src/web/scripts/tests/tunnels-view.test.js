@@ -30,12 +30,16 @@ const NOW = 2_000_000;
 
 function stub(
   defs,
-  { status = [], jumps = [], settings = {}, calls = {} } = {},
+  { status = [], jumps = [], settings = {}, calls = {}, eventsById = {} } = {},
 ) {
   return {
     tunnels: {
       list: async () => defs,
       status: async () => status,
+      events: async (id) => (
+        (calls.events ||= []).push(id),
+        eventsById[id] || []
+      ),
       arm: async (id) => (
         (calls.arm ||= []).push(id),
         { id, state: "listening" }
@@ -186,6 +190,43 @@ test("clicking the errored State card opens a dialog with the full error", async
   const msg = document.querySelector(".popup-notify .popup-message");
   assert.ok(msg, "an error dialog opened");
   assert.match(msg.textContent, /SSH authentication failed/);
+  PopupManager.close();
+});
+
+test("clicking the Errors card opens the history dialog fetched on demand from main", async () => {
+  const { view, calls } = await mount({
+    eventsById: {
+      a: [
+        { at: NOW - 1000, level: "error", message: "bind: address in use" },
+        { at: NOW, level: "error", message: "forward failed" },
+      ],
+    },
+  });
+  // Tunnel 'a' (auto-selected) reports two errors via a stats snapshot.
+  window.dispatchEvent(
+    new CustomEvent("porthippo:stats-updated", {
+      detail: {
+        stats: new Map([["a", { id: "a", state: "error", errorCount: 2 }]]),
+      },
+    }),
+  );
+  const errorsCard = view.element.querySelector(
+    '.detail-card[data-card="errors"]',
+  );
+  assert.ok(errorsCard.classList.contains("detail-card--clickable"));
+  errorsCard.click();
+  await tick();
+
+  assert.deepEqual(calls.events, ["a"], "fetched the history for 'a'");
+  const items = document.querySelectorAll(
+    ".popup-error-history .error-history-item",
+  );
+  assert.equal(items.length, 2);
+  // Newest first.
+  assert.match(
+    items[0].querySelector(".error-history-message").textContent,
+    /forward failed/,
+  );
   PopupManager.close();
 });
 

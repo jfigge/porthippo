@@ -62,6 +62,7 @@ export class TunnelDetail {
   #onTogglePause;
   #onCardsChange;
   #onShowError;
+  #onShowErrors;
 
   constructor({
     now,
@@ -69,12 +70,14 @@ export class TunnelDetail {
     onTogglePause,
     onCardsChange,
     onShowError,
+    onShowErrors,
   } = {}) {
     this.#now = now || Date.now;
     this.#onToggleArm = onToggleArm || (() => {});
     this.#onTogglePause = onTogglePause || (() => {});
     this.#onCardsChange = onCardsChange || (() => {});
     this.#onShowError = onShowError || (() => {});
+    this.#onShowErrors = onShowErrors || (() => {});
     this.#cardMenu = new CardMenu({
       visible: () => this.#visible,
       onToggle: (key, show) => this.#toggleCard(key, show),
@@ -242,15 +245,15 @@ export class TunnelDetail {
         onDrop: (e) => this.#onDrop(e, key),
         onDragend: () => this.#clearDropMarks(),
       };
-      // The State card doubles as the "error card": while the tunnel is errored
-      // it becomes an activatable button that opens the full error (see
-      // #updateValues for the matching affordance).
-      if (key === "state") {
-        props.onClick = () => this.#activateStateCard();
+      // Two cards double as buttons: the State card opens the current error
+      // while errored; the Errors card opens the whole error history when the
+      // count is non-zero (see #updateCardAffordances for the matching cue).
+      if (key === "state" || key === "errors") {
+        props.onClick = () => this.#activateCard(key);
         props.onKeydown = (e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
-            this.#activateStateCard();
+            this.#activateCard(key);
           }
         };
       }
@@ -273,24 +276,38 @@ export class TunnelDetail {
         rec.valueEl.classList.add(cls);
       }
     }
-    this.#updateStateCardAffordance();
+    this.#updateCardAffordances();
   }
 
   /**
-   * Toggle the State card's "click for the full error" affordance. It's an
-   * activatable button only while the tunnel is errored; otherwise it's an inert
-   * display card like the rest.
+   * Toggle the "click me" affordance on the two activatable cards: the State card
+   * (danger-tinted) while the tunnel is errored, and the Errors card while its
+   * count is non-zero. Any other time they're inert display cards like the rest.
    */
-  #updateStateCardAffordance() {
-    const rec = this.#cardNodes.get("state");
+  #updateCardAffordances() {
+    this.#setCardActivatable(
+      "state",
+      this.#state === "error",
+      "detail-card--error",
+      "error.card.hint",
+    );
+    this.#setCardActivatable(
+      "errors",
+      (this.#snap?.errorCount ?? 0) > 0,
+      "detail-card--clickable",
+      "errors.card.hint",
+    );
+  }
+
+  #setCardActivatable(key, active, cls, hintKey) {
+    const rec = this.#cardNodes.get(key);
     if (!rec) return;
-    const errored = this.#state === "error";
-    rec.root.classList.toggle("detail-card--error", errored);
-    if (errored) {
+    rec.root.classList.toggle(cls, active);
+    if (active) {
       rec.root.setAttribute("role", "button");
       rec.root.setAttribute("tabindex", "0");
-      rec.root.title = t("error.card.hint");
-      rec.root.setAttribute("aria-label", t("error.card.hint"));
+      rec.root.title = t(hintKey);
+      rec.root.setAttribute("aria-label", t(hintKey));
     } else {
       rec.root.setAttribute("role", "listitem");
       rec.root.removeAttribute("tabindex");
@@ -299,10 +316,14 @@ export class TunnelDetail {
     }
   }
 
-  /** Activate the State card: open the full error, but only when errored. */
-  #activateStateCard() {
-    if (this.#state !== "error" || !this.#def) return;
-    this.#onShowError(this.#def.id);
+  /** Activate an error card: State → the current error; Errors → the history. */
+  #activateCard(key) {
+    if (!this.#def) return;
+    if (key === "state" && this.#state === "error") {
+      this.#onShowError(this.#def.id);
+    } else if (key === "errors" && (this.#snap?.errorCount ?? 0) > 0) {
+      this.#onShowErrors(this.#def.id);
+    }
   }
 
   #updateControls() {

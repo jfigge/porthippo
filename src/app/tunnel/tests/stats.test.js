@@ -128,6 +128,47 @@ test("connectionCount is cumulative and errorCount tracks onError()", () => {
   assert.equal(stats.snapshot().errorCount, 2);
 });
 
+test("onError logs a timestamped event; the log resets with the count on re-arm", () => {
+  const clock = fakeClock(5_000_000);
+  const stats = new Stats({ now: clock.now });
+  stats.onArmed();
+  assert.deepEqual(stats.events(), []);
+
+  stats.onError("bind: address in use");
+  clock.advance(1000);
+  stats.onError("forward failed: ECONNREFUSED");
+
+  const log = stats.events();
+  assert.equal(log.length, 2);
+  assert.deepEqual(log[0], {
+    at: 5_000_000,
+    level: "error",
+    message: "bind: address in use",
+  });
+  assert.equal(log[1].at, 5_001_000);
+  assert.equal(log[1].message, "forward failed: ECONNREFUSED");
+  // Count and log stay in lockstep.
+  assert.equal(stats.snapshot().errorCount, 2);
+
+  // events() returns a copy — mutating it can't corrupt the internal log.
+  log.pop();
+  assert.equal(stats.events().length, 2);
+
+  stats.onArmed();
+  assert.deepEqual(stats.events(), []);
+  assert.equal(stats.snapshot().errorCount, 0);
+});
+
+test("the event log is bounded to the most recent entries", () => {
+  const stats = new Stats({ now: fakeClock().now });
+  stats.onArmed();
+  for (let i = 0; i < 150; i++) stats.onError(`err ${i}`);
+  const log = stats.events();
+  assert.equal(log.length, 100, "bounded to MAX_EVENTS");
+  assert.equal(log[0].message, "err 50", "oldest fell off");
+  assert.equal(log.at(-1).message, "err 149", "newest kept");
+});
+
 test("firstConnectedAt is stamped once; lastDisconnectedAt tracks teardown", () => {
   const clock = fakeClock(9_000_000);
   const stats = new Stats({ now: clock.now });

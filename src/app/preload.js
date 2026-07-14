@@ -61,6 +61,8 @@ contextBridge.exposeInMainWorld("porthippo", {
     arm: (id) => ipcRenderer.invoke("tunnels:arm", id),
     disarm: (id) => ipcRenderer.invoke("tunnels:disarm", id),
     status: () => ipcRenderer.invoke("tunnels:status"),
+    // On-demand error/warning history for one tunnel (the "Errors" card dialog).
+    events: (id) => ipcRenderer.invoke("tunnels:events", id),
     pause: (id) => ipcRenderer.invoke("tunnels:pause", id),
     resume: (id) => ipcRenderer.invoke("tunnels:resume", id),
     // Force-apply a stashed connection-affecting edit now (drops live connections)

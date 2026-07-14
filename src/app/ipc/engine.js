@@ -70,6 +70,12 @@ function registerEngineIPC({ ipcMain, getEngine }) {
     wrap("tunnels:status", () => getEngine().status()),
   );
 
+  // On-demand error/warning history for one tunnel (the "Errors" card dialog).
+  ipcMain.handle(
+    "tunnels:events",
+    wrap("tunnels:events", (id) => getEngine().events(id)),
+  );
+
   // Force-apply a pending (connection-affecting) edit now, dropping live
   // connections, instead of waiting for the tunnel to go idle.
   ipcMain.handle(

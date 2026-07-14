@@ -250,6 +250,13 @@ export const EN = {
   "error.dialog.unknown":
     "The tunnel reported an error, but no details are available.",
 
+  // ── Errors card → error/warning history dialog ──────────────────────────
+  "errors.card.hint": "Show the error history",
+  "errors.dialog.title": "Error history — {name}",
+  "errors.dialog.empty": "No errors recorded yet.",
+  "errors.level.error": "Error",
+  "errors.level.warning": "Warning",
+
   // ── View mode + all-tunnels list (table) ────────────────────────────────
   "view.mode.label": "View",
   "view.mode.cards": "Cards",

@@ -151,6 +151,11 @@ class Tunnel {
     };
   }
 
+  /** The bounded error/warning event log (oldest first) the "Errors" card opens. */
+  events() {
+    return this.#stats.events();
+  }
+
   // ── Arm / disarm ──────────────────────────────────────────────────────────────
 
   /** Bind the listener; if `keepAlive`, also connect the SSH chain eagerly. */
@@ -174,7 +179,7 @@ class Tunnel {
     try {
       await listener.start();
     } catch (err) {
-      this.#error = err.message;
+      this.#recordError(err.message);
       this.#setState("error");
       return this.status();
     }
@@ -358,10 +363,9 @@ class Tunnel {
             // socket down and will fire onClose; record the reason so a misconfigured
             // destination is visible instead of the tunnel sitting silently
             // "connected" while every forward fails.
-            this.#error = String(
-              (err && err.message) || err || "forward failed",
+            this.#recordError(
+              String((err && err.message) || err || "forward failed"),
             );
-            this.#stats.onError();
             this.#emitState();
           },
         });
@@ -384,9 +388,18 @@ class Tunnel {
     this.#emitState();
   }
 
+  /**
+   * Record an error: set the reported `error` string AND append it to the stats
+   * event log (which the "Errors" card opens) + bump the count. The single seam
+   * every error path funnels through, so the log and the count can't diverge.
+   */
+  #recordError(message) {
+    this.#error = message;
+    this.#stats.onError(message);
+  }
+
   #handleListenerError(err) {
-    this.#error = err.message;
-    this.#stats.onError();
+    this.#recordError(err.message);
     this.#setState("error");
   }
 
@@ -453,7 +466,9 @@ class Tunnel {
   #handleDrop(err) {
     this.#sshConnection = null;
     this.#stats.onDisconnected(); // this SSH session is over; openedAt clears
-    this.#error = err ? String(err.message || err) : "SSH connection dropped";
+    this.#recordError(
+      err ? String(err.message || err) : "SSH connection dropped",
+    );
     this.#failAllConnections();
     this.#cancelLinger();
 
@@ -505,8 +520,9 @@ class Tunnel {
 
   /** A connect attempt failed (lazy connect, eager keepAlive, or reconnect). */
   #failConnect(err) {
-    this.#error = String((err && err.message) || err || "connection failed");
-    this.#stats.onError();
+    this.#recordError(
+      String((err && err.message) || err || "connection failed"),
+    );
     if (this.#shouldStayHot()) {
       this.#attemptReconnect();
     } else {

@@ -46,9 +46,14 @@ const RATE_WINDOW_MS = 3000;
 const RATE_BUCKET_MS = 500;
 const RATE_BUCKET_COUNT = RATE_WINDOW_MS / RATE_BUCKET_MS;
 
+// The event log (errors now; warnings later) is bounded to the most recent
+// entries so a flapping tunnel can't grow it without limit; the oldest fall off.
+const MAX_EVENTS = 100;
+
 class Stats {
   #now;
   #buckets = []; // [{ idx, up, down }] within the window, oldest first
+  #events = []; // [{ at, level, message }], oldest first — the error/warning log
 
   // Public, serializable fields (mirrored verbatim into snapshot()).
   bytesUp = 0;
@@ -111,9 +116,35 @@ class Stats {
     if (this.activeConnections > 0) this.activeConnections -= 1;
   }
 
-  /** A connect / forward / listener error occurred (cumulative since arm). */
-  onError() {
+  /**
+   * A connect / forward / listener error occurred (cumulative since arm). The
+   * optional `message` is appended to the event log the "Errors" card opens.
+   * @param {string} [message]
+   */
+  onError(message) {
     this.errorCount += 1;
+    this.#record("error", message);
+  }
+
+  /**
+   * Append an entry to the bounded event log. Kept generic over `level` so a
+   * future "warning" event (a soft, non-error condition) reuses the same log the
+   * history dialog reads.
+   * @param {"error"|"warning"} level
+   * @param {string} [message]
+   */
+  #record(level, message) {
+    this.#events.push({
+      at: this.#now(),
+      level,
+      message: message == null ? "" : String(message),
+    });
+    if (this.#events.length > MAX_EVENTS) this.#events.shift();
+  }
+
+  /** A serializable copy of the event log (oldest first). */
+  events() {
+    return this.#events.map((e) => ({ ...e }));
   }
 
   // ── Lifecycle (called by tunnel.js) ─────────────────────────────────────────
@@ -131,6 +162,7 @@ class Stats {
     this.lastDisconnectedAt = null;
     this.armedAt = this.#now();
     this.#buckets = [];
+    this.#events = []; // the log resets with errorCount for a fresh session
   }
 
   /** The SSH session connected — stamp the current open time (and the first). */

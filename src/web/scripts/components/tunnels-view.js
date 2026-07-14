@@ -30,6 +30,7 @@ import { TunnelEditorDialog } from "./tunnel-editor-dialog.js";
 import { TunnelList } from "./tunnel-list.js";
 import { TunnelDetail } from "./tunnel-detail.js";
 import { TunnelTable } from "./tunnel-table.js";
+import { buildErrorHistory } from "./error-history-dialog.js";
 
 /** Armed = the engine holds this tunnel (anything but disarmed / error). */
 function isArmed(state) {
@@ -85,6 +86,7 @@ export class TunnelsView {
       onTogglePause: (id) => this.#togglePause(id),
       onCardsChange: (order) => this.#persistCardOrder(order),
       onShowError: (id) => this.#showError(id),
+      onShowErrors: (id) => this.#showErrorHistory(id),
     });
 
     this.#table = new TunnelTable({
@@ -341,6 +343,31 @@ export class TunnelsView {
       }),
       message: this.#errors.get(id) || t("error.dialog.unknown"),
     });
+  }
+
+  /**
+   * Open the error/warning HISTORY for a tunnel (fired by clicking its Errors
+   * card). The log is fetched on demand from main so the stats heartbeat stays
+   * lean; a failed/empty fetch just yields an empty history.
+   */
+  async #showErrorHistory(id) {
+    const def = this.#defs.find((d) => d.id === id);
+    let events = [];
+    try {
+      const res = await this.#porthippo?.tunnels?.events?.(id);
+      if (Array.isArray(res)) events = res;
+    } catch {
+      events = [];
+    }
+    const element = buildErrorHistory({
+      events,
+      title: t("errors.dialog.title", {
+        name: (def && def.name) || t("def.unnamed"),
+      }),
+      now: this.#now,
+      onClose: () => PopupManager.close(),
+    });
+    PopupManager.open({ element, onMaskClick: () => PopupManager.close() });
   }
 
   #setLiveState(id, state) {

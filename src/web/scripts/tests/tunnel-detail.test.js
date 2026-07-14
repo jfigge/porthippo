@@ -240,6 +240,29 @@ test("the State card becomes an activatable error button only while errored", ()
   assert.equal(stateCard().getAttribute("tabindex"), null);
 });
 
+test("the Errors card becomes an activatable button only when the count is non-zero", () => {
+  const { detail, calls } = mount({
+    onShowErrors: (id) => calls.errs.push(id),
+  });
+  calls.errs = [];
+  detail.show(DEF, { state: "connected", snap: { errorCount: 0 } });
+
+  const errorsCard = () =>
+    detail.element.querySelector('.detail-card[data-card="errors"]');
+
+  // Zero errors → inert, and a click does nothing.
+  assert.ok(!errorsCard().classList.contains("detail-card--clickable"));
+  errorsCard().click();
+  assert.deepEqual(calls.errs, []);
+
+  // A non-zero count → clickable, and a click reports the tunnel id.
+  detail.updateSnap({ errorCount: 3 }, "connected");
+  assert.ok(errorsCard().classList.contains("detail-card--clickable"));
+  assert.equal(errorsCard().getAttribute("role"), "button");
+  errorsCard().click();
+  assert.deepEqual(calls.errs, ["t1"]);
+});
+
 test("Enter/Space on the errored State card also opens the error", () => {
   const { detail, calls } = mount({ onShowError: (id) => calls.err.push(id) });
   calls.err = [];

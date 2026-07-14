@@ -123,6 +123,15 @@ class TunnelEngine {
     return [...this.#tunnels.values()].map((t) => t.status());
   }
 
+  /**
+   * The error/warning event log for one tunnel (oldest first), or `[]` when the
+   * tunnel isn't currently held by the engine. Read on demand when the user opens
+   * the "Errors" card, so the frequent stats heartbeat stays lean.
+   */
+  events(id) {
+    return this.#tunnels.get(id)?.events() ?? [];
+  }
+
   /** Arm every enabled definition (startup). */
   async armAll() {
     const defs = this.#getStores().tunnelStore().listDecrypted();
