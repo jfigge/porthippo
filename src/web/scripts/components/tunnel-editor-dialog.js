@@ -161,6 +161,19 @@ export class TunnelEditorDialog {
     this.#dialog.open();
   }
 
+  /**
+   * Open a *create* editor prefilled with a copy of an existing definition
+   * (the row context menu's "Clone"). Every value carries over except the name,
+   * which is blanked; dropping the id makes the save a create. The name field is
+   * focused so the user must name the copy before saving.
+   */
+  async openClone(def) {
+    await this.#load({ ...(def || {}), id: undefined, name: "" });
+    this.#dialog.setTitle(t("editor.newTitle"));
+    this.#dialog.open();
+    this.#controls.name?.focus();
+  }
+
   // ── Form state ──────────────────────────────────────────────────────────────
 
   async #load(def) {

@@ -62,7 +62,8 @@ Electron main process (src/app/main.js)
 - Request/response IPC channels are registered in `ipc/store.js` (CRUD + settings +
   `hostkeys:list|revoke`), `ipc/engine.js` (`tunnels:arm|disarm|status|pause|resume|apply`,
   `hostkeys:trust|reject`), `ipc/resolve.js` (`resolve:lookup|test|cancel` — Feature 100),
-  `ipc/dialog.js` (`dialog:open-key-file`), `ipc/shell.js`
+  `ipc/dialog.js` (`dialog:open-key-file`), `ipc/context-menu.js` (`menu:popup` — the
+  native tunnel-row right-click menu), `ipc/shell.js`
   (`i18n:load`, `diagnostics:copy`) and `ipc/secret-storage.js`
   (`secret-storage:get-mode|set-mode|unlock|lock`), and exposed through `preload.js`; **keep
   the handler and the `window.porthippo.*` exposure in lockstep** (the `ipc-parity` test

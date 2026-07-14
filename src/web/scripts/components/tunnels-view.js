@@ -77,7 +77,8 @@ export class TunnelsView {
       onSelect: (id) => this.#select(id),
       onAdd: () => this.#editor.openCreate(),
       onEdit: (id) => this.#editById(id),
-      onDelete: (id) => this.#confirmDelete(id),
+      // Delete is offered from the sidebar row's right-click menu, not an icon.
+      onContextMenu: (id) => this.#showContextMenu(id),
     });
 
     this.#detail = new TunnelDetail({
@@ -99,6 +100,7 @@ export class TunnelsView {
       onSortChange: (sort) => this.#persistListSort(sort),
       onToggleArm: (id) => this.#toggleArm(id),
       onTogglePause: (id) => this.#togglePause(id),
+      onContextMenu: (id) => this.#showContextMenu(id),
     });
 
     this.#split = el("div", { class: "tunnels-split" }, [
@@ -215,6 +217,76 @@ export class TunnelsView {
   #editById(id) {
     const def = this.#defs.find((d) => d.id === id);
     if (def) this.#editor.openEdit(def);
+  }
+
+  /**
+   * Open a create editor prefilled with a copy of an existing tunnel — every
+   * value carries over except the name, which is left blank and focused so the
+   * user must name the copy before saving (the id is dropped, so the save is a
+   * create, not an update).
+   */
+  #cloneById(id) {
+    const def = this.#defs.find((d) => d.id === id);
+    if (def) this.#editor.openClone(def);
+  }
+
+  // ── Row context menu (native OS menu on secondary-click) ──────────────────
+
+  /**
+   * Pop the native OS context menu for a right-clicked tunnel row. Labels are
+   * resolved here (Pause/Play + Arm/Disarm reflect the live state), sent to main
+   * as a plain template, and the chosen item id is dispatched to the same
+   * actions the row buttons use. Selecting the row first keeps the detail view
+   * (and the list-view arm/pause controls) pointed at the menu's target.
+   */
+  async #showContextMenu(id) {
+    const def = this.#defs.find((d) => d.id === id);
+    if (!def) return;
+    this.#select(id);
+
+    const state = this.#states.get(id) || "disarmed";
+    const armed = isArmed(state);
+    const paused = state === "paused";
+    const canPause = state === "connected" || paused;
+
+    const items = [
+      { id: "edit", label: t("tunnels.menu.edit") },
+      { type: "separator" },
+      {
+        id: "pause",
+        label: paused ? t("tunnels.menu.play") : t("tunnels.menu.pause"),
+        enabled: canPause,
+      },
+      {
+        id: "arm",
+        label: armed ? t("tunnels.menu.disarm") : t("tunnels.menu.arm"),
+      },
+      { type: "separator" },
+      { id: "clone", label: t("tunnels.menu.clone") },
+      { type: "separator" },
+      { id: "delete", label: t("tunnels.menu.delete") },
+    ];
+
+    const action = await this.#porthippo?.contextMenu?.popup?.({ items });
+    switch (action) {
+      case "edit":
+        this.#editById(id);
+        break;
+      case "pause":
+        this.#togglePause(id);
+        break;
+      case "arm":
+        this.#toggleArm(id);
+        break;
+      case "clone":
+        this.#cloneById(id);
+        break;
+      case "delete":
+        this.#confirmDelete(id);
+        break;
+      default:
+        break; // dismissed (null) or an unknown id
+    }
   }
 
   #select(id) {

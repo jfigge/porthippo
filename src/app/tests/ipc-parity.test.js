@@ -63,6 +63,7 @@ const mainProcessSource = [
   "ipc/engine.js",
   "ipc/resolve.js",
   "ipc/dialog.js",
+  "ipc/context-menu.js",
   "ipc/shell.js",
   "ipc/secret-storage.js",
 ]

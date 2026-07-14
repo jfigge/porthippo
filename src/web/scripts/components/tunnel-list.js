@@ -15,10 +15,12 @@
  */
 
 // tunnel-list.js — the master sidebar: a flat list of tunnels, one row each with
-// a status dot, the local port, the name, and (on hover/focus) edit + delete icon
-// buttons. An Add icon sits in the header. Selection, add, edit and delete are
-// reported to the owning TunnelsView via constructor callbacks; the list itself
-// holds no IPC and computes nothing — state is fed in.
+// a status dot, the local port, the name, and (on hover/focus) a quick-edit icon
+// button. An Add icon sits in the header; delete (and the other row actions) live
+// on the row's right-click context menu, owned by TunnelsView. Selection, add,
+// edit and context-menu requests are reported to the owning TunnelsView via
+// constructor callbacks; the list itself holds no IPC and computes nothing —
+// state is fed in.
 
 import { el, clear } from "../dom.js";
 import { t } from "../i18n.js";
@@ -48,13 +50,13 @@ export class TunnelList {
   #onSelect;
   #onAdd;
   #onEdit;
-  #onDelete;
+  #onContextMenu;
 
-  constructor({ onSelect, onAdd, onEdit, onDelete } = {}) {
+  constructor({ onSelect, onAdd, onEdit, onContextMenu } = {}) {
     this.#onSelect = onSelect || (() => {});
     this.#onAdd = onAdd || (() => {});
     this.#onEdit = onEdit || (() => {});
-    this.#onDelete = onDelete || (() => {});
+    this.#onContextMenu = onContextMenu || (() => {});
     this.#el = this.#build();
   }
 
@@ -145,6 +147,8 @@ export class TunnelList {
       class: `tunnel-dot tunnel-dot--${dotState(state)}`,
       title: t(`state.${state}`),
     });
+    // Delete is offered from the row's right-click context menu (TunnelsView),
+    // so the sidebar row keeps only the quick-edit affordance on hover.
     const tools = el("div", { class: "tunnel-row-tools" }, [
       el("button", {
         class: "btn--icon tunnel-row-btn tunnel-edit-btn",
@@ -155,17 +159,6 @@ export class TunnelList {
         onClick: (e) => {
           e.stopPropagation();
           this.#onEdit(def.id);
-        },
-      }),
-      el("button", {
-        class: "btn--icon tunnel-row-btn tunnel-delete-btn",
-        type: "button",
-        title: t("tunnels.delete"),
-        "aria-label": t("tunnels.delete"),
-        html: icons.delete(),
-        onClick: (e) => {
-          e.stopPropagation();
-          this.#onDelete(def.id);
         },
       }),
     ]);
@@ -183,6 +176,11 @@ export class TunnelList {
             e.preventDefault();
             this.#onSelect(def.id);
           }
+        },
+        // Secondary (right) click opens the native OS row menu.
+        onContextmenu: (e) => {
+          e.preventDefault();
+          this.#onContextMenu(def.id);
         },
       },
       [

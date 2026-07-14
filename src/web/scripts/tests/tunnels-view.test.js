@@ -30,9 +30,24 @@ const NOW = 2_000_000;
 
 function stub(
   defs,
-  { status = [], jumps = [], settings = {}, calls = {}, eventsById = {} } = {},
+  {
+    status = [],
+    jumps = [],
+    settings = {},
+    calls = {},
+    eventsById = {},
+    popupChoose = null,
+  } = {},
 ) {
   return {
+    contextMenu: {
+      popup: async (request) => {
+        (calls.popup ||= []).push(request);
+        return typeof popupChoose === "function"
+          ? popupChoose(request)
+          : popupChoose;
+      },
+    },
     tunnels: {
       list: async () => defs,
       status: async () => status,
@@ -160,17 +175,6 @@ test("the detail arm control routes to tunnels.arm for the selected tunnel", asy
   view.element.querySelector(".detail-arm-btn").click();
   await tick();
   assert.deepEqual(calls.arm, ["a"]);
-});
-
-test("deleting a tunnel confirms via the shared dialog then calls delete", async () => {
-  const calls = {};
-  await mount({ calls });
-  document.querySelector('.tunnel-row[data-id="b"] .tunnel-delete-btn').click();
-  const danger = document.querySelector(".popup-confirm .btn--danger");
-  assert.ok(danger, "a delete confirm dialog opened");
-  danger.click();
-  await tick();
-  assert.deepEqual(calls.delete, ["b"]);
 });
 
 test("clicking the errored State card opens a dialog with the full error", async () => {
@@ -323,4 +327,119 @@ test("the list view shares the persisted card order as its columns", async () =>
     (t) => t.dataset.col,
   );
   assert.deepEqual(cols, ["__tunnel", "connections", "download"]);
+});
+
+// ── Row context menu (native OS menu on secondary-click) ─────────────────────
+
+const rightClick = (view, id) =>
+  view.element
+    .querySelector(`.tunnel-row[data-id="${id}"]`)
+    .dispatchEvent(
+      new Event("contextmenu", { bubbles: true, cancelable: true }),
+    );
+// Drain the popup promise → switch → follow-on action (openClone awaits a few).
+const settle = async () => {
+  for (let i = 0; i < 6; i++) await tick();
+};
+const itemById = (items, id) => items.find((i) => i.id === id);
+
+test("right-clicking a row pops a native menu whose items match the spec + state", async () => {
+  const calls = {};
+  const { view } = await mount({ calls });
+  rightClick(view, "a"); // 'a' is disarmed on load
+  await settle();
+
+  assert.equal(calls.popup.length, 1, "one popup requested");
+  const items = calls.popup[0].items;
+  // Edit · — · Pause/Play · Arm/Disarm · — · Clone · — · Delete.
+  assert.deepEqual(
+    items.map((i) => (i.type === "separator" ? "—" : i.id)),
+    ["edit", "—", "pause", "arm", "—", "clone", "—", "delete"],
+  );
+  assert.equal(itemById(items, "edit").label, "Edit");
+  assert.equal(itemById(items, "clone").label, "Clone");
+  assert.equal(itemById(items, "delete").label, "Delete");
+  // Disarmed → "Arm", and Pause is offered but disabled (nothing to pause).
+  assert.equal(itemById(items, "arm").label, "Arm");
+  assert.equal(itemById(items, "pause").label, "Pause");
+  assert.equal(itemById(items, "pause").enabled, false);
+});
+
+test("the menu's Pause/Play + Arm/Disarm labels track the live state", async () => {
+  const calls = {};
+  const { view } = await mount({ calls });
+  const emit = (state) =>
+    window.dispatchEvent(
+      new CustomEvent("porthippo:tunnel-state", { detail: { id: "a", state } }),
+    );
+
+  emit("connected");
+  rightClick(view, "a");
+  await settle();
+  let items = calls.popup.at(-1).items;
+  assert.equal(itemById(items, "arm").label, "Disarm");
+  assert.equal(itemById(items, "pause").label, "Pause");
+  assert.equal(itemById(items, "pause").enabled, true);
+
+  emit("paused");
+  rightClick(view, "a");
+  await settle();
+  items = calls.popup.at(-1).items;
+  assert.equal(itemById(items, "pause").label, "Play");
+  assert.equal(itemById(items, "pause").enabled, true);
+});
+
+test("choosing Delete from the row menu confirms then deletes", async () => {
+  const calls = {};
+  const { view } = await mount({ calls, popupChoose: "delete" });
+  rightClick(view, "b");
+  await settle();
+  const danger = document.querySelector(".popup-confirm .btn--danger");
+  assert.ok(danger, "the shared delete confirm opened");
+  danger.click();
+  await tick();
+  assert.deepEqual(calls.delete, ["b"]);
+});
+
+test("choosing Arm from the row menu routes to tunnels.arm", async () => {
+  const calls = {};
+  const { view } = await mount({ calls, popupChoose: "arm" });
+  rightClick(view, "a");
+  await settle();
+  assert.deepEqual(calls.arm, ["a"]);
+});
+
+test("choosing Clone opens a create editor prefilled from the row, name blanked", async () => {
+  const { view } = await mount({ popupChoose: "clone" });
+  rightClick(view, "b"); // Beta → 172.29.0.12:22, port 5432
+  await settle();
+  const dlg = document.querySelector(".tunnel-dialog");
+  assert.ok(dlg && dlg.open, "the tunnel editor opened");
+  assert.equal(
+    dlg.querySelector(".editor-input-name").value,
+    "",
+    "the copied name is blanked",
+  );
+  assert.equal(
+    dlg.querySelector(".editor-input-targetServer").value,
+    "172.29.0.12",
+    "the target server carried over",
+  );
+});
+
+test("in list mode a right-click on a table row also pops the native menu", async () => {
+  const calls = {};
+  const { view } = await mount({
+    calls,
+    settings: { detailMode: "list" },
+    popupChoose: "arm",
+  });
+  view.element
+    .querySelector('.tt-row[data-id="b"]')
+    .dispatchEvent(
+      new Event("contextmenu", { bubbles: true, cancelable: true }),
+    );
+  await settle();
+  assert.ok((calls.popup || []).length >= 1, "a popup was requested");
+  assert.deepEqual(calls.arm, ["b"]);
 });

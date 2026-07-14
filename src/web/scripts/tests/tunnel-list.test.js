@@ -15,8 +15,8 @@
  */
 
 // tunnel-list.test.js — the sidebar master list: status-dot colour by state, the
-// port + name, selection, the add/edit/delete callbacks (and that edit/delete
-// don't also select), and in-place dot updates.
+// port + name, selection, the add/edit callbacks (and that edit doesn't also
+// select), that delete is no longer an inline icon, and in-place dot updates.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -26,12 +26,12 @@ import { TunnelList, dotState } from "../components/tunnel-list.js";
 
 function mount() {
   resetDom();
-  const calls = { select: [], add: 0, edit: [], delete: [] };
+  const calls = { select: [], add: 0, edit: [], context: [] };
   const list = new TunnelList({
     onSelect: (id) => calls.select.push(id),
     onAdd: () => (calls.add += 1),
     onEdit: (id) => calls.edit.push(id),
-    onDelete: (id) => calls.delete.push(id),
+    onContextMenu: (id) => calls.context.push(id),
   });
   document.body.appendChild(list.element);
   return { list, calls };
@@ -76,7 +76,7 @@ test("empty state shows when there are no tunnels", () => {
   assert.equal(list.element.querySelector(".tunnel-list").hidden, true);
 });
 
-test("clicking a row selects it; edit/delete act without selecting", () => {
+test("clicking a row selects it; edit acts without selecting", () => {
   const { list, calls } = mount();
   list.setData(DEFS, new Map());
   const r = rows(list);
@@ -85,11 +85,26 @@ test("clicking a row selects it; edit/delete act without selecting", () => {
   assert.deepEqual(calls.select, ["b"]);
 
   r[0].querySelector(".tunnel-edit-btn").click();
-  r[0].querySelector(".tunnel-delete-btn").click();
   assert.deepEqual(calls.edit, ["a"]);
-  assert.deepEqual(calls.delete, ["a"]);
-  // The edit/delete clicks did NOT also fire selection.
-  assert.deepEqual(calls.select, ["b"], "edit/delete stop propagation");
+  // The edit click did NOT also fire selection.
+  assert.deepEqual(calls.select, ["b"], "edit stops propagation");
+});
+
+test("delete is no longer an inline row icon (it lives on the context menu)", () => {
+  const { list, calls } = mount();
+  list.setData(DEFS, new Map());
+  const r = rows(list);
+  assert.equal(
+    r[0].querySelector(".tunnel-delete-btn"),
+    null,
+    "no delete icon",
+  );
+
+  // The row still surfaces its actions via a native context-menu request.
+  r[0].dispatchEvent(
+    new Event("contextmenu", { bubbles: true, cancelable: true }),
+  );
+  assert.deepEqual(calls.context, ["a"]);
 });
 
 test("the header add button fires onAdd", () => {

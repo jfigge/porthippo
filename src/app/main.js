@@ -48,6 +48,7 @@ const { registerStoreIPC } = require("./ipc/store");
 const { registerEngineIPC } = require("./ipc/engine");
 const { registerResolveIPC } = require("./ipc/resolve");
 const { registerDialogIPC } = require("./ipc/dialog");
+const { registerContextMenuIPC } = require("./ipc/context-menu");
 const { registerShellIPC } = require("./ipc/shell");
 const { registerSecretStorageIPC } = require("./ipc/secret-storage");
 const { TunnelEngine } = require("./tunnel/engine");
@@ -418,6 +419,10 @@ function registerIpc() {
   registerResolveIPC({ ipcMain, getStores, getEngine });
 
   registerDialogIPC({ ipcMain, dialog, getMainWindow: () => mainWindow });
+
+  // Native OS context menu for a right-clicked tunnel row: the renderer sends a
+  // label/id template and awaits the clicked id; main just pops the menu.
+  registerContextMenuIPC({ ipcMain, Menu, getMainWindow: () => mainWindow });
 
   // App-shell IPC (Feature 60): i18n catalog + diagnostics report.
   registerShellIPC({

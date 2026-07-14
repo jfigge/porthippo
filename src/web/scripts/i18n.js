@@ -214,6 +214,15 @@ export const EN = {
   "tunnels.emptyHint": "Add one to get started.",
   "tunnels.selectHint": "Select a tunnel to see its live details.",
 
+  // ── Tunnel row right-click context menu (native OS menu) ────────────────
+  "tunnels.menu.edit": "Edit",
+  "tunnels.menu.pause": "Pause",
+  "tunnels.menu.play": "Play",
+  "tunnels.menu.arm": "Arm",
+  "tunnels.menu.disarm": "Disarm",
+  "tunnels.menu.clone": "Clone",
+  "tunnels.menu.delete": "Delete",
+
   // ── Tunnel detail (breadcrumb + controls) ───────────────────────────────
   "detail.arm": "Arm tunnel",
   "detail.disarm": "Disarm tunnel",

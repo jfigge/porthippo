@@ -232,6 +232,51 @@ test("openEdit round-trips the verbatim address strings when stored", async () =
   assert.equal(q(dlg, ".editor-input-exitAddress").value, "db.local:5432");
 });
 
+test("openClone copies every field except the name, saving as a create", async () => {
+  const calls = [];
+  const dlg = mount({
+    onSubmit: (payload, ctx) => (
+      calls.push({ payload, ctx }),
+      { id: "clone1", ...payload }
+    ),
+  });
+  await dlg.openClone({
+    id: "t1",
+    name: "Original",
+    localPort: 80,
+    bindHost: "0.0.0.0",
+    destination: { host: "db.local", port: 5432 },
+    sshHost: "bastion",
+    sshPort: 2222,
+    credentialId: "c1",
+    jumpHostIds: [],
+    entryAddress: "0.0.0.0:80",
+    exitAddress: "db.local:5432",
+  });
+
+  // Every value carries over verbatim...
+  assert.equal(q(dlg, ".editor-input-entryAddress").value, "0.0.0.0:80");
+  assert.equal(q(dlg, ".editor-input-targetServer").value, "bastion:2222");
+  assert.equal(q(dlg, ".editor-input-exitAddress").value, "db.local:5432");
+  assert.equal(q(dlg, ".cred-picker-select").value, "c1");
+  // ...except the name, which is blanked and focused so the copy must be renamed.
+  assert.equal(q(dlg, ".editor-input-name").value, "");
+  assert.equal(document.activeElement, q(dlg, ".editor-input-name"));
+
+  // Naming it and saving submits a CREATE (ctx.id null), not an update of t1.
+  setInput(dlg, "name", "Copy of Original");
+  dlg.element
+    .querySelector("form")
+    .dispatchEvent(new Event("submit", { cancelable: true }));
+  await flush();
+
+  assert.equal(calls.length, 1, "the clone saved");
+  assert.equal(calls[0].ctx.id, null, "a create, not an update");
+  assert.equal(calls[0].payload.name, "Copy of Original");
+  assert.equal(calls[0].payload.sshHost, "bastion");
+  assert.equal(calls[0].payload.entryAddress, "0.0.0.0:80");
+});
+
 test("openEdit reconstructs the fields for a legacy record without raw strings", async () => {
   const dlg = mount();
   await dlg.openEdit({

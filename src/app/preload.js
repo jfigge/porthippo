@@ -109,6 +109,16 @@ contextBridge.exposeInMainWorld("porthippo", {
     openKeyFile: () => ipcRenderer.invoke("dialog:open-key-file"),
   },
 
+  // ── Native OS context menu ────────────────────────────────────────────────
+  // A right-click on a tunnel row asks main to pop a real OS menu at the cursor.
+  // The renderer sends a template of `{ id, label, enabled }` items (+
+  // `{ type: "separator" }` dividers) with labels already localized, and awaits
+  // the clicked item's id (or `null` when the menu is dismissed). No secret or
+  // executable code crosses — only labels and ids.
+  contextMenu: {
+    popup: (request) => ipcRenderer.invoke("menu:popup", request),
+  },
+
   // ── Accepted SSH host keys (TOFU) ─────────────────────────────────────────
   // Resolve an unknown-host-key prompt raised during a connection (TOFU). The
   // engine holds the connection pending until one of these is called.

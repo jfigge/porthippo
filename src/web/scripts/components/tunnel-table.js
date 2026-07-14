@@ -83,6 +83,7 @@ export class TunnelTable {
   #onSortChange;
   #onToggleArm;
   #onTogglePause;
+  #onContextMenu;
 
   constructor({
     now,
@@ -94,6 +95,7 @@ export class TunnelTable {
     onSortChange,
     onToggleArm,
     onTogglePause,
+    onContextMenu,
   } = {}) {
     this.#now = now || Date.now;
     this.#onSelect = onSelect || (() => {});
@@ -104,6 +106,7 @@ export class TunnelTable {
     this.#onSortChange = onSortChange || (() => {});
     this.#onToggleArm = onToggleArm || (() => {});
     this.#onTogglePause = onTogglePause || (() => {});
+    this.#onContextMenu = onContextMenu || (() => {});
     this.#cardMenu = new CardMenu({
       visible: () => this.#visible,
       onToggle: (key, show) => this.#toggleColumn(key, show),
@@ -389,6 +392,11 @@ export class TunnelTable {
             e.preventDefault();
             this.#onSelect(id);
           }
+        },
+        // Secondary (right) click opens the native OS row menu.
+        onContextmenu: (e) => {
+          e.preventDefault();
+          this.#onContextMenu(id);
         },
       },
       [identityCell, ...metricCells],
