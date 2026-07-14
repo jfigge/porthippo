@@ -61,12 +61,20 @@ export class TunnelDetail {
   #onToggleArm;
   #onTogglePause;
   #onCardsChange;
+  #onShowError;
 
-  constructor({ now, onToggleArm, onTogglePause, onCardsChange } = {}) {
+  constructor({
+    now,
+    onToggleArm,
+    onTogglePause,
+    onCardsChange,
+    onShowError,
+  } = {}) {
     this.#now = now || Date.now;
     this.#onToggleArm = onToggleArm || (() => {});
     this.#onTogglePause = onTogglePause || (() => {});
     this.#onCardsChange = onCardsChange || (() => {});
+    this.#onShowError = onShowError || (() => {});
     this.#cardMenu = new CardMenu({
       visible: () => this.#visible,
       onToggle: (key, show) => this.#toggleCard(key, show),
@@ -223,21 +231,33 @@ export class TunnelDetail {
       const card = getCard(key);
       if (!card) continue;
       const valueEl = el("div", { class: "card-value" });
-      const root = el(
-        "div",
-        {
-          class: "detail-card",
-          role: "listitem",
-          draggable: "true",
-          dataset: { card: key },
-          onDragstart: (e) => this.#onDragStart(e, key),
-          onDragover: (e) => this.#onDragOver(e, key),
-          onDragleave: () => root.classList.remove("detail-card--drop"),
-          onDrop: (e) => this.#onDrop(e, key),
-          onDragend: () => this.#clearDropMarks(),
-        },
-        [el("div", { class: "card-label", text: t(card.labelKey) }), valueEl],
-      );
+      const props = {
+        class: "detail-card",
+        role: "listitem",
+        draggable: "true",
+        dataset: { card: key },
+        onDragstart: (e) => this.#onDragStart(e, key),
+        onDragover: (e) => this.#onDragOver(e, key),
+        onDragleave: () => root.classList.remove("detail-card--drop"),
+        onDrop: (e) => this.#onDrop(e, key),
+        onDragend: () => this.#clearDropMarks(),
+      };
+      // The State card doubles as the "error card": while the tunnel is errored
+      // it becomes an activatable button that opens the full error (see
+      // #updateValues for the matching affordance).
+      if (key === "state") {
+        props.onClick = () => this.#activateStateCard();
+        props.onKeydown = (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            this.#activateStateCard();
+          }
+        };
+      }
+      const root = el("div", props, [
+        el("div", { class: "card-label", text: t(card.labelKey) }),
+        valueEl,
+      ]);
       this.#cardNodes.set(key, { root, valueEl, card });
       this.#cardsEl.appendChild(root);
     }
@@ -253,6 +273,36 @@ export class TunnelDetail {
         rec.valueEl.classList.add(cls);
       }
     }
+    this.#updateStateCardAffordance();
+  }
+
+  /**
+   * Toggle the State card's "click for the full error" affordance. It's an
+   * activatable button only while the tunnel is errored; otherwise it's an inert
+   * display card like the rest.
+   */
+  #updateStateCardAffordance() {
+    const rec = this.#cardNodes.get("state");
+    if (!rec) return;
+    const errored = this.#state === "error";
+    rec.root.classList.toggle("detail-card--error", errored);
+    if (errored) {
+      rec.root.setAttribute("role", "button");
+      rec.root.setAttribute("tabindex", "0");
+      rec.root.title = t("error.card.hint");
+      rec.root.setAttribute("aria-label", t("error.card.hint"));
+    } else {
+      rec.root.setAttribute("role", "listitem");
+      rec.root.removeAttribute("tabindex");
+      rec.root.removeAttribute("title");
+      rec.root.removeAttribute("aria-label");
+    }
+  }
+
+  /** Activate the State card: open the full error, but only when errored. */
+  #activateStateCard() {
+    if (this.#state !== "error" || !this.#def) return;
+    this.#onShowError(this.#def.id);
   }
 
   #updateControls() {

@@ -34,6 +34,9 @@ import { el } from "./dom.js";
  * @param {HTMLElement} opts.control
  * @param {string} [opts.errorKey]  dotted validation path this field owns
  * @param {string} [opts.hint]
+ * @param {string} [opts.description]  long-form help shown as a native tooltip on
+ *        the label (and mirrored to the control's title), for fields whose rules
+ *        don't fit in a one-line hint.
  * @param {string} [opts.labelFor]  id to associate the label with
  * @param {string} [opts.className] extra class on the wrapper
  * @returns {HTMLElement}
@@ -43,14 +46,21 @@ export function field({
   control,
   errorKey,
   hint,
+  description,
   labelFor,
   className,
 } = {}) {
   const children = [];
   if (label) {
-    children.push(
-      el("label", { class: "field-label", for: labelFor, text: label }),
-    );
+    const labelAttrs = { class: "field-label", for: labelFor, text: label };
+    // A description surfaces as a hover tooltip on the label and, so it's
+    // discoverable from the input too, on the control itself.
+    if (description) {
+      labelAttrs.title = description;
+      labelAttrs.class = "field-label field-label--described";
+      if (control && !control.title) control.title = description;
+    }
+    children.push(el("label", labelAttrs));
   }
   children.push(control);
   if (hint) children.push(el("p", { class: "field-hint", text: hint }));

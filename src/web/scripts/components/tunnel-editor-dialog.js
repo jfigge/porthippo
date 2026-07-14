@@ -14,28 +14,45 @@
  * limitations under the License.
  */
 
-// tunnel-editor-dialog.js — create/edit a tunnel in a native <dialog>. The common
-// case shows ~four fields (name, destination host + port, local port, credential);
-// everything else — local bind address, SSH-server override, jump-host chain,
-// options — lives in a collapsed native <details> so the SSH server and local host
-// only appear when a user goes looking for them.
+// tunnel-editor-dialog.js — create/edit a tunnel in a native <dialog>. The body
+// reads as the path a connection takes: Name, then three free-text address:port
+// fields — Entry port (the local listener), Target server (the remote SSH box),
+// Exit port (the address forwarded to on that box) — then the Credential, and an
+// Advanced <details> for the jump-host chain, idle linger and option toggles.
 //
-// Validation is live-but-quiet until the first save attempt (mirroring the old
-// inline editor): validateDefinition drives inline field errors; two soft warnings
-// (a privileged local port, a port already claimed by another tunnel) never block
-// the save — they surface conditions the engine would otherwise only reveal at arm
-// time. The store re-validates authoritatively.
+// Each address field accepts a bare port, a bare host, or `address:port` and is
+// parsed by address.js into the concrete data-model fields the store keeps:
+//   Entry  → bindHost + localPort            (host defaults to 127.0.0.1)
+//   Target → sshHost  + sshPort (mandatory)  (port defaults to 22)
+//   Exit   → destination.host + .port        (defaults to 127.0.0.1 + the Entry port)
+// The raw strings are ALSO stored verbatim (entryAddress / exitAddress) so the
+// editor re-displays exactly what the user typed. See features/tunnel-address-fields.md.
+//
+// Validation is live-but-quiet until the first save attempt: parse errors + the
+// structural validator drive inline field errors (remapped from the concrete
+// data-model keys onto the owning address field). Three soft warnings never
+// block the save — they surface conditions the engine would otherwise only reveal
+// at arm time: a privileged Entry port (needs root/Administrator), an Entry port
+// already claimed by another tunnel, and an Entry/Target host that doesn't resolve
+// to a bindable local / reachable address. The store re-validates authoritatively.
 
 import { el, clear } from "../dom.js";
 import { field, applyFieldErrors } from "../field.js";
 import { t } from "../i18n.js";
 import { Dialog } from "../dialog.js";
 import { validateDefinition } from "../validate.js";
+import {
+  parseEntry,
+  parseTarget,
+  parseExit,
+  PRIVILEGED_PORT,
+  LOOPBACK,
+} from "../address.js";
 import { CredentialPickerField } from "./credential-picker-field.js";
 import { JumpHostPickerField } from "./jump-host-picker-field.js";
 
-const LOOPBACK = new Set(["", "127.0.0.1", "localhost", "::1"]);
-const PRIVILEGED_PORT = 1024;
+/** Hosts that always mean "this machine's loopback" — no bind/resolve warning. */
+const LOOPBACKS = new Set(["", "127.0.0.1", "localhost", "::1"]);
 const RESOLVE_DEBOUNCE_MS = 300;
 
 /** A cheap "already an IP literal" guard so the editor skips a pointless lookup. */
@@ -43,15 +60,22 @@ function looksLikeIp(host) {
   return /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(":");
 }
 
-function toPort(str) {
-  const s = String(str).trim();
-  if (s === "") return undefined;
-  return Number(s);
-}
 function toInt(str) {
   const s = String(str).trim();
   if (s === "") return undefined;
   return Number(s);
+}
+
+/** Map an address.js parse-error code to an inline field message. */
+function addressErrorMessage(fieldName, code) {
+  if (code === "port_range") return t("editor.address.portRange");
+  if (fieldName === "entry") {
+    return code === "no_port"
+      ? t("editor.address.entryNoPort")
+      : t("editor.address.entryRequired");
+  }
+  if (fieldName === "target") return t("editor.address.targetRequired");
+  return t("editor.address.portRange");
 }
 
 export class TunnelEditorDialog {
@@ -65,17 +89,14 @@ export class TunnelEditorDialog {
   #credPicker;
   #jumpPicker;
   #detailsEl;
-  #bindWarningEl;
-  #portWarningEl;
+  #entryWarningEl; // privileged-port / port-conflict (instant, soft)
+  #entryResolveWarnEl; // Entry host not a bindable local address (debounced)
+  #targetResolveWarnEl; // Target server doesn't resolve locally (debounced)
   #editingId = null;
   #showErrors = false;
   #existing = []; // other tunnels, for the local-port conflict warning
 
-  // Feature 100 — hostname resolution. Live local-DNS warnings for the names this
-  // machine resolves (bind host + first hop), and the "Test resolution" probe.
-  #destResolveWarnEl;
-  #bindResolveWarnEl;
-  #sshResolveWarnEl;
+  // Feature 100 — the "Test resolution" probe (walks the real chain).
   #resolveBtn;
   #resolveResultsEl;
   #resolveTimer = null;
@@ -92,7 +113,9 @@ export class TunnelEditorDialog {
    * @param {(record: object) => void} [opts.onSaved]  fires after a successful write.
    */
   constructor({ porthippo, openKeyFile, onSubmit, onSaved } = {}) {
-    this.#porthippo = porthippo || window.porthippo;
+    this.#porthippo =
+      porthippo ||
+      (typeof window !== "undefined" ? window.porthippo : undefined);
     this.#onSubmit = onSubmit;
     this.#onSaved = onSaved;
 
@@ -147,12 +170,11 @@ export class TunnelEditorDialog {
 
     this.#form = {
       name: str(d.name),
-      localPort: portStr(d.localPort),
-      bindHost: str(d.bindHost),
-      destHost: str(d.destination?.host),
-      destPort: portStr(d.destination?.port),
-      sshHost: str(d.sshHost),
-      sshPort: portStr(d.sshPort),
+      // Prefer the verbatim strings; reconstruct from the concrete fields for
+      // legacy records (or a hand-edited file) that predate them.
+      entryAddress: str(d.entryAddress) || reconstructEntry(d),
+      targetServer: reconstructTarget(d),
+      exitAddress: str(d.exitAddress) || reconstructExit(d),
       credentialId: str(d.credentialId),
       jumpHostIds: Array.isArray(d.jumpHostIds) ? d.jumpHostIds : [],
       lingerMs:
@@ -179,8 +201,7 @@ export class TunnelEditorDialog {
     // Reveal Advanced up front when the tunnel actually uses any advanced field.
     this.#detailsEl.open = this.#usesAdvanced();
 
-    this.#updateBindWarning();
-    this.#updatePortWarning();
+    this.#updateEntryWarning();
     this.#resetProbe();
     this.#runResolveCheck(); // prime the local-resolution warnings for this def
     this.#dialog.clearError();
@@ -189,9 +210,6 @@ export class TunnelEditorDialog {
 
   #usesAdvanced() {
     return Boolean(
-      this.#form.bindHost.trim() ||
-      this.#form.sshHost.trim() ||
-      this.#form.sshPort.trim() ||
       this.#form.jumpHostIds.length ||
       this.#form.keepAlive ||
       this.#form.autoReconnect ||
@@ -199,14 +217,27 @@ export class TunnelEditorDialog {
     );
   }
 
+  /**
+   * Assemble the reference-shape payload the store persists: the three raw address
+   * strings parsed into concrete fields, plus the verbatim strings for round-trip.
+   * A field that fails to parse leaves its concrete value undefined so the
+   * validator flags it; the raw string is still sent so nothing the user typed is
+   * silently dropped.
+   */
   buildPayload() {
+    const entry = parseEntry(this.#form.entryAddress);
+    const target = parseTarget(this.#form.targetServer);
+    const exit = parseExit(this.#form.exitAddress);
+
+    const entryHost = entry.error ? undefined : entry.host;
+    const entryPort = entry.error ? undefined : entry.port;
+
     const payload = {
       name: this.#form.name.trim(),
-      localPort: toPort(this.#form.localPort),
-      destination: {
-        host: this.#form.destHost.trim(),
-        port: toPort(this.#form.destPort),
-      },
+      localPort: entryPort,
+      destination: exit.error
+        ? { host: undefined, port: undefined }
+        : { host: exit.host ?? LOOPBACK, port: exit.port ?? entryPort },
       // Read the live picker (like jumpHostIds) — it drops a since-deleted id to
       // "", whereas #form.credentialId can retain a stale id the picker rejected.
       credentialId: this.#credPicker.value,
@@ -214,13 +245,25 @@ export class TunnelEditorDialog {
       keepAlive: this.#form.keepAlive,
       enabled: this.#form.enabled,
       autoReconnect: this.#form.autoReconnect,
+      entryAddress: this.#form.entryAddress.trim(),
     };
-    const bindHost = this.#form.bindHost.trim();
-    if (bindHost) payload.bindHost = bindHost;
-    const sshHost = this.#form.sshHost.trim();
-    if (sshHost) payload.sshHost = sshHost;
-    const sshPort = toPort(this.#form.sshPort);
-    if (sshPort !== undefined) payload.sshPort = sshPort;
+
+    // bindHost is only stored when it's a non-default (non-loopback) address; a
+    // bare-port Entry leaves it implicit (the resolver defaults it to 127.0.0.1).
+    if (entryHost && !LOOPBACKS.has(entryHost)) payload.bindHost = entryHost;
+
+    // Target server → the mandatory SSH endpoint. A parse failure leaves sshHost
+    // undefined (the validator flags it); the port is stored only when explicit.
+    if (!target.error) {
+      payload.sshHost = target.host;
+      if (target.port !== undefined) payload.sshPort = target.port;
+    }
+
+    // Exit raw echo — stored only when the user actually typed something (a blank
+    // Exit reconstructs from the loopback default on reload).
+    const exitRaw = this.#form.exitAddress.trim();
+    if (exitRaw) payload.exitAddress = exitRaw;
+
     const linger = toInt(this.#form.lingerMs);
     if (linger !== undefined) payload.lingerMs = linger;
     return payload;
@@ -229,55 +272,18 @@ export class TunnelEditorDialog {
   // ── Rendering ───────────────────────────────────────────────────────────────
 
   #buildBody() {
-    this.#bindWarningEl = el("p", {
-      class: "editor-bind-warning",
-      text: t("editor.bindHost.warning"),
-      hidden: true,
-    });
-    this.#portWarningEl = el("p", {
+    this.#entryWarningEl = el("p", {
       class: "editor-port-warning",
       hidden: true,
     });
-    // Local-resolution warnings sit under the field whose host they concern.
-    this.#destResolveWarnEl = this.#resolveWarning();
-    this.#bindResolveWarnEl = this.#resolveWarning();
-    this.#sshResolveWarnEl = this.#resolveWarning();
+    this.#entryResolveWarnEl = this.#resolveWarning();
+    this.#targetResolveWarnEl = this.#resolveWarning();
 
     this.#detailsEl = el("details", { class: "editor-advanced" }, [
       el("summary", {
         class: "editor-advanced-summary",
         text: t("editor.advanced"),
       }),
-      this.#section([
-        field({
-          label: t("editor.bindHost"),
-          control: this.#input("bindHost", "127.0.0.1", "text"),
-          errorKey: "bindHost",
-          hint: t("editor.bindHost.hint"),
-        }),
-        this.#bindWarningEl,
-        this.#bindResolveWarnEl,
-      ]),
-      this.#section([
-        el("div", { class: "editor-row" }, [
-          field({
-            label: t("editor.sshHost"),
-            control: this.#input(
-              "sshHost",
-              t("editor.sshHost.placeholder"),
-              "text",
-            ),
-            errorKey: "sshHost",
-            hint: t("editor.sshHost.hint"),
-          }),
-          field({
-            label: t("editor.sshPort"),
-            control: this.#input("sshPort", "22", "number"),
-            errorKey: "sshPort",
-          }),
-        ]),
-        this.#sshResolveWarnEl,
-      ]),
       this.#jumpPicker.element,
       this.#section([
         field({
@@ -301,26 +307,45 @@ export class TunnelEditorDialog {
       }),
       this.#section([
         field({
-          label: t("editor.destination.host"),
-          control: this.#input("destHost", "db.internal", "text"),
-          errorKey: "destination.host",
+          label: t("editor.entryPort"),
+          control: this.#input(
+            "entryAddress",
+            t("editor.entryPort.placeholder"),
+            "text",
+          ),
+          errorKey: "entryAddress",
+          hint: t("editor.entryPort.hint"),
+          description: t("editor.entryPort.desc"),
         }),
-        this.#destResolveWarnEl,
+        this.#entryWarningEl,
+        this.#entryResolveWarnEl,
       ]),
       this.#section([
-        el("div", { class: "editor-row" }, [
-          field({
-            label: t("editor.destination.port"),
-            control: this.#input("destPort", "5432", "number"),
-            errorKey: "destination.port",
-          }),
-          field({
-            label: t("editor.localPort"),
-            control: this.#input("localPort", "5432", "number"),
-            errorKey: "localPort",
-          }),
-        ]),
-        this.#portWarningEl,
+        field({
+          label: t("editor.targetServer"),
+          control: this.#input(
+            "targetServer",
+            t("editor.targetServer.placeholder"),
+            "text",
+          ),
+          errorKey: "targetServer",
+          hint: t("editor.targetServer.hint"),
+          description: t("editor.targetServer.desc"),
+        }),
+        this.#targetResolveWarnEl,
+      ]),
+      this.#section([
+        field({
+          label: t("editor.exitPort"),
+          control: this.#input(
+            "exitAddress",
+            t("editor.exitPort.placeholder"),
+            "text",
+          ),
+          errorKey: "exitAddress",
+          hint: t("editor.exitPort.hint"),
+          description: t("editor.exitPort.desc"),
+        }),
       ]),
       this.#credPicker.element,
       this.#detailsEl,
@@ -339,8 +364,7 @@ export class TunnelEditorDialog {
       value: this.#form[key],
       onInput: (e) => {
         this.#form[key] = e.target.value;
-        if (key === "bindHost") this.#updateBindWarning();
-        if (key === "localPort") this.#updatePortWarning();
+        if (key === "entryAddress") this.#updateEntryWarning();
         this.#changed();
       },
     });
@@ -393,37 +417,6 @@ export class TunnelEditorDialog {
     ]);
   }
 
-  /**
-   * The host fields this machine resolves directly — always the bind host, plus the
-   * chain's first hop when that hop is one of this dialog's own text fields (a jump
-   * host is a separate record, so with a jump chain the downstream hosts are left to
-   * Test resolution). Every warning element appears so each run fully rewrites them.
-   */
-  #localResolveTargets() {
-    const targets = [
-      { el: this.#bindResolveWarnEl, host: this.#form.bindHost.trim() },
-    ];
-    const hasJumps = this.#jumpPicker.value.length > 0;
-    const ssh = this.#form.sshHost.trim();
-    if (hasJumps) {
-      // First hop is a jump host → validated by Test; nothing local to flag here.
-      targets.push({ el: this.#destResolveWarnEl, host: "" });
-      targets.push({ el: this.#sshResolveWarnEl, host: "" });
-    } else if (ssh) {
-      // Bastion: SSH server is the first (local) hop; the destination is remote.
-      targets.push({ el: this.#sshResolveWarnEl, host: ssh });
-      targets.push({ el: this.#destResolveWarnEl, host: "" });
-    } else {
-      // No bastion: we SSH straight into the destination box, so it's the first hop.
-      targets.push({
-        el: this.#destResolveWarnEl,
-        host: this.#form.destHost.trim(),
-      });
-      targets.push({ el: this.#sshResolveWarnEl, host: "" });
-    }
-    return targets;
-  }
-
   #scheduleResolveCheck() {
     clearTimeout(this.#resolveTimer);
     this.#resolveTimer = setTimeout(
@@ -435,30 +428,69 @@ export class TunnelEditorDialog {
     this.#resolveTimer?.unref?.();
   }
 
+  /**
+   * Refresh the two local-resolution warnings: the Entry host must name a
+   * bindable local address (loopback / wildcard / a local interface), and the
+   * Target server must resolve from this machine when it's reached directly (no
+   * jump chain). Everything past that — a jumped target, the Exit on the far side
+   * — is left to "Test resolution", which walks the real chain.
+   */
   async #runResolveCheck() {
     const seq = ++this.#resolveSeq;
-    for (const { el: warnEl, host } of this.#localResolveTargets()) {
-      if (!warnEl) continue;
-      if (!host || looksLikeIp(host)) {
-        this.#setResolveWarning(warnEl, "");
-        continue;
-      }
-      let res;
-      try {
-        res = await this.#porthippo?.resolve?.lookup?.(host);
-      } catch {
-        res = null;
-      }
-      if (seq !== this.#resolveSeq) return; // a newer check supersedes this one
-      const unresolved = Boolean(res) && res.resolved === false;
-      this.#setResolveWarning(
-        warnEl,
-        unresolved ? t("editor.resolve.unresolved", { host }) : "",
-      );
+    await this.#checkEntryHost(seq);
+    if (seq !== this.#resolveSeq) return; // a newer check supersedes this one
+    await this.#checkTargetHost(seq);
+  }
+
+  async #checkEntryHost(seq) {
+    const entry = parseEntry(this.#form.entryAddress);
+    const host = entry.error ? "" : entry.host;
+    if (!host || LOOPBACKS.has(host)) {
+      this.#setResolveWarning(this.#entryResolveWarnEl, "");
+      return;
     }
+    let res;
+    try {
+      res = await this.#porthippo?.resolve?.bindcheck?.(host);
+    } catch {
+      res = null;
+    }
+    if (seq !== this.#resolveSeq) return;
+    let message = "";
+    if (res && res.resolved === false) {
+      message = t("editor.resolve.unresolved", { host });
+    } else if (res && res.local === false) {
+      message = t("editor.entryPort.notLocal", { host });
+    }
+    this.#setResolveWarning(this.#entryResolveWarnEl, message);
+  }
+
+  async #checkTargetHost(seq) {
+    const target = parseTarget(this.#form.targetServer);
+    const host = target.error ? "" : target.host;
+    const hasJumps = this.#jumpPicker.value.length > 0;
+    // With a jump chain the target is reached from the last hop, not locally, so
+    // there's nothing this machine can meaningfully check here.
+    if (!host || hasJumps || looksLikeIp(host)) {
+      this.#setResolveWarning(this.#targetResolveWarnEl, "");
+      return;
+    }
+    let res;
+    try {
+      res = await this.#porthippo?.resolve?.lookup?.(host);
+    } catch {
+      res = null;
+    }
+    if (seq !== this.#resolveSeq) return;
+    const unresolved = Boolean(res) && res.resolved === false;
+    this.#setResolveWarning(
+      this.#targetResolveWarnEl,
+      unresolved ? t("editor.resolve.unresolved", { host }) : "",
+    );
   }
 
   #setResolveWarning(warnEl, message) {
+    if (!warnEl) return;
     warnEl.textContent = message;
     warnEl.hidden = message === "";
   }
@@ -518,7 +550,7 @@ export class TunnelEditorDialog {
     }
     if (result.destination) {
       this.#resolveResultsEl.append(
-        this.#probeRow(t("editor.resolve.destinationRow"), result.destination),
+        this.#probeRow(t("editor.resolve.exitRow"), result.destination),
       );
     }
   }
@@ -549,7 +581,7 @@ export class TunnelEditorDialog {
   }
 
   #hopFriendly(hopLabel) {
-    if (hopLabel === "sshServer") return t("editor.resolve.sshServer");
+    if (hopLabel === "sshServer") return t("editor.resolve.targetRow");
     const m = /^jump\[(\d+)\]$/.exec(hopLabel || "");
     if (m) return t("editor.resolve.jump", { n: Number(m[1]) + 1 });
     return hopLabel || "";
@@ -591,14 +623,19 @@ export class TunnelEditorDialog {
     this.#clearProbeResult(); // a field edit invalidates the last test
   }
 
-  #updateBindWarning() {
-    this.#bindWarningEl.hidden = LOOPBACK.has(this.#form.bindHost.trim());
+  /** The OS term for the privileged account, chosen from the reported platform. */
+  #adminTerm() {
+    return this.#porthippo?.platform === "win32"
+      ? t("common.administrator")
+      : t("common.root");
   }
 
-  #updatePortWarning() {
-    const port = toPort(this.#form.localPort);
+  /** Instant soft warning under Entry: a port conflict, or a privileged port. */
+  #updateEntryWarning() {
+    const entry = parseEntry(this.#form.entryAddress);
     let message = "";
-    if (Number.isInteger(port)) {
+    if (!entry.error) {
+      const port = entry.port;
       const clash = this.#existing.find(
         (d) => d && d.id !== this.#editingId && d.localPort === port,
       );
@@ -608,15 +645,64 @@ export class TunnelEditorDialog {
           name: clash.name || t("def.unnamed"),
         });
       } else if (port < PRIVILEGED_PORT) {
-        message = t("editor.localPort.privileged");
+        message = t("editor.entryPort.privileged", {
+          admin: this.#adminTerm(),
+        });
       }
     }
-    this.#portWarningEl.textContent = message;
-    this.#portWarningEl.hidden = message === "";
+    this.#entryWarningEl.textContent = message;
+    this.#entryWarningEl.hidden = message === "";
+  }
+
+  /**
+   * Translate structural (concrete-field) validator keys onto the field that owns
+   * them, so a `destination.port` error lands on the Exit input rather than a
+   * field that no longer exists. Names/refs (name, credentialId, jumpHostIds[i])
+   * pass through unchanged.
+   */
+  #mapConcreteErrors(errors) {
+    const out = {};
+    for (const [key, message] of Object.entries(errors)) {
+      let target = key;
+      if (key === "localPort" || key === "bindHost") target = "entryAddress";
+      else if (key === "sshHost" || key === "sshPort") target = "targetServer";
+      else if (
+        key === "destination" ||
+        key === "destination.host" ||
+        key === "destination.port"
+      ) {
+        target = "exitAddress";
+      }
+      if (!out[target]) out[target] = message;
+    }
+    return out;
+  }
+
+  /** Combine per-field parse errors with the remapped structural validator. */
+  #computeErrors() {
+    const parseErrors = {};
+    const entry = parseEntry(this.#form.entryAddress);
+    if (entry.error) {
+      parseErrors.entryAddress = addressErrorMessage("entry", entry.error);
+    }
+    const target = parseTarget(this.#form.targetServer);
+    if (target.error) {
+      parseErrors.targetServer = addressErrorMessage("target", target.error);
+    }
+    const exit = parseExit(this.#form.exitAddress);
+    if (exit.error) {
+      parseErrors.exitAddress = addressErrorMessage("exit", exit.error);
+    }
+
+    const { errors } = validateDefinition(this.buildPayload());
+    const mapped = this.#mapConcreteErrors(errors);
+    // A raw parse error is the more precise message, so it wins over the
+    // concrete-field fallback for the same field.
+    return { ...mapped, ...parseErrors };
   }
 
   #revalidate() {
-    const { errors } = validateDefinition(this.buildPayload());
+    const errors = this.#computeErrors();
     applyFieldErrors(this.#dialog.body, errors);
     return errors;
   }
@@ -644,8 +730,9 @@ export class TunnelEditorDialog {
 
     if (result && result.__hippoError) {
       if (result.errors) {
-        applyFieldErrors(this.#dialog.body, result.errors);
-        if (this.#hasAdvancedError(result.errors)) this.#detailsEl.open = true;
+        const mapped = this.#mapConcreteErrors(result.errors);
+        applyFieldErrors(this.#dialog.body, mapped);
+        if (this.#hasAdvancedError(mapped)) this.#detailsEl.open = true;
       }
       this.#dialog.showError(
         t("editor.saveError", { message: result.message || result.code || "" }),
@@ -659,12 +746,7 @@ export class TunnelEditorDialog {
 
   #hasAdvancedError(errors) {
     return Object.keys(errors).some(
-      (k) =>
-        k === "bindHost" ||
-        k === "sshHost" ||
-        k === "sshPort" ||
-        k === "lingerMs" ||
-        k.startsWith("jumpHostIds"),
+      (k) => k === "lingerMs" || k.startsWith("jumpHostIds"),
     );
   }
 }
@@ -674,18 +756,48 @@ export class TunnelEditorDialog {
 function str(v) {
   return typeof v === "string" ? v : "";
 }
-function portStr(v) {
-  return v === undefined || v === null ? "" : String(v);
+
+/** Rebuild the Entry field from a stored def: "port" or "host:port". */
+function reconstructEntry(d) {
+  const port = d.localPort;
+  if (port === undefined || port === null) return "";
+  const host = str(d.bindHost).trim();
+  return host === "" || LOOPBACKS.has(host) ? String(port) : `${host}:${port}`;
 }
+
+/** Rebuild the Target field: "host" or "host:port" (22 elided). */
+function reconstructTarget(d) {
+  const host = str(d.sshHost).trim();
+  if (host === "") {
+    // Legacy blank sshHost: the box SSH'd into was the destination host itself.
+    return str(d.destination?.host).trim();
+  }
+  const port = d.sshPort;
+  return port === undefined || port === null || port === 22
+    ? host
+    : `${host}:${port}`;
+}
+
+/** Rebuild the Exit field, collapsing the loopback + entry-port default to "". */
+function reconstructExit(d) {
+  const port = d.destination?.port;
+  if (port === undefined || port === null) return "";
+  // Legacy blank sshHost forwarded to loopback:destPort on the destination box.
+  if (str(d.sshHost).trim() === "") {
+    return port === d.localPort ? "" : String(port);
+  }
+  const host = str(d.destination?.host).trim();
+  const loopback = host === "" || LOOPBACKS.has(host);
+  if (loopback) return port === d.localPort ? "" : String(port);
+  return `${host}:${port}`;
+}
+
 function blankForm() {
   return {
     name: "",
-    localPort: "",
-    bindHost: "",
-    destHost: "",
-    destPort: "",
-    sshHost: "",
-    sshPort: "",
+    entryAddress: "",
+    targetServer: "",
+    exitAddress: "",
     credentialId: "",
     jumpHostIds: [],
     lingerMs: "",

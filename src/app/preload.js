@@ -117,7 +117,9 @@ contextBridge.exposeInMainWorld("porthippo", {
 
   // ── Hostname-resolution validation (Feature 100) ──────────────────────────
   // The editor asks main whether hosts resolve. `lookup` is a pure local DNS
-  // check for the names resolved from this machine (bind host / first hop).
+  // check for the names resolved from this machine (target server / first hop).
+  // `bindcheck` additionally confirms an Entry-port host names a bindable local
+  // address (loopback / wildcard / a local interface).
   // `test` walks the real jump chain and probes the destination from the far end,
   // resolving to a per-hop `{ hopLabel, host, port, status, reason? }` result;
   // credential decryption and every socket stay in main, so nothing here carries a
@@ -125,6 +127,7 @@ contextBridge.exposeInMainWorld("porthippo", {
   // porthippo:hostkey-unknown event. `cancel` aborts an in-flight test.
   resolve: {
     lookup: (host) => ipcRenderer.invoke("resolve:lookup", { host }),
+    bindcheck: (host) => ipcRenderer.invoke("resolve:bindcheck", { host }),
     test: (payload) => ipcRenderer.invoke("resolve:test", { payload }),
     cancel: () => ipcRenderer.invoke("resolve:cancel"),
   },

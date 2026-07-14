@@ -64,9 +64,12 @@ function isValidPort(v) {
 /**
  * Validate a tunnel definition (reference shape).
  *
- * The SSH server is implied from the destination unless `sshHost` overrides it
- * (a bastion forwarding onward), so only the destination, the local port, and a
- * `credentialId` are structurally required; `sshHost` / `sshPort` are optional.
+ * A tunnel listens on a local Entry (`bindHost` + `localPort`), connects to a
+ * mandatory Target server (`sshHost`, port defaulting to 22), and forwards to an
+ * Exit on that server (`destination`). So the local port, destination, target
+ * server (`sshHost`) and a `credentialId` are all structurally required;
+ * `sshPort` / `bindHost` are optional (defaulted in the resolver), and
+ * `entryAddress` / `exitAddress` are the verbatim strings the editor round-trips.
  *
  * @param {*} def
  * @returns {{ valid: boolean, errors: Object<string,string> }}
@@ -101,10 +104,10 @@ function validateDefinition(def) {
     }
   }
 
-  // SSH server override — blank means "same box as the destination". Only its
-  // structure is checked when present; it defaults in the resolver.
-  if (def.sshHost !== undefined && !isNonEmptyString(def.sshHost)) {
-    errors.sshHost = "sshHost must be a non-empty string when set";
+  // Target server — the SSH server the tunnel connects to. Mandatory (it is the
+  // far end of the tunnel); its port defaults to 22 in the resolver when unset.
+  if (!isNonEmptyString(def.sshHost)) {
+    errors.sshHost = "target server is required";
   }
   if (def.sshPort !== undefined && !isValidPort(def.sshPort)) {
     errors.sshPort = `sshPort must be an integer ${MIN_PORT}–${MAX_PORT}`;
@@ -145,6 +148,16 @@ function validateDefinition(def) {
     typeof def.autoReconnect !== "boolean"
   ) {
     errors.autoReconnect = "autoReconnect must be a boolean";
+  }
+
+  // Verbatim Entry / Exit strings the editor stores for faithful round-trip. The
+  // extracted concrete fields above carry the real constraints, so only the type
+  // is checked here.
+  if (def.entryAddress !== undefined && typeof def.entryAddress !== "string") {
+    errors.entryAddress = "entryAddress must be a string";
+  }
+  if (def.exitAddress !== undefined && typeof def.exitAddress !== "string") {
+    errors.exitAddress = "exitAddress must be a string";
   }
 
   return { valid: Object.keys(errors).length === 0, errors };

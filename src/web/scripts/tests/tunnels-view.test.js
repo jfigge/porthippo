@@ -169,6 +169,36 @@ test("deleting a tunnel confirms via the shared dialog then calls delete", async
   assert.deepEqual(calls.delete, ["b"]);
 });
 
+test("clicking the errored State card opens a dialog with the full error", async () => {
+  const { view } = await mount();
+  // Tunnel 'a' (auto-selected) reports an error with details.
+  window.dispatchEvent(
+    new CustomEvent("porthippo:tunnel-state", {
+      detail: { id: "a", state: "error", error: "SSH authentication failed" },
+    }),
+  );
+  const stateCard = view.element.querySelector(
+    '.detail-card[data-card="state"]',
+  );
+  assert.ok(stateCard.classList.contains("detail-card--error"));
+  stateCard.click();
+
+  const msg = document.querySelector(".popup-notify .popup-message");
+  assert.ok(msg, "an error dialog opened");
+  assert.match(msg.textContent, /SSH authentication failed/);
+  PopupManager.close();
+});
+
+test("the error dialog surfaces an error reported by status on load", async () => {
+  const { view } = await mount({
+    status: [{ id: "a", state: "error", error: "port already in use" }],
+  });
+  view.element.querySelector('.detail-card[data-card="state"]').click();
+  const msg = document.querySelector(".popup-notify .popup-message");
+  assert.match(msg.textContent, /port already in use/);
+  PopupManager.close();
+});
+
 test("reordering cards persists the new order to settings", async () => {
   const calls = {};
   const { view } = await mount({ calls });

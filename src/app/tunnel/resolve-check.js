@@ -32,6 +32,10 @@
 
 const dns = require("dns");
 const net = require("net");
+const os = require("os");
+
+/** Addresses that always bind to the local machine, regardless of interfaces. */
+const WILDCARD = new Set(["0.0.0.0", "::", "::0"]);
 
 /**
  * Resolve `host` locally to an address.
@@ -65,4 +69,58 @@ function lookupHost(host, { lookup = dns.lookup } = {}) {
   });
 }
 
-module.exports = { lookupHost };
+/** True when `address` is a loopback literal (127/8 or ::1). */
+function isLoopbackAddress(address) {
+  if (address === "::1") return true;
+  return net.isIPv4(address) && address.startsWith("127.");
+}
+
+/** Every IPv4/IPv6 address currently assigned to a local interface. */
+function localInterfaceAddresses(interfaces) {
+  const set = new Set();
+  for (const list of Object.values(interfaces || {})) {
+    for (const iface of list || []) {
+      if (iface && typeof iface.address === "string") set.add(iface.address);
+    }
+  }
+  return set;
+}
+
+/**
+ * Classify the Entry-port bind host: does it resolve *and* name an address this
+ * machine can actually bind to (loopback, a wildcard, or one of its own
+ * interface addresses)? The tunnel's local listener can only bind local
+ * addresses, so a name pointing anywhere else is rejected before arm time.
+ *
+ * An empty host is "the default loopback" — resolvable and local. An IP literal
+ * is checked directly (no DNS); a hostname is resolved first, then its address
+ * is checked. A name that resolves off-box comes back `{ resolved: true, local:
+ * false }` so the editor can explain *why* it can't be used.
+ *
+ * @param {string} host
+ * @param {object} [deps]
+ * @param {(hostname: string, opts: object, cb: Function) => void} [deps.lookup]
+ * @param {() => Object} [deps.networkInterfaces]  injectable for tests
+ * @returns {Promise<{ resolved: boolean, local: boolean, address?: string, reason?: string }>}
+ */
+async function classifyBindHost(
+  host,
+  { lookup = dns.lookup, networkInterfaces = os.networkInterfaces } = {},
+) {
+  const name = typeof host === "string" ? host.trim() : "";
+  if (name === "") return { resolved: true, local: true };
+
+  const res = await lookupHost(name, { lookup });
+  if (!res.resolved) {
+    return { resolved: false, local: false, reason: res.reason };
+  }
+
+  const address = res.address || name;
+  const local =
+    WILDCARD.has(address) ||
+    isLoopbackAddress(address) ||
+    localInterfaceAddresses(networkInterfaces()).has(address);
+  return { resolved: true, local, address };
+}
+
+module.exports = { lookupHost, classifyBindHost };

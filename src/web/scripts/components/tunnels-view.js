@@ -84,6 +84,7 @@ export class TunnelsView {
       onToggleArm: (id) => this.#toggleArm(id),
       onTogglePause: (id) => this.#togglePause(id),
       onCardsChange: (order) => this.#persistCardOrder(order),
+      onShowError: (id) => this.#showError(id),
     });
 
     this.#table = new TunnelTable({
@@ -135,7 +136,12 @@ export class TunnelsView {
     ]);
     this.#defs = Array.isArray(defs) ? defs : [];
     if (Array.isArray(status)) {
-      for (const s of status) if (s && s.id) this.#states.set(s.id, s.state);
+      for (const s of status) {
+        if (!s || !s.id) continue;
+        this.#states.set(s.id, s.state);
+        if (s.error) this.#errors.set(s.id, s.error);
+        else this.#errors.delete(s.id);
+      }
     }
     this.#jumpsById = new Map(
       (Array.isArray(jumps) ? jumps : []).map((j) => [j.id, j]),
@@ -324,6 +330,17 @@ export class TunnelsView {
     if (result && result.__hippoError) {
       PopupManager.notify({ message: result.message || "Engine error" });
     }
+  }
+
+  /** Open the full error for a tunnel (fired by clicking its errored State card). */
+  #showError(id) {
+    const def = this.#defs.find((d) => d.id === id);
+    PopupManager.notify({
+      title: t("error.dialog.title", {
+        name: (def && def.name) || t("def.unnamed"),
+      }),
+      message: this.#errors.get(id) || t("error.dialog.unknown"),
+    });
   }
 
   #setLiveState(id, state) {

@@ -102,6 +102,7 @@ test("delete is blocked while a tunnel lists it in jumpHostIds", () => {
       name: "t",
       localPort: 1234,
       destination: { host: "h", port: 80 },
+      sshHost: "h",
       credentialId: cred.id,
       jumpHostIds: [jh.id],
     });

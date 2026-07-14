@@ -111,6 +111,14 @@
   color: var(--color-subtext);
 }
 
+/* A label carrying a long-form description (native title tooltip): hint that
+   there's more on hover with a dotted underline + a help cursor. */
+.field-label--described {
+  text-decoration: underline dotted var(--color-overlay);
+  text-underline-offset: 3px;
+  cursor: help;
+}
+
 .field input,
 .field select {
   width: 100%;
@@ -1453,6 +1461,24 @@
 
 .detail-card--drop {
   border-color: var(--color-accent);
+}
+
+/* The State card while the tunnel is errored: an activatable "click for the full
+   error" button, tinted with the danger colour. */
+.detail-card--error {
+  cursor: pointer;
+  border-color: color-mix(in srgb, var(--color-danger) 55%, transparent);
+  background: color-mix(
+    in srgb,
+    var(--color-danger) 8%,
+    var(--color-surface-0)
+  );
+}
+
+.detail-card--error:hover,
+.detail-card--error:focus-visible {
+  border-color: var(--color-danger);
+  outline: none;
 }
 
 .card-label {

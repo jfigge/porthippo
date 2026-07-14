@@ -146,6 +146,7 @@ test("delete is blocked while a tunnel or jump host references it", () => {
       name: "t",
       localPort: 1234,
       destination: { host: "h", port: 80 },
+      sshHost: "h",
       credentialId: cred.id,
     });
     assert.throws(

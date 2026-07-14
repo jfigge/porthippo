@@ -17,9 +17,12 @@
 /**
  * ipc/resolve.js — hostname-resolution validation IPC (Feature 100).
  *
- * Two intents from the editor, both request/response:
+ * Intents from the editor, all request/response:
  *   - `resolve:lookup` — does a single host resolve *from this machine*? (the live
- *     bind-host / first-hop warnings). Pure DNS, no connection.
+ *     first-hop / target-server warnings). Pure DNS, no connection.
+ *   - `resolve:bindcheck` — does a host resolve *and* name an address this machine
+ *     can bind (loopback / wildcard / a local interface)? Drives the Entry-port
+ *     not-a-local-address warning. Pure DNS + interface enumeration, no connection.
  *   - `resolve:test` — walk the real jump chain and probe the destination from the
  *     far end, reporting a per-hop result. This decrypts the referenced credentials
  *     in main (`tunnelStore().resolveDecrypted`) and hands the engine-shaped def to
@@ -39,7 +42,7 @@
  * @param {() => import('../store/stores').Stores} deps.getStores
  * @param {() => import('../tunnel/engine').TunnelEngine} deps.getEngine
  */
-const { lookupHost } = require("../tunnel/resolve-check");
+const { lookupHost, classifyBindHost } = require("../tunnel/resolve-check");
 
 function registerResolveIPC({ ipcMain, getStores, getEngine }) {
   let active = null; // the in-flight probe's AbortController, or null
@@ -64,6 +67,11 @@ function registerResolveIPC({ ipcMain, getStores, getEngine }) {
   ipcMain.handle(
     "resolve:lookup",
     wrap("resolve:lookup", ({ host } = {}) => lookupHost(host)),
+  );
+
+  ipcMain.handle(
+    "resolve:bindcheck",
+    wrap("resolve:bindcheck", ({ host } = {}) => classifyBindHost(host)),
   );
 
   ipcMain.handle(

@@ -33,6 +33,7 @@ function validDef(over = {}) {
     localPort: 5432,
     bindHost: "127.0.0.1",
     destination: { host: "db.internal", port: 5432 },
+    sshHost: "db.internal",
     credentialId: "cred-1",
     jumpHostIds: [],
     lingerMs: 10000,
@@ -47,17 +48,37 @@ test("a well-formed definition validates clean", () => {
   assert.deepEqual(errors, {});
 });
 
-test("sshHost / sshPort are optional (implied SSH server)", () => {
-  // Absent is fine — the resolver implies the SSH server from the destination.
-  assert.equal(validateDefinition(validDef()).valid, true);
-  // Present and well-formed is fine (a bastion override).
+test("the target server (sshHost) is required; sshPort is optional", () => {
+  // A target server is mandatory — absent or blank is rejected against its key.
+  assert.ok(
+    validateDefinition(validDef({ sshHost: undefined })).errors.sshHost,
+  );
+  assert.ok(validateDefinition(validDef({ sshHost: "" })).errors.sshHost);
+  // Present and well-formed is fine, with or without an explicit SSH port.
   assert.equal(
     validateDefinition(validDef({ sshHost: "bastion", sshPort: 2222 })).valid,
     true,
   );
-  // Present but malformed is rejected against its own key.
-  assert.ok(validateDefinition(validDef({ sshHost: "" })).errors.sshHost);
+  assert.equal(
+    validateDefinition(validDef({ sshPort: undefined })).valid,
+    true,
+  );
+  // A malformed SSH port is rejected against its own key.
   assert.ok(validateDefinition(validDef({ sshPort: 0 })).errors.sshPort);
+});
+
+test("entryAddress / exitAddress are optional strings", () => {
+  assert.equal(
+    validateDefinition(validDef({ entryAddress: "5432", exitAddress: "" }))
+      .valid,
+    true,
+  );
+  assert.ok(
+    validateDefinition(validDef({ entryAddress: 5432 })).errors.entryAddress,
+  );
+  assert.ok(
+    validateDefinition(validDef({ exitAddress: {} })).errors.exitAddress,
+  );
 });
 
 test("localPort out of range is rejected with a field-keyed error", () => {

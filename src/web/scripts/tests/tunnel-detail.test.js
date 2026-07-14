@@ -210,6 +210,49 @@ test("cards render values from the snapshot, incl. the new counters", () => {
   assert.ok(errEl.classList.contains("card-value--error"));
 });
 
+// ── Error card → full-error dialog ────────────────────────────────────────────
+
+test("the State card becomes an activatable error button only while errored", () => {
+  const { detail, calls } = mount({ onShowError: (id) => calls.err.push(id) });
+  calls.err = [];
+  detail.show(DEF, { state: "connected" });
+
+  const stateCard = () =>
+    detail.element.querySelector('.detail-card[data-card="state"]');
+
+  // Not errored → inert display card, and a click does nothing.
+  assert.ok(!stateCard().classList.contains("detail-card--error"));
+  assert.equal(stateCard().getAttribute("role"), "listitem");
+  stateCard().click();
+  assert.deepEqual(calls.err, []);
+
+  // Errored → clickable, focusable, and a click reports the tunnel id.
+  detail.updateState("error");
+  assert.ok(stateCard().classList.contains("detail-card--error"));
+  assert.equal(stateCard().getAttribute("role"), "button");
+  assert.equal(stateCard().getAttribute("tabindex"), "0");
+  stateCard().click();
+  assert.deepEqual(calls.err, ["t1"]);
+
+  // Recovering clears the affordance again.
+  detail.updateState("connected");
+  assert.ok(!stateCard().classList.contains("detail-card--error"));
+  assert.equal(stateCard().getAttribute("tabindex"), null);
+});
+
+test("Enter/Space on the errored State card also opens the error", () => {
+  const { detail, calls } = mount({ onShowError: (id) => calls.err.push(id) });
+  calls.err = [];
+  detail.show(DEF, { state: "error" });
+  const stateCard = detail.element.querySelector(
+    '.detail-card[data-card="state"]',
+  );
+  stateCard.dispatchEvent(
+    new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+  );
+  assert.deepEqual(calls.err, ["t1"]);
+});
+
 test("the errors card is not red when the count is zero", () => {
   const { detail } = mount();
   detail.show(

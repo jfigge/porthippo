@@ -66,8 +66,10 @@ function applyDefaults(def) {
 // Optional fields the editor omits from its payload when the user leaves them
 // blank. On update the (full, authoritative) payload's ABSENCE of one means the
 // user cleared it, so a shallow merge must not resurrect the stored value —
-// mirrors credential-store's SECRET_FIELDS handling.
-const OPTIONAL_FIELDS = ["bindHost", "sshHost", "sshPort", "lingerMs"];
+// mirrors credential-store's SECRET_FIELDS handling. `sshHost` (the mandatory
+// target server) is NOT here: it can never be cleared, and omitting it should
+// keep the stored value rather than blank a required field.
+const OPTIONAL_FIELDS = ["bindHost", "sshPort", "lingerMs", "exitAddress"];
 
 /** Index an array of `{ id }` records into a Map for O(1) reference lookup. */
 function indexById(records) {

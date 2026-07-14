@@ -26,7 +26,12 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { lookupHost } = require("../resolve-check");
+const { lookupHost, classifyBindHost } = require("../resolve-check");
+
+const IFACES = () => ({
+  lo0: [{ address: "127.0.0.1", family: "IPv4" }],
+  en0: [{ address: "192.168.1.42", family: "IPv4" }],
+});
 
 test("a name that resolves returns its address", async () => {
   let calls = 0;
@@ -73,4 +78,68 @@ test("an IPv6 literal is resolved without a lookup", async () => {
   assert.equal(res.resolved, true);
   assert.equal(res.family, 6);
   assert.equal(calls, 0);
+});
+
+// ── classifyBindHost — Entry-port bind-address validation ─────────────────────
+
+test("an empty bind host is the default loopback: resolved + local", async () => {
+  const res = await classifyBindHost("  ", {
+    lookup: () => assert.fail("no lookup for empty host"),
+    networkInterfaces: IFACES,
+  });
+  assert.deepEqual(res, { resolved: true, local: true });
+});
+
+test("a loopback literal is local", async () => {
+  const res = await classifyBindHost("127.0.0.1", {
+    networkInterfaces: IFACES,
+  });
+  assert.equal(res.local, true);
+});
+
+test("the wildcard address 0.0.0.0 is local", async () => {
+  const res = await classifyBindHost("0.0.0.0", { networkInterfaces: IFACES });
+  assert.equal(res.local, true);
+});
+
+test("a local interface address is local", async () => {
+  const res = await classifyBindHost("192.168.1.42", {
+    networkInterfaces: IFACES,
+  });
+  assert.equal(res.local, true);
+});
+
+test("an off-box address resolves but is not local", async () => {
+  const res = await classifyBindHost("203.0.113.7", {
+    networkInterfaces: IFACES,
+  });
+  assert.deepEqual(res, {
+    resolved: true,
+    local: false,
+    address: "203.0.113.7",
+  });
+});
+
+test("a hostname is resolved, then its address is checked for locality", async () => {
+  const lookup = (_host, _opts, cb) => cb(null, "192.168.1.42", 4);
+  const res = await classifyBindHost("my-box.local", {
+    lookup,
+    networkInterfaces: IFACES,
+  });
+  assert.equal(res.resolved, true);
+  assert.equal(res.local, true);
+  assert.equal(res.address, "192.168.1.42");
+});
+
+test("an unresolvable bind host is neither resolved nor local", async () => {
+  const lookup = (_host, _opts, cb) => {
+    const err = new Error("nope");
+    err.code = "ENOTFOUND";
+    cb(err);
+  };
+  const res = await classifyBindHost("nope.invalid", {
+    lookup,
+    networkInterfaces: IFACES,
+  });
+  assert.deepEqual(res, { resolved: false, local: false, reason: "ENOTFOUND" });
 });

@@ -50,6 +50,7 @@ function makeDef(credentialId, over = {}) {
     name: "prod db",
     localPort: 5432,
     destination: { host: "db.internal", port: 5432 },
+    sshHost: "db.internal",
     credentialId,
     ...over,
   };
@@ -95,15 +96,19 @@ test("a tunnel record carries no secret; the credential holds the sealed one", (
   }
 });
 
-test("getDecrypted resolves an implied SSH server (blank sshHost)", () => {
+test("getDecrypted resolves the target server + exit, decrypting the credential", () => {
   const dir = freshDir();
   try {
     const stores = new Stores(dir);
     const cred = makeCred(stores.credentialStore());
-    const created = stores.tunnelStore().create(makeDef(cred.id));
+    // A simple tunnel: SSH into db.internal, forward to loopback on it (the Exit).
+    const created = stores
+      .tunnelStore()
+      .create(
+        makeDef(cred.id, { destination: { host: "127.0.0.1", port: 5432 } }),
+      );
 
     const dec = stores.tunnelStore().getDecrypted(created.id);
-    // SSH into the destination box itself, forward to loopback on it.
     assert.equal(dec.sshServer.host, "db.internal");
     assert.equal(dec.sshServer.port, 22);
     assert.equal(dec.sshServer.user, "jason");
@@ -207,7 +212,7 @@ test("an update that changes only the name keeps its references", () => {
   }
 });
 
-test("an update can clear an optional field (bastion / linger) by omitting it", () => {
+test("an update can clear an optional field (SSH port / LAN bind / linger) by omitting it", () => {
   const dir = freshDir();
   try {
     const stores = new Stores(dir);
@@ -220,14 +225,16 @@ test("an update can clear an optional field (bastion / linger) by omitting it", 
         lingerMs: 60000,
       }),
     );
-    assert.equal(created.sshHost, "bastion.example.com");
+    assert.equal(created.sshPort, 2222);
 
     // The editor omits blanked optionals from its payload; the update must not
-    // resurrect the stored values through the shallow merge.
+    // resurrect the stored values through the shallow merge. The target server
+    // (sshHost) is mandatory, so it is always sent and retained.
     const updated = stores.tunnelStore().update(created.id, {
       name: created.name,
       localPort: created.localPort,
       destination: created.destination,
+      sshHost: created.sshHost,
       credentialId: created.credentialId,
       jumpHostIds: [],
       keepAlive: false,
@@ -235,14 +242,18 @@ test("an update can clear an optional field (bastion / linger) by omitting it", 
       autoReconnect: false,
     });
 
-    assert.equal(updated.sshHost, undefined, "bastion cleared");
-    assert.equal(updated.sshPort, undefined, "bastion port cleared");
+    assert.equal(
+      updated.sshHost,
+      "bastion.example.com",
+      "target server retained",
+    );
+    assert.equal(updated.sshPort, undefined, "SSH port override cleared");
     assert.equal(updated.bindHost, undefined, "LAN bind cleared");
     assert.equal(updated.lingerMs, undefined, "linger override cleared");
 
     // ...and it survives a reload from disk.
     const reloaded = new Stores(dir).tunnelStore().get(created.id);
-    assert.equal(reloaded.sshHost, undefined);
+    assert.equal(reloaded.sshPort, undefined);
     assert.equal(reloaded.bindHost, undefined);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

@@ -44,6 +44,9 @@ export const EN = {
   "common.trust": "Trust",
   "common.reject": "Reject",
   "common.dismiss": "Dismiss",
+  // The OS term for the privileged account (Unix vs Windows), used in warnings.
+  "common.root": "root",
+  "common.administrator": "Administrator",
 
   // ── Definition view — master list ───────────────────────────────────────
   "def.list.title": "Tunnels",
@@ -65,24 +68,40 @@ export const EN = {
   "editor.newTitle": "New tunnel",
   "editor.editTitle": "Edit tunnel",
   "editor.name": "Name",
-  "editor.localPort": "Local port",
-  "editor.localPort.privileged":
-    "Ports below 1024 usually need elevated privileges.",
+
+  // Entry / Target / Exit address fields. See features/tunnel-address-fields.md.
+  "editor.entryPort": "Entry port",
+  "editor.entryPort.hint": "local port or address:port",
+  "editor.entryPort.placeholder": "5432  or  127.0.0.1:5432",
+  "editor.entryPort.desc":
+    "The local address that represents the entry point of the tunnel on this machine. Enter a port on its own (bound to 127.0.0.1) or an address:port. An address must resolve to a loopback address, 0.0.0.0, or one of this machine’s own interfaces — it can’t point off-box.",
+  "editor.entryPort.privileged":
+    "Ports below 1024 need Port Hippo to run as {admin} to open them.",
+  "editor.entryPort.notLocal":
+    "“{host}” isn’t an address on this machine — the entry point can only bind a local address.",
+
+  "editor.targetServer": "Target server",
+  "editor.targetServer.hint": "destination server and ssh port",
+  "editor.targetServer.placeholder": "db.example.com  or  db.example.com:22",
+  "editor.targetServer.desc":
+    "The remote server the tunnel connects to over SSH — the far end. Enter a host name or IP, optionally with an SSH port (host:port); the port defaults to 22. A host name is resolved on save (or test): from this machine when there are no jump hosts, otherwise from the last jump host.",
+
+  "editor.exitPort": "Exit port",
+  "editor.exitPort.hint": "Optional address:port",
+  "editor.exitPort.placeholder": "127.0.0.1:5432  (optional)",
+  "editor.exitPort.desc":
+    "An optional local address and port on the target server that the tunnel connects to. Valid entries are address:port, address, port, or blank. Blank uses 127.0.0.1 and the same port as the Entry port; a host on its own reuses the Entry port; a port on its own uses 127.0.0.1. A host must resolve on the target server and be one of its interfaces, 0.0.0.0, or a loopback address — checked on save (or test) once the Target server (and any jump hosts) are set.",
+
   "editor.localPort.conflict": "Port {port} is already used by “{name}”.",
-  "editor.bindHost": "Bind address",
-  "editor.bindHost.hint": "127.0.0.1 keeps the tunnel private to this machine.",
-  "editor.bindHost.warning":
-    "This binds beyond loopback — reachable by other machines on your network.",
-  "editor.destination": "Destination",
-  "editor.destination.host": "Host",
-  "editor.destination.port": "Target port",
+
+  // Inline address parse errors (shown against the owning field on save).
+  "editor.address.entryRequired": "An entry port is required.",
+  "editor.address.entryNoPort": "Enter a port, or an address:port.",
+  "editor.address.targetRequired": "A target server is required.",
+  "editor.address.portRange": "Port must be between 1 and 65535.",
+
   "editor.credential": "Credential",
   "editor.advanced": "Advanced",
-  "editor.sshHost": "SSH server",
-  "editor.sshHost.placeholder": "Same as destination",
-  "editor.sshHost.hint":
-    "Only needed when a bastion forwards on to a different internal host.",
-  "editor.sshPort": "SSH port",
   "editor.jumps": "Jump hosts",
   "editor.linger": "Idle linger (ms)",
   "editor.linger.hint":
@@ -101,8 +120,8 @@ export const EN = {
   "editor.resolve.hint":
     "Walks the jump chain and checks each host resolves from where it’s reached.",
   "editor.resolve.jump": "Jump {n}",
-  "editor.resolve.sshServer": "SSH server",
-  "editor.resolve.destinationRow": "Destination",
+  "editor.resolve.targetRow": "Target server",
+  "editor.resolve.exitRow": "Exit",
   "editor.resolve.ok": "reachable",
   "editor.resolve.fail": "unreachable",
   "editor.resolve.skipped": "not tested",
@@ -224,6 +243,12 @@ export const EN = {
   "card.errors": "Errors",
   "card.state": "State",
   "card.none": "—",
+
+  // ── Tunnel error card → full-error dialog ───────────────────────────────
+  "error.card.hint": "Show the full error",
+  "error.dialog.title": "Tunnel error — {name}",
+  "error.dialog.unknown":
+    "The tunnel reported an error, but no details are available.",
 
   // ── View mode + all-tunnels list (table) ────────────────────────────────
   "view.mode.label": "View",
