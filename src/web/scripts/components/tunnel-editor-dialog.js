@@ -272,24 +272,24 @@ export class TunnelEditorDialog {
         control: this.#input("name", "e.g. Prod database", "text"),
         errorKey: "name",
       }),
-      el("div", { class: "editor-row" }, [
-        field({
-          label: t("editor.destination.host"),
-          control: this.#input("destHost", "db.internal", "text"),
-          errorKey: "destination.host",
-        }),
-        field({
-          label: t("editor.destination.port"),
-          control: this.#input("destPort", "5432", "number"),
-          errorKey: "destination.port",
-        }),
-      ]),
+      field({
+        label: t("editor.destination.host"),
+        control: this.#input("destHost", "db.internal", "text"),
+        errorKey: "destination.host",
+      }),
       this.#section([
-        field({
-          label: t("editor.localPort"),
-          control: this.#input("localPort", "5432", "number"),
-          errorKey: "localPort",
-        }),
+        el("div", { class: "editor-row" }, [
+          field({
+            label: t("editor.destination.port"),
+            control: this.#input("destPort", "5432", "number"),
+            errorKey: "destination.port",
+          }),
+          field({
+            label: t("editor.localPort"),
+            control: this.#input("localPort", "5432", "number"),
+            errorKey: "localPort",
+          }),
+        ]),
         this.#portWarningEl,
       ]),
       this.#credPicker.element,

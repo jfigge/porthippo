@@ -32,7 +32,7 @@
   "editor.bindHost.warning": "This binds beyond loopback — reachable by other machines on your network.",
   "editor.destination": "Destination",
   "editor.destination.host": "Host",
-  "editor.destination.port": "Port",
+  "editor.destination.port": "Target port",
   "editor.credential": "Credential",
   "editor.advanced": "Advanced",
   "editor.sshHost": "SSH server",
