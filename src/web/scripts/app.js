@@ -30,9 +30,29 @@ import { SettingsPopup } from "./components/settings-popup.js";
 import { AboutDialog } from "./components/about-dialog.js";
 import { init as initI18n, t } from "./i18n.js";
 import { icons } from "./icons.js";
+import {
+  installZoomHandlers,
+  FONT_SIZES,
+  DEFAULT_FONT_SIZE,
+} from "./zoom-handlers.js";
 
 let tunnelsView = null;
 let settingsPopup = null;
+
+// UI typeface stacks keyed by the fontFamily setting. Only Inter is bundled
+// (src/web/fonts/); the rest resolve to platform/system faces. Mirrors Rest Hippo.
+const FONT_STACKS = {
+  inter: '"Inter", "Segoe UI", system-ui, -apple-system, sans-serif',
+  system:
+    'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+  "sf-pro": '-apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif',
+  segoe: '"Segoe UI", system-ui, sans-serif',
+  ubuntu: '"Ubuntu", "Cantarell", system-ui, sans-serif',
+  roboto: '"Roboto", "Helvetica Neue", system-ui, sans-serif',
+};
+
+// The live UI font size (px); the zoom factor is fontSize / DEFAULT_FONT_SIZE.
+let currentFontSize = DEFAULT_FONT_SIZE;
 
 // Apply the chosen theme (Feature 60). "light"/"dark" force a palette via the
 // data-theme attribute (which wins over the OS preference in theme.css);
@@ -41,6 +61,36 @@ function applyTheme(theme) {
   const root = document.documentElement;
   if (theme === "light" || theme === "dark") root.dataset.theme = theme;
   else delete root.dataset.theme;
+}
+
+// Apply theme + typeface + zoom from a (possibly partial) settings object. The
+// font size drives a real Chromium zoom factor (relative to the 13px baseline),
+// so the whole px-authored UI scales — not just the elements using --font-size.
+function applyAppearance(settings) {
+  if (!settings) return;
+  if (settings.theme !== undefined) applyTheme(settings.theme);
+  if (settings.fontFamily !== undefined) {
+    const stack = FONT_STACKS[settings.fontFamily] ?? FONT_STACKS.inter;
+    document.documentElement.style.setProperty("--font-sans", stack);
+  }
+  if (settings.fontSize !== undefined) {
+    const size = FONT_SIZES.includes(settings.fontSize)
+      ? settings.fontSize
+      : DEFAULT_FONT_SIZE;
+    currentFontSize = size;
+    window.porthippo?.setZoomFactor?.(size / DEFAULT_FONT_SIZE);
+    // Keep the settings popup's dropdown in step when a zoom gesture (not the
+    // popup itself) changed the size.
+    settingsPopup?.syncAppearance?.({ fontSize: size });
+  }
+}
+
+// Persist + apply a font size chosen by a zoom gesture or the View menu. (The
+// settings popup persists through its own change handler; this is the other path.)
+function commitFontSize(size) {
+  if (size === currentFontSize) return;
+  window.porthippo?.settings?.set?.({ fontSize: size })?.catch?.(() => {});
+  applyAppearance({ fontSize: size });
 }
 
 async function initTunnelsView() {
@@ -126,12 +176,11 @@ function initShell() {
     if (id) tunnelsView?.selectById(id);
   });
 
-  // A settings change re-applies the theme live (other prefs are read on demand
-  // by their consumers; language triggers a full reload from the popup itself).
+  // A settings change re-applies appearance live — theme, typeface, and zoom
+  // (other prefs are read on demand by their consumers; language triggers a full
+  // reload from the popup itself).
   window.addEventListener("porthippo:settings-changed", (event) => {
-    if (event.detail && event.detail.theme !== undefined) {
-      applyTheme(event.detail.theme);
-    }
+    applyAppearance(event.detail);
   });
 }
 
@@ -148,7 +197,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   } catch {
     // Non-fatal: fall back to defaults.
   }
-  applyTheme(settings.theme);
+  applyAppearance(settings);
 
   new HostKeyPrompt().install();
   new UpdateNotifier().install();
@@ -156,5 +205,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   // deferred tunnels (held disarmed in main until unlock) can arm.
   new UnlockPrompt().install();
   initShell();
+  // Cmd +/- (and Ctrl+wheel / pinch, and the View menu) step the UI zoom.
+  installZoomHandlers({
+    getFontSize: () => currentFontSize,
+    setFontSize: (size) => commitFontSize(size),
+  });
   initTunnelsView();
 });

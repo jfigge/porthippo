@@ -325,6 +325,11 @@ export const EN = {
   "settings.appearance.theme.dark": "Dark",
   "settings.appearance.language": "Language",
   "settings.appearance.language.system": "System default",
+  "settings.appearance.fontSize": "Font size",
+  "settings.appearance.fontSize.hint":
+    "Scales the whole interface. Cmd/Ctrl with +, - or 0 also adjusts it.",
+  "settings.appearance.fontFamily": "Font",
+  "settings.appearance.fontFamily.system": "System default",
 
   "settings.defaults.linger": "Default idle linger (ms)",
   "settings.defaults.linger.hint":
@@ -407,6 +412,9 @@ export const EN = {
   "menu.hide": "Hide Port Hippo",
   "menu.quit": "Quit Port Hippo",
   "menu.checkUpdates": "Check for Updates…",
+  "menu.fontIncrease": "Increase Font Size",
+  "menu.fontDecrease": "Decrease Font Size",
+  "menu.fontReset": "Reset Font Size",
 
   // ── Tray (MAIN process) ─────────────────────────────────────────────────
   "tray.show": "Show Port Hippo",

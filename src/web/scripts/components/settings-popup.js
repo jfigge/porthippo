@@ -66,6 +66,23 @@ export class SettingsPopup {
     PopupManager.open({ element: this.#el });
   }
 
+  /**
+   * Reflect an externally-changed appearance value (e.g. a Cmd +/- zoom step)
+   * into the controls WITHOUT re-emitting a change. No-ops before the popup is
+   * built or when a field is absent, so it's safe to call from app-wide handlers.
+   */
+  syncAppearance(partial) {
+    if (!this.#built || !partial) return;
+    if (partial.fontSize !== undefined) {
+      const el = this.#get("setting-font-size");
+      if (el) el.value = String(partial.fontSize);
+    }
+    if (partial.fontFamily !== undefined) {
+      const el = this.#get("setting-font-family");
+      if (el) el.value = partial.fontFamily;
+    }
+  }
+
   // ── Build ────────────────────────────────────────────────────────────────
 
   #ensureBuilt() {
@@ -155,6 +172,22 @@ export class SettingsPopup {
         text: o.labelKey ? t(o.labelKey) : o.label,
       })),
     );
+    const fontSizeSelect = this.#select(
+      "setting-font-size",
+      "fontSize",
+      [11, 12, 13, 14, 16, 18].map((n) => ({
+        value: String(n),
+        text: `${n} px`,
+      })),
+    );
+    const fontFamilySelect = this.#select("setting-font-family", "fontFamily", [
+      { value: "inter", text: "Inter" },
+      { value: "system", text: t("settings.appearance.fontFamily.system") },
+      { value: "sf-pro", text: "SF Pro (macOS)" },
+      { value: "segoe", text: "Segoe UI (Windows)" },
+      { value: "ubuntu", text: "Ubuntu (Linux)" },
+      { value: "roboto", text: "Roboto" },
+    ]);
 
     return this.#panel("appearance", [
       field({
@@ -166,6 +199,17 @@ export class SettingsPopup {
         label: t("settings.appearance.language"),
         labelFor: "setting-language",
         control: languageSelect,
+      }),
+      field({
+        label: t("settings.appearance.fontSize"),
+        labelFor: "setting-font-size",
+        control: fontSizeSelect,
+        hint: t("settings.appearance.fontSize.hint"),
+      }),
+      field({
+        label: t("settings.appearance.fontFamily"),
+        labelFor: "setting-font-family",
+        control: fontFamilySelect,
       }),
     ]);
   }
@@ -681,6 +725,10 @@ export class SettingsPopup {
     if (s.theme !== undefined) this.#get("setting-theme").value = s.theme;
     if (s.language !== undefined)
       this.#get("setting-language").value = s.language;
+    if (s.fontSize !== undefined)
+      this.#get("setting-font-size").value = String(s.fontSize);
+    if (s.fontFamily !== undefined)
+      this.#get("setting-font-family").value = s.fontFamily;
     if (s.defaultLingerMs !== undefined)
       this.#get("setting-lingerMs").value = String(s.defaultLingerMs);
     if (s.defaultBindHost !== undefined)
@@ -702,6 +750,8 @@ export class SettingsPopup {
     return {
       theme: this.#get("setting-theme").value,
       language: this.#get("setting-language").value,
+      fontSize: parseInt(this.#get("setting-font-size").value, 10) || 13,
+      fontFamily: this.#get("setting-font-family").value,
       defaultLingerMs:
         Number.isFinite(lingerRaw) && lingerRaw >= 0 ? lingerRaw : 0,
       defaultBindHost: this.#get("setting-bindHost").value.trim(),

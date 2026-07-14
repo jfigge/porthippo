@@ -56,6 +56,29 @@ function installAppMenu({ app, Menu, label, actions, isDev = false }) {
           { type: "separator" },
         ]
       : []),
+    // Font-size zoom. The accelerators are advertised only
+    // (registerAccelerator:false): the renderer owns the keystroke — it also
+    // handles wheel/pinch and lets the combo pass through inside text fields — so
+    // the menu must not bind it or the keypress would fire twice.
+    {
+      label: label("menu.fontIncrease", "Increase Font Size"),
+      accelerator: "CmdOrCtrl+Plus",
+      registerAccelerator: false,
+      click: () => a.fontChange?.("in"),
+    },
+    {
+      label: label("menu.fontDecrease", "Decrease Font Size"),
+      accelerator: "CmdOrCtrl+-",
+      registerAccelerator: false,
+      click: () => a.fontChange?.("out"),
+    },
+    {
+      label: label("menu.fontReset", "Reset Font Size"),
+      accelerator: "CmdOrCtrl+0",
+      registerAccelerator: false,
+      click: () => a.fontChange?.("reset"),
+    },
+    { type: "separator" },
     { role: "togglefullscreen" },
   ];
 

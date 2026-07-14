@@ -30,6 +30,8 @@ const DEFAULTS = Object.freeze({
   // ── Appearance ────────────────────────────────────────────────────────────
   theme: "system", // "system" | "light" | "dark"
   language: "system", // "system" | a BCP-47 subtag (e.g. "en"); Feature 60 i18n
+  fontSize: 13, // UI zoom baseline in px (11–18); Cmd +/- steps it
+  fontFamily: "inter", // UI typeface key (see FONT_STACKS in app.js)
 
   // ── Defaults seeded into new tunnel definitions ───────────────────────────
   defaultLingerMs: 10000, // idle grace before SSH teardown

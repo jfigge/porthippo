@@ -25,7 +25,7 @@
 // main process must arrive over IPC.
 "use strict";
 
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webFrame } = require("electron");
 
 contextBridge.exposeInMainWorld("porthippo", {
   // Static platform info — available synchronously from the sandboxed preload's
@@ -34,6 +34,14 @@ contextBridge.exposeInMainWorld("porthippo", {
   arch: process.arch,
   // Electron runtime version, shown in the About dialog's build details.
   electron: process.versions?.electron,
+
+  // UI zoom — the renderer maps its fontSize setting to a Chromium zoom factor so
+  // the WHOLE interface scales (its font sizes are authored in px). webFrame lives
+  // in the sandboxed preload; the renderer can't reach it directly.
+  setZoomFactor: (factor) => {
+    const f = Number(factor);
+    if (Number.isFinite(f) && f > 0) webFrame.setZoomFactor(f);
+  },
 
   // App version comes from the main process (package.json), over IPC — this also
   // proves the ipcMain <-> preload bridge is wired correctly.
@@ -215,6 +223,8 @@ const MENU_EVENT_MAP = {
   "menu:open-settings": "porthippo:open-settings",
   "menu:new-tunnel": "porthippo:new-tunnel",
   "menu:show-about": "porthippo:show-about",
+  // View ▸ Increase/Decrease/Reset Font Size — payload is "in" | "out" | "reset".
+  "menu:font-change": "porthippo:ui-font-change",
 };
 for (const [channel, domEvent] of Object.entries(MENU_EVENT_MAP)) {
   ipcRenderer.on(channel, (_event, payload) => {

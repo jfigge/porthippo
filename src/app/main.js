@@ -400,6 +400,9 @@ function refreshMenu() {
       showLogs: () => shell.openPath(logger.dir),
       about: showAbout,
       checkUpdates: () => updater.checkForUpdates({ manual: true }),
+      // View ▸ font zoom: the renderer owns the step logic (it also handles the
+      // keyboard/wheel gestures), so the menu just forwards the direction.
+      fontChange: (direction) => sendToRenderer("menu:font-change", direction),
       quit: requestQuit,
     },
   });
@@ -589,6 +592,11 @@ function createWindow({ show = true } = {}) {
   win.on("closed", () => {
     if (mainWindow === win) mainWindow = null;
   });
+
+  // Disable Chromium's built-in pinch/ctrl-wheel visual zoom — the renderer
+  // intercepts those gestures and steps the settings fontSize (a real zoom
+  // factor) instead, so the whole UI scales through one code path.
+  win.webContents.setVisualZoomLevelLimits(1, 1).catch(() => {});
 
   // Re-localize main chrome whenever the renderer (re)loads — e.g. after a
   // language change reloads the window.

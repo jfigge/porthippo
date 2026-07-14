@@ -55,7 +55,7 @@
     "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono:
     ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", Menlo, monospace;
-  --font-size: 14px;
+  --font-size: 13px;
   --line-height: 1.5;
 
   /* ── Spacing scale ───────────────────────────────────────────────────── */
