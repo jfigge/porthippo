@@ -22,13 +22,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { resetDom } from "./jsdom-setup.js";
+import { TunnelDetail } from "../components/tunnel-detail.js";
 import {
-  TunnelDetail,
   reorderCards,
   visibleCards,
   hiddenCards,
   DEFAULT_CARD_ORDER,
-} from "../components/tunnel-detail.js";
+} from "../components/card-catalog.js";
 
 const NOW = 1_000_000;
 

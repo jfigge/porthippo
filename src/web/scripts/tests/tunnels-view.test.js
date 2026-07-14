@@ -195,3 +195,61 @@ test("a persisted cardOrder is applied to the detail grid", async () => {
   assert.equal(order[0], "errors", "saved order leads");
   assert.equal(order[1], "download");
 });
+
+// ── View mode (cards ↔ list) ─────────────────────────────────────────────────
+
+test("a set-detail-mode intent (from the header) toggles the split/table and persists it", async () => {
+  const calls = {};
+  const { view } = await mount({ calls });
+  assert.equal(view.element.querySelector(".tunnels-split").hidden, false);
+  assert.equal(view.element.querySelector(".tunnel-table-view").hidden, true);
+
+  window.dispatchEvent(
+    new CustomEvent("porthippo:set-detail-mode", { detail: { mode: "list" } }),
+  );
+  assert.equal(view.element.querySelector(".tunnels-split").hidden, true);
+  assert.equal(view.element.querySelector(".tunnel-table-view").hidden, false);
+  assert.ok(
+    (calls.set || []).some((p) => p.detailMode === "list"),
+    "detailMode persisted",
+  );
+});
+
+test("in list mode, the table toolbar arm control routes to tunnels.arm", async () => {
+  const calls = {};
+  const { view } = await mount({ calls, settings: { detailMode: "list" } });
+  // 'a' is auto-selected; the table toolbar's arm button acts on it.
+  view.element.querySelector(".tunnel-table-view .detail-arm-btn").click();
+  await tick();
+  assert.deepEqual(calls.arm, ["a"]);
+});
+
+test("the view echoes detail-mode-changed so the header selector can sync", async () => {
+  const { view } = await mount();
+  const seen = [];
+  window.addEventListener("porthippo:detail-mode-changed", (e) =>
+    seen.push(e.detail && e.detail.mode),
+  );
+  window.dispatchEvent(
+    new CustomEvent("porthippo:set-detail-mode", { detail: { mode: "list" } }),
+  );
+  assert.equal(seen.at(-1), "list");
+  assert.equal(view.element.querySelector(".tunnel-table-view").hidden, false);
+});
+
+test("a persisted detailMode of list starts in the list view", async () => {
+  const { view } = await mount({ settings: { detailMode: "list" } });
+  assert.equal(view.element.querySelector(".tunnels-split").hidden, true);
+  assert.equal(view.element.querySelector(".tunnel-table-view").hidden, false);
+  assert.equal(view.element.querySelectorAll(".tt-row").length, 2);
+});
+
+test("the list view shares the persisted card order as its columns", async () => {
+  const { view } = await mount({
+    settings: { detailMode: "list", cardOrder: ["connections", "download"] },
+  });
+  const cols = [...view.element.querySelectorAll(".tt-th")].map(
+    (t) => t.dataset.col,
+  );
+  assert.deepEqual(cols, ["__tunnel", "connections", "download"]);
+});

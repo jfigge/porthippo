@@ -17,10 +17,11 @@
 // tunnels-view.js — the single master-detail surface that replaced the old
 // Definition + Monitoring split. It owns the data (definitions, live states,
 // stats snapshots, jump-host records for the breadcrumb) and the shared
-// TunnelEditorDialog, and wires the master TunnelList to the TunnelDetail: the
-// list reports selection / add / edit / delete; the detail reports arm / pause /
-// card-reorder. All native work still flows through `window.porthippo.*`; the
-// existing dialogs are reused unchanged for add/edit/delete.
+// TunnelEditorDialog, and offers two presentations chosen by a header dropdown:
+// "cards" (the master TunnelList + per-tunnel TunnelDetail) and "list" (the
+// all-tunnels TunnelTable). Both share the persisted card order (columns) so the
+// "Cards" checklist governs either view. All native work flows through
+// `window.porthippo.*`; the existing dialogs are reused unchanged.
 
 import { el } from "../dom.js";
 import { t } from "../i18n.js";
@@ -28,6 +29,7 @@ import { PopupManager } from "../popup-manager.js";
 import { TunnelEditorDialog } from "./tunnel-editor-dialog.js";
 import { TunnelList } from "./tunnel-list.js";
 import { TunnelDetail } from "./tunnel-detail.js";
+import { TunnelTable } from "./tunnel-table.js";
 
 /** Armed = the engine holds this tunnel (anything but disarmed / error). */
 function isArmed(state) {
@@ -38,9 +40,14 @@ export class TunnelsView {
   #el;
   #list;
   #detail;
+  #table;
   #editor;
   #porthippo;
   #now;
+
+  #split;
+  #tableEl;
+  #mode = "cards";
 
   #defs = [];
   #states = new Map();
@@ -52,6 +59,7 @@ export class TunnelsView {
 
   #onStats;
   #onTunnelState;
+  #onSetMode;
 
   constructor({ porthippo, openKeyFile, now } = {}) {
     this.#porthippo = porthippo || window.porthippo;
@@ -67,10 +75,7 @@ export class TunnelsView {
     this.#list = new TunnelList({
       onSelect: (id) => this.#select(id),
       onAdd: () => this.#editor.openCreate(),
-      onEdit: (id) => {
-        const def = this.#defs.find((d) => d.id === id);
-        if (def) this.#editor.openEdit(def);
-      },
+      onEdit: (id) => this.#editById(id),
       onDelete: (id) => this.#confirmDelete(id),
     });
 
@@ -81,23 +86,46 @@ export class TunnelsView {
       onCardsChange: (order) => this.#persistCardOrder(order),
     });
 
-    this.#el = el("div", { class: "tunnels-view" }, [
+    this.#table = new TunnelTable({
+      now: this.#now,
+      onSelect: (id) => this.#select(id),
+      onAdd: () => this.#editor.openCreate(),
+      onEdit: (id) => this.#editById(id),
+      onDelete: (id) => this.#confirmDelete(id),
+      onCardsChange: (order) => this.#persistCardOrder(order),
+      onSortChange: (sort) => this.#persistListSort(sort),
+      onToggleArm: (id) => this.#toggleArm(id),
+      onTogglePause: (id) => this.#togglePause(id),
+    });
+
+    this.#split = el("div", { class: "tunnels-split" }, [
       this.#list.element,
       this.#detail.element,
+    ]);
+    this.#tableEl = this.#table.element;
+
+    this.#el = el("div", { class: "tunnels-view" }, [
+      this.#split,
+      this.#tableEl,
       this.#editor.element,
     ]);
+    this.#applyMode(); // default: cards
 
     this.#onStats = (e) => this.#applyStats(e.detail);
     this.#onTunnelState = (e) => this.#applyState(e.detail);
+    // The view-mode selector lives in the app header; it broadcasts the intent
+    // and we echo the resolved mode back so the <select> stays in sync.
+    this.#onSetMode = (e) => this.#setMode(e.detail && e.detail.mode);
     window.addEventListener("porthippo:stats-updated", this.#onStats);
     window.addEventListener("porthippo:tunnel-state", this.#onTunnelState);
+    window.addEventListener("porthippo:set-detail-mode", this.#onSetMode);
   }
 
   get element() {
     return this.#el;
   }
 
-  /** Load definitions, jump hosts (breadcrumb), live state + the card order. */
+  /** Load definitions, jump hosts (breadcrumb), live state, card order + mode. */
   async load() {
     const [defs, status, jumps, settings] = await Promise.all([
       this.#porthippo?.tunnels?.list?.() ?? [],
@@ -112,16 +140,27 @@ export class TunnelsView {
     this.#jumpsById = new Map(
       (Array.isArray(jumps) ? jumps : []).map((j) => [j.id, j]),
     );
-    if (settings && Array.isArray(settings.cardOrder)) {
-      this.#cardOrder = settings.cardOrder;
-      this.#detail.setCardOrder(this.#cardOrder);
-    }
+    // Always apply the (possibly null) order so both views default to all cards.
+    this.#cardOrder =
+      settings && Array.isArray(settings.cardOrder) ? settings.cardOrder : null;
+    this.#detail.setCardOrder(this.#cardOrder);
+    this.#table.setCardOrder(this.#cardOrder);
+    if (settings && settings.listSort) this.#table.setSort(settings.listSort);
+    // Always (re)apply so the header selector syncs, even for the default.
+    this.#setMode(settings?.detailMode, { persist: false });
 
     // Keep the current selection if it still exists, else select the first tunnel.
     if (!this.#defs.some((d) => d.id === this.#selectedId)) {
       this.#selectedId = this.#defs[0]?.id ?? null;
     }
     this.#list.setData(this.#defs, this.#states, this.#selectedId);
+    this.#table.setData(
+      this.#defs,
+      this.#states,
+      this.#snaps,
+      this.#selectedId,
+      this.#jumpsById,
+    );
     this.#renderDetail();
   }
 
@@ -138,13 +177,42 @@ export class TunnelsView {
   destroy() {
     window.removeEventListener("porthippo:stats-updated", this.#onStats);
     window.removeEventListener("porthippo:tunnel-state", this.#onTunnelState);
+    window.removeEventListener("porthippo:set-detail-mode", this.#onSetMode);
+  }
+
+  // ── View mode ─────────────────────────────────────────────────────────────
+
+  #setMode(mode, { persist = true } = {}) {
+    const m = mode === "list" ? "list" : "cards";
+    this.#mode = m;
+    this.#applyMode();
+    // Echo the resolved mode so the header <select> reflects it.
+    window.dispatchEvent(
+      new CustomEvent("porthippo:detail-mode-changed", { detail: { mode: m } }),
+    );
+    if (persist) {
+      this.#porthippo?.settings?.set?.({ detailMode: m })?.catch?.(() => {});
+    }
+  }
+
+  #applyMode() {
+    const list = this.#mode === "list";
+    this.#split.hidden = list;
+    this.#tableEl.hidden = !list;
+    this.#el.classList.toggle("tunnels-view--list", list);
   }
 
   // ── Selection ─────────────────────────────────────────────────────────────
 
+  #editById(id) {
+    const def = this.#defs.find((d) => d.id === id);
+    if (def) this.#editor.openEdit(def);
+  }
+
   #select(id) {
     this.#selectedId = id;
     this.#list.setSelected(id);
+    this.#table.setSelected(id);
     this.#renderDetail();
   }
 
@@ -173,6 +241,7 @@ export class TunnelsView {
       else this.#errors.delete(snap.id);
       this.#list.updateState(snap.id, snap.state);
     }
+    this.#table.applyStats(this.#snaps, this.#states);
     if (this.#selectedId) {
       this.#detail.updateSnap(
         this.#snaps.get(this.#selectedId) || null,
@@ -191,6 +260,7 @@ export class TunnelsView {
       if (detail.error) this.#errors.set(detail.id, detail.error);
       else this.#errors.delete(detail.id);
       this.#list.updateState(detail.id, detail.state);
+      this.#table.updateState(detail.id, detail.state);
     }
     if (detail.id === this.#selectedId) {
       this.#detail.updateState(this.#states.get(detail.id) || "disarmed");
@@ -259,11 +329,18 @@ export class TunnelsView {
   #setLiveState(id, state) {
     this.#states.set(id, state);
     this.#list.updateState(id, state);
+    this.#table.updateState(id, state);
     if (id === this.#selectedId) this.#detail.updateState(state);
   }
 
   #persistCardOrder(order) {
     this.#cardOrder = order;
+    this.#detail.setCardOrder(order);
+    this.#table.setCardOrder(order);
     this.#porthippo?.settings?.set?.({ cardOrder: order })?.catch?.(() => {});
+  }
+
+  #persistListSort(sort) {
+    this.#porthippo?.settings?.set?.({ listSort: sort })?.catch?.(() => {});
   }
 }

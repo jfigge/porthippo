@@ -70,6 +70,27 @@ function initShell() {
     settingsPopup.open(),
   );
 
+  // The header view-mode selector (cards ↔ list). It's the control; TunnelsView
+  // owns the state, so a change is broadcast to it and it echoes the resolved
+  // mode back (incl. on load from settings) to keep the <select> in sync.
+  const viewMode = document.getElementById("view-mode");
+  if (viewMode) {
+    viewMode.setAttribute("aria-label", t("view.mode.label"));
+    viewMode.options[0].textContent = t("view.mode.cards");
+    viewMode.options[1].textContent = t("view.mode.list");
+    viewMode.addEventListener("change", () => {
+      window.dispatchEvent(
+        new CustomEvent("porthippo:set-detail-mode", {
+          detail: { mode: viewMode.value },
+        }),
+      );
+    });
+    window.addEventListener("porthippo:detail-mode-changed", (event) => {
+      const mode = event.detail && event.detail.mode;
+      if (mode) viewMode.value = mode;
+    });
+  }
+
   // The top-left brand ICON button opens the in-app About dialog (also reachable
   // from the Help ▸ About / macOS app menu, which arrives as porthippo:show-about).
   // It's a native <button>, so Enter/Space activation is handled for us; the logo

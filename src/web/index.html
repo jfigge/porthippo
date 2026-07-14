@@ -56,6 +56,18 @@
         </div>
 
         <div class="app-header-meta">
+          <!-- View-mode selector (cards ↔ list); localized + wired in app.js. -->
+          <select
+            id="view-mode"
+            class="app-header-view-select"
+            aria-label="View mode"
+          >
+            <option value="cards">Cards</option>
+            <option value="list">List</option>
+          </select>
+
+          <span class="app-header-sep" aria-hidden="true"></span>
+
           <button
             id="settings-btn"
             class="btn--icon app-header-settings"

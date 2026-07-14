@@ -186,10 +186,10 @@ export const EN = {
   "detail.reorderHint": "Drag to rearrange",
   "detail.route.local": "Local",
   "detail.route.target": "Target",
-  "detail.cards": "Cards",
-  "detail.cards.title": "Choose which cards to show",
-  "detail.cards.menuTitle": "Show cards",
-  "detail.cards.empty": "No cards shown — use “Cards” to add some.",
+  "detail.cards": "Data Fields",
+  "detail.cards.title": "Choose which data fields to show",
+  "detail.cards.menuTitle": "Data fields",
+  "detail.cards.empty": "No data fields shown — use “Data Fields” to add some.",
 
   // ── Detail cards ────────────────────────────────────────────────────────
   "card.download": "Download",
@@ -207,6 +207,13 @@ export const EN = {
   "card.errors": "Errors",
   "card.state": "State",
   "card.none": "—",
+
+  // ── View mode + all-tunnels list (table) ────────────────────────────────
+  "view.mode.label": "View",
+  "view.mode.cards": "Cards",
+  "view.mode.list": "List",
+  "table.tunnel": "Tunnel",
+  "table.sortHint": "Sort by {name}",
 
   // ── Host-key trust prompt (TOFU) ────────────────────────────────────────
   "hostkey.unknown.title": "Unknown SSH host key",

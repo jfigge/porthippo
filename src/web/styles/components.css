@@ -1107,12 +1107,26 @@
 /* ─────────────────────────────────────────────────────────────────────────────
    Master-detail Tunnels surface (sidebar list + live detail).
    ───────────────────────────────────────────────────────────────────────────── */
+/* The view-mode selector now lives in the app header (see app.css); this surface
+   is just the mode-switched body — the cards split, or the list table. */
 .tunnels-view {
-  display: grid;
-  grid-template-columns: 240px 1fr;
+  display: flex;
   width: 100%;
   height: 100%;
   min-height: 0;
+}
+
+.tunnels-split {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 240px 1fr;
+}
+
+/* A `display` rule overrides the UA `[hidden] { display: none }`, so guard it. */
+.tunnels-split[hidden] {
+  display: none;
 }
 
 /* ── Sidebar (master list) ─────────────────────────────────────────────────── */
@@ -1520,4 +1534,163 @@
   padding: var(--space-5) 0;
   color: var(--color-muted);
   text-align: center;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   List view — every tunnel as a row in one sortable, column-reorderable table.
+   ───────────────────────────────────────────────────────────────────────────── */
+.tunnel-table-view {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.tunnel-table-view[hidden] {
+  display: none;
+}
+
+.tunnel-table-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4) var(--space-2);
+}
+
+.tunnel-table-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+.tunnel-table-spacer {
+  flex: 1 1 auto;
+}
+
+.tunnel-table-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 var(--space-4) var(--space-4);
+}
+
+.tunnel-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.tunnel-table[hidden] {
+  display: none;
+}
+
+/* ── Header row (click to sort, drag a metric header to reorder columns) ────── */
+.tt-th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: var(--space-2) var(--space-3);
+  text-align: right;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--color-muted);
+  background: var(--color-base);
+  border-bottom: 1px solid var(--color-crust);
+  cursor: pointer;
+  user-select: none;
+}
+
+.tt-th--identity {
+  text-align: left;
+}
+
+.tt-th:hover,
+.tt-th--sorted {
+  color: var(--color-text);
+}
+
+.tt-th--drop {
+  box-shadow: inset 2px 0 0 var(--color-accent);
+}
+
+.tt-th--dragging {
+  opacity: 0.5;
+}
+
+.tt-th-arrow {
+  display: inline-block;
+  width: 1em;
+  margin-left: 2px;
+  font-size: 9px;
+  color: var(--color-accent);
+}
+
+/* ── Body rows ─────────────────────────────────────────────────────────────── */
+.tt-row {
+  cursor: pointer;
+  border-bottom: 1px solid var(--color-surface-0);
+}
+
+.tt-row:hover {
+  background: var(--color-surface-0);
+}
+
+.tt-row:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.tt-row--selected,
+.tt-row--selected:hover {
+  background: var(--color-surface-1);
+}
+
+.tt-td {
+  padding: var(--space-2) var(--space-3);
+  text-align: right;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  color: var(--color-subtext);
+}
+
+.tt-td--identity {
+  text-align: left;
+  font-family: inherit;
+}
+
+.tt-identity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.tt-identity .tunnel-row-name {
+  flex: 1 1 auto;
+}
+
+.tt-row .tunnel-row-tools {
+  margin-left: auto;
+}
+
+.tt-row:hover .tunnel-row-tools,
+.tt-row:focus-within .tunnel-row-tools,
+.tt-row--selected .tunnel-row-tools {
+  opacity: 1;
+}
+
+.tunnel-table-empty {
+  padding: var(--space-6) var(--space-4);
+  text-align: center;
+  color: var(--color-muted);
+}
+
+.tunnel-table-empty[hidden] {
+  display: none;
 }
