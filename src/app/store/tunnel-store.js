@@ -141,6 +141,17 @@ class TunnelStore {
     };
   }
 
+  /**
+   * Resolve an arbitrary reference-shape tunnel — a stored one OR an unsaved editor
+   * draft — into the engine shape with secrets decrypted, against the live
+   * credential / jump-host records. Used by the Feature 100 resolution probe, which
+   * validates a draft that has no id yet. Never persisted; secrets stay in-process.
+   */
+  resolveDecrypted(def) {
+    const doc = this._read();
+    return resolveDefinition(def || {}, this._decryptedRefs(doc));
+  }
+
   /** Reference maps for the resolver: credentials decrypted, jump hosts as-is. */
   _decryptedRefs(doc) {
     const credentialsById = new Map();

@@ -61,7 +61,8 @@ Electron main process (src/app/main.js)
   sandboxed and communicates exclusively via `window.porthippo.*`.
 - Request/response IPC channels are registered in `ipc/store.js` (CRUD + settings +
   `hostkeys:list|revoke`), `ipc/engine.js` (`tunnels:arm|disarm|status|pause|resume|apply`,
-  `hostkeys:trust|reject`), `ipc/dialog.js` (`dialog:open-key-file`), `ipc/shell.js`
+  `hostkeys:trust|reject`), `ipc/resolve.js` (`resolve:lookup|test|cancel` — Feature 100),
+  `ipc/dialog.js` (`dialog:open-key-file`), `ipc/shell.js`
   (`i18n:load`, `diagnostics:copy`) and `ipc/secret-storage.js`
   (`secret-storage:get-mode|set-mode|unlock|lock`), and exposed through `preload.js`; **keep
   the handler and the `window.porthippo.*` exposure in lockstep** (the `ipc-parity` test
@@ -87,13 +88,19 @@ socket and relay bytes ourselves — never shell out to the system `ssh`.
 - `relay.js` — `forwardOut` + bidirectional pipe with byte counters (Feature 30 reads them).
 - `host-verifier.js` — verifies each hop's key against `~/.ssh/known_hosts` + the accepted-
   keys store; TOFU-prompts on unknown, hard-rejects a changed key. Never auto-accepts.
+- `resolve-check.js` + `ssh-chain.js` `probeChain` (Feature 100) — hostname-resolution
+  validation. `lookupHost` is a plain local `dns.lookup` (bind host / first hop). `probeChain`
+  walks the real chain and probes the destination from the far end via `direct-tcpip`
+  (`forwardOut`) — reusing the same host-key verifier — to report a per-hop resolve/reach
+  result; it is **protocol-only** (no remote command execution) and always disposes.
 - `tunnel.js` — per-definition lifecycle: lazy connect on first access, ref-counted idle
   teardown after `lingerMs`, `keepAlive`, reconcile (pending edits / force-apply), and the
   `autoReconnect` drop policy (default off → re-establish on next access).
-- `engine.js` — the singleton: `arm/disarm/armAll/disarmAll/status/apply/reconcile` and
-  host-key prompt mediation. Reads decrypted definitions via
-  `tunnelStore().getDecrypted()/listDecrypted()`; never imports Electron (broadcasts are
-  injected).
+- `engine.js` — the singleton: `arm/disarm/armAll/disarmAll/status/apply/reconcile`,
+  host-key prompt mediation, and `probeDefinition` (Feature 100 — a disposable resolution
+  probe that reuses the host-key verifier but never binds a listener or tracks a tunnel).
+  Reads decrypted definitions via `tunnelStore().getDecrypted()/listDecrypted()` (and
+  `resolveDecrypted()` for a draft probe); never imports Electron (broadcasts are injected).
 
 ### App shell (Feature 60)
 
@@ -214,7 +221,11 @@ make clean     # Remove build/ and dist/
   `safeStorage` is unavailable, leaving a locked master password is refused, and the app-key
   file is deleted only after a completed switch away from it.
 - Verify SSH host keys against `known_hosts` (trust-on-first-use with an explicit prompt);
-  never auto-accept (Feature 20).
+  never auto-accept (Feature 20). The resolution probe (Feature 90 → 100) reuses this same
+  TOFU path — an unknown key during a "Test resolution" prompts exactly as arming would.
+- Hostname-resolution validation (Feature 100) is **protocol-only**: remote checks resolve
+  via SSH `direct-tcpip`, never by executing a command on a remote host, and the renderer
+  only ever sends a reference draft + hostnames — no secret leaves main.
 - Redact secrets from logs, diagnostics, and any export.
 
 ## License headers

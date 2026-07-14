@@ -115,6 +115,20 @@ contextBridge.exposeInMainWorld("porthippo", {
     reject: (promptId) => ipcRenderer.invoke("hostkeys:reject", promptId),
   },
 
+  // ── Hostname-resolution validation (Feature 100) ──────────────────────────
+  // The editor asks main whether hosts resolve. `lookup` is a pure local DNS
+  // check for the names resolved from this machine (bind host / first hop).
+  // `test` walks the real jump chain and probes the destination from the far end,
+  // resolving to a per-hop `{ hopLabel, host, port, status, reason? }` result;
+  // credential decryption and every socket stay in main, so nothing here carries a
+  // secret. Host-key prompts raised during a test arrive over the existing
+  // porthippo:hostkey-unknown event. `cancel` aborts an in-flight test.
+  resolve: {
+    lookup: (host) => ipcRenderer.invoke("resolve:lookup", { host }),
+    test: (payload) => ipcRenderer.invoke("resolve:test", { payload }),
+    cancel: () => ipcRenderer.invoke("resolve:cancel"),
+  },
+
   // ── App shell (Feature 60) ────────────────────────────────────────────────
   // i18n.load returns the active locale's catalog (resolved from settings +
   // the OS locale) for the renderer to layer over its embedded English.

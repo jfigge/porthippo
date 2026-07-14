@@ -450,12 +450,70 @@
 }
 
 .editor-bind-warning,
-.editor-port-warning {
+.editor-port-warning,
+.editor-resolve-warning {
   margin: calc(-1 * var(--space-2)) 0 var(--space-3);
   padding: var(--space-2);
   border: 1px solid var(--color-warning);
   border-radius: var(--radius-sm);
   font-size: 12px;
+  color: var(--color-warning);
+}
+
+/* Test-resolution block (Feature 100): the button, its hint, and the per-hop
+   result list the probe returns. */
+.editor-resolve {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.editor-resolve-btn {
+  align-self: flex-start;
+}
+
+.editor-resolve-hint {
+  margin: 0;
+}
+
+.editor-resolve-results {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  border: 1px solid var(--color-overlay);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-0);
+}
+
+.editor-resolve-summary {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.editor-resolve-summary--warn {
+  color: var(--color-warning);
+}
+
+.editor-resolve-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: 12px;
+  color: var(--color-subtext);
+}
+
+.editor-resolve-row-status {
+  white-space: nowrap;
+}
+
+.editor-resolve-row--ok .editor-resolve-row-status {
+  color: var(--color-success);
+}
+
+.editor-resolve-row--fail .editor-resolve-row-status {
   color: var(--color-warning);
 }
 

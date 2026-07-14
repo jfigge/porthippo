@@ -40,6 +40,7 @@ have landed; each names its prerequisites in **Context**.
 | 70 | [CI/CD, packaging & website](70-cicd-packaging-and-website.md) | electron-builder targets for macOS/Windows/Linux × arm64/x64, signing + notarization, auto-update feed, GitHub Actions (CI, DCO, release, deploy-site), the GitHub Pages download site | 60 |
 | 80 | [Docs & user guide](80-docs-and-user-guide.md) | In-app + hosted user guide (single Markdown source), README/CONTRIBUTING/SECURITY/NOTICE, export-compliance notes | 70 |
 | 90 | [Selectable secret storage](90-selectable-secret-storage.md) | Rest Hippo's three at-rest backends made user-selectable — device key (no prompt, default), OS keychain, master password — with re-encrypt-all migration and a Security tab in the Settings dialog | 60 |
+| 100 | [Hostname resolution validation](100-hostname-resolution-validation.md) | Live soft warnings when a bind host / first hop won't resolve locally, plus a **Test resolution** button that walks the real jump-host chain (reusing the engine + host-key TOFU) to validate each downstream hop and the destination from its correct vantage point — protocol-only, no secret leaves main | 20, 45 |
 
 ## Cross-cutting conventions (apply in every stage)
 - **No UI framework.** Plain DOM + class-based ES modules; CSS via design tokens in

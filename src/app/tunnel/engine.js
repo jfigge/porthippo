@@ -33,8 +33,13 @@ const crypto = require("crypto");
 
 const { Tunnel } = require("./tunnel");
 const { makeHostVerifier } = require("./host-verifier");
+const { probeChain } = require("./ssh-chain");
 
 const DEFAULT_LINGER_MS = 10000;
+
+// A resolution probe (Feature 100) is time-boxed so a black-holed hop can't hang the
+// editor's "Test resolution" spinner forever; the run aborts and reports the reach.
+const PROBE_TIMEOUT_MS = 20000;
 
 // The `porthippo:stats` heartbeat: one throttled snapshot of every tunnel, on a
 // timer while any tunnel is armed. State changes also emit an immediate snapshot,
@@ -190,6 +195,48 @@ class TunnelEngine {
           err && err.message,
         );
       }
+    }
+  }
+
+  // ── Resolution probe (Feature 100) ────────────────────────────────────────────
+
+  /**
+   * Test-resolve an (already engine-shaped, decrypted) definition through its real
+   * chain: connect each hop from its correct vantage point and probe the destination
+   * from the SSH server, reporting a per-hop result. It reuses the same host-key
+   * verifier as `arm()`, so an unknown key prompts (and is persisted on trust) here
+   * too — but it NEVER binds a listener, touches `#tunnels`, or leaves a connection
+   * open: every hop is disposed on success, failure, cancel, and timeout.
+   *
+   * @param {object} def  engine-shaped `{ destination, sshServer, jumps }`
+   * @param {object} [opts]
+   * @param {AbortSignal} [opts.signal]  cancel the in-flight probe
+   * @param {number} [opts.timeoutMs]
+   * @returns {Promise<object>}  `{ ok, hops[], destination }`
+   */
+  async probeDefinition(def, { signal, timeoutMs = PROBE_TIMEOUT_MS } = {}) {
+    const d = def || {};
+    // Fold the caller's signal and an internal timeout into one abort source.
+    const controller = new AbortController();
+    const onOuterAbort = () => controller.abort();
+    if (signal) {
+      if (signal.aborted) controller.abort();
+      else signal.addEventListener("abort", onOuterAbort, { once: true });
+    }
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    timer.unref?.();
+
+    try {
+      return await probeChain({
+        hops: [...(Array.isArray(d.jumps) ? d.jumps : []), d.sshServer],
+        destination: d.destination || {},
+        tunnelId: d.id || "probe",
+        hostVerifierFactory: (ctx) => this.#buildHostVerifier(ctx),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onOuterAbort);
     }
   }
 

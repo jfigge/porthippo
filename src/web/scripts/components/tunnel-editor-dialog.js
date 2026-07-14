@@ -26,7 +26,7 @@
 // the save — they surface conditions the engine would otherwise only reveal at arm
 // time. The store re-validates authoritatively.
 
-import { el } from "../dom.js";
+import { el, clear } from "../dom.js";
 import { field, applyFieldErrors } from "../field.js";
 import { t } from "../i18n.js";
 import { Dialog } from "../dialog.js";
@@ -36,6 +36,12 @@ import { JumpHostPickerField } from "./jump-host-picker-field.js";
 
 const LOOPBACK = new Set(["", "127.0.0.1", "localhost", "::1"]);
 const PRIVILEGED_PORT = 1024;
+const RESOLVE_DEBOUNCE_MS = 300;
+
+/** A cheap "already an IP literal" guard so the editor skips a pointless lookup. */
+function looksLikeIp(host) {
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(":");
+}
 
 function toPort(str) {
   const s = String(str).trim();
@@ -64,6 +70,18 @@ export class TunnelEditorDialog {
   #editingId = null;
   #showErrors = false;
   #existing = []; // other tunnels, for the local-port conflict warning
+
+  // Feature 100 — hostname resolution. Live local-DNS warnings for the names this
+  // machine resolves (bind host + first hop), and the "Test resolution" probe.
+  #destResolveWarnEl;
+  #bindResolveWarnEl;
+  #sshResolveWarnEl;
+  #resolveBtn;
+  #resolveResultsEl;
+  #resolveTimer = null;
+  #resolveSeq = 0; // guards against a stale debounced check applying late
+  #probeRunning = false;
+  #probeCancelled = false;
 
   /**
    * @param {object} opts
@@ -163,6 +181,8 @@ export class TunnelEditorDialog {
 
     this.#updateBindWarning();
     this.#updatePortWarning();
+    this.#resetProbe();
+    this.#runResolveCheck(); // prime the local-resolution warnings for this def
     this.#dialog.clearError();
     applyFieldErrors(this.#dialog.body, {});
   }
@@ -218,6 +238,10 @@ export class TunnelEditorDialog {
       class: "editor-port-warning",
       hidden: true,
     });
+    // Local-resolution warnings sit under the field whose host they concern.
+    this.#destResolveWarnEl = this.#resolveWarning();
+    this.#bindResolveWarnEl = this.#resolveWarning();
+    this.#sshResolveWarnEl = this.#resolveWarning();
 
     this.#detailsEl = el("details", { class: "editor-advanced" }, [
       el("summary", {
@@ -232,6 +256,7 @@ export class TunnelEditorDialog {
           hint: t("editor.bindHost.hint"),
         }),
         this.#bindWarningEl,
+        this.#bindResolveWarnEl,
       ]),
       this.#section([
         el("div", { class: "editor-row" }, [
@@ -251,6 +276,7 @@ export class TunnelEditorDialog {
             errorKey: "sshPort",
           }),
         ]),
+        this.#sshResolveWarnEl,
       ]),
       this.#jumpPicker.element,
       this.#section([
@@ -264,6 +290,7 @@ export class TunnelEditorDialog {
         this.#check("keepAlive", t("editor.keepAlive")),
         this.#check("autoReconnect", t("editor.autoReconnect")),
       ]),
+      this.#buildResolveBlock(),
     ]);
 
     this.#dialog.body.append(
@@ -272,11 +299,14 @@ export class TunnelEditorDialog {
         control: this.#input("name", "e.g. Prod database", "text"),
         errorKey: "name",
       }),
-      field({
-        label: t("editor.destination.host"),
-        control: this.#input("destHost", "db.internal", "text"),
-        errorKey: "destination.host",
-      }),
+      this.#section([
+        field({
+          label: t("editor.destination.host"),
+          control: this.#input("destHost", "db.internal", "text"),
+          errorKey: "destination.host",
+        }),
+        this.#destResolveWarnEl,
+      ]),
       this.#section([
         el("div", { class: "editor-row" }, [
           field({
@@ -336,11 +366,229 @@ export class TunnelEditorDialog {
     ]);
   }
 
+  // ── Resolution validation (Feature 100) ──────────────────────────────────────
+
+  #resolveWarning() {
+    return el("p", { class: "editor-resolve-warning", hidden: true });
+  }
+
+  #buildResolveBlock() {
+    this.#resolveBtn = el("button", {
+      type: "button", // never submit the form
+      class: "btn btn--secondary editor-resolve-btn",
+      text: t("editor.resolve.test"),
+      onClick: () => this.#onTestResolution(),
+    });
+    this.#resolveResultsEl = el("div", {
+      class: "editor-resolve-results",
+      hidden: true,
+    });
+    return el("div", { class: "editor-block editor-resolve" }, [
+      this.#resolveBtn,
+      el("p", {
+        class: "field-hint editor-resolve-hint",
+        text: t("editor.resolve.hint"),
+      }),
+      this.#resolveResultsEl,
+    ]);
+  }
+
+  /**
+   * The host fields this machine resolves directly — always the bind host, plus the
+   * chain's first hop when that hop is one of this dialog's own text fields (a jump
+   * host is a separate record, so with a jump chain the downstream hosts are left to
+   * Test resolution). Every warning element appears so each run fully rewrites them.
+   */
+  #localResolveTargets() {
+    const targets = [
+      { el: this.#bindResolveWarnEl, host: this.#form.bindHost.trim() },
+    ];
+    const hasJumps = this.#jumpPicker.value.length > 0;
+    const ssh = this.#form.sshHost.trim();
+    if (hasJumps) {
+      // First hop is a jump host → validated by Test; nothing local to flag here.
+      targets.push({ el: this.#destResolveWarnEl, host: "" });
+      targets.push({ el: this.#sshResolveWarnEl, host: "" });
+    } else if (ssh) {
+      // Bastion: SSH server is the first (local) hop; the destination is remote.
+      targets.push({ el: this.#sshResolveWarnEl, host: ssh });
+      targets.push({ el: this.#destResolveWarnEl, host: "" });
+    } else {
+      // No bastion: we SSH straight into the destination box, so it's the first hop.
+      targets.push({
+        el: this.#destResolveWarnEl,
+        host: this.#form.destHost.trim(),
+      });
+      targets.push({ el: this.#sshResolveWarnEl, host: "" });
+    }
+    return targets;
+  }
+
+  #scheduleResolveCheck() {
+    clearTimeout(this.#resolveTimer);
+    this.#resolveTimer = setTimeout(
+      () => this.#runResolveCheck(),
+      RESOLVE_DEBOUNCE_MS,
+    );
+    // Under Node (tests) this is a Timeout; don't let it keep the loop alive. In a
+    // browser it's a number, so the optional chain is a harmless no-op.
+    this.#resolveTimer?.unref?.();
+  }
+
+  async #runResolveCheck() {
+    const seq = ++this.#resolveSeq;
+    for (const { el: warnEl, host } of this.#localResolveTargets()) {
+      if (!warnEl) continue;
+      if (!host || looksLikeIp(host)) {
+        this.#setResolveWarning(warnEl, "");
+        continue;
+      }
+      let res;
+      try {
+        res = await this.#porthippo?.resolve?.lookup?.(host);
+      } catch {
+        res = null;
+      }
+      if (seq !== this.#resolveSeq) return; // a newer check supersedes this one
+      const unresolved = Boolean(res) && res.resolved === false;
+      this.#setResolveWarning(
+        warnEl,
+        unresolved ? t("editor.resolve.unresolved", { host }) : "",
+      );
+    }
+  }
+
+  #setResolveWarning(warnEl, message) {
+    warnEl.textContent = message;
+    warnEl.hidden = message === "";
+  }
+
+  async #onTestResolution() {
+    if (this.#probeRunning) {
+      // The button doubles as Cancel while a test is running.
+      this.#probeCancelled = true;
+      this.#porthippo?.resolve?.cancel?.();
+      return;
+    }
+    this.#probeRunning = true;
+    this.#probeCancelled = false;
+    this.#resolveBtn.textContent = t("editor.resolve.cancel");
+    this.#renderResolveMessage(t("editor.resolve.testing"));
+
+    let result;
+    try {
+      result = await this.#porthippo?.resolve?.test?.(this.buildPayload());
+    } catch (err) {
+      result = { __hippoError: true, message: err?.message || String(err) };
+    }
+
+    this.#probeRunning = false;
+    this.#resolveBtn.textContent = t("editor.resolve.test");
+    if (this.#probeCancelled) {
+      this.#clearProbeResult();
+      return;
+    }
+    if (!result || result.__hippoError) {
+      this.#renderResolveMessage(
+        t("editor.resolve.error", {
+          message: (result && (result.message || result.code)) || "",
+        }),
+        true,
+      );
+      return;
+    }
+    this.#renderProbeResult(result);
+  }
+
+  #renderProbeResult(result) {
+    clear(this.#resolveResultsEl);
+    this.#resolveResultsEl.hidden = false;
+    this.#resolveResultsEl.append(
+      el("p", {
+        class: `editor-resolve-summary${result.ok ? "" : " editor-resolve-summary--warn"}`,
+        text: result.ok
+          ? t("editor.resolve.allOk")
+          : t("editor.resolve.someFailed"),
+      }),
+    );
+    for (const hop of Array.isArray(result.hops) ? result.hops : []) {
+      this.#resolveResultsEl.append(
+        this.#probeRow(this.#hopFriendly(hop.hopLabel), hop),
+      );
+    }
+    if (result.destination) {
+      this.#resolveResultsEl.append(
+        this.#probeRow(t("editor.resolve.destinationRow"), result.destination),
+      );
+    }
+  }
+
+  #probeRow(label, entry) {
+    const status = entry?.status || "skipped";
+    const word =
+      status === "ok"
+        ? t("editor.resolve.ok")
+        : status === "fail"
+          ? t("editor.resolve.fail")
+          : t("editor.resolve.skipped");
+    const hostPort = entry?.host
+      ? `${entry.host}${entry.port != null ? `:${entry.port}` : ""}`
+      : "";
+    const statusText = entry?.reason ? `${word} — ${entry.reason}` : word;
+    return el(
+      "div",
+      { class: `editor-resolve-row editor-resolve-row--${status}` },
+      [
+        el("span", {
+          class: "editor-resolve-row-host",
+          text: `${label}  ${hostPort}`,
+        }),
+        el("span", { class: "editor-resolve-row-status", text: statusText }),
+      ],
+    );
+  }
+
+  #hopFriendly(hopLabel) {
+    if (hopLabel === "sshServer") return t("editor.resolve.sshServer");
+    const m = /^jump\[(\d+)\]$/.exec(hopLabel || "");
+    if (m) return t("editor.resolve.jump", { n: Number(m[1]) + 1 });
+    return hopLabel || "";
+  }
+
+  #renderResolveMessage(text, warn = false) {
+    clear(this.#resolveResultsEl);
+    this.#resolveResultsEl.hidden = false;
+    this.#resolveResultsEl.append(
+      el("p", {
+        class: `editor-resolve-summary${warn ? " editor-resolve-summary--warn" : ""}`,
+        text,
+      }),
+    );
+  }
+
+  #clearProbeResult() {
+    if (this.#probeRunning) return; // never wipe an in-flight run's status
+    clear(this.#resolveResultsEl);
+    this.#resolveResultsEl.hidden = true;
+  }
+
+  #resetProbe() {
+    if (this.#probeRunning) this.#porthippo?.resolve?.cancel?.();
+    this.#probeRunning = false;
+    this.#probeCancelled = false;
+    if (this.#resolveBtn)
+      this.#resolveBtn.textContent = t("editor.resolve.test");
+    clear(this.#resolveResultsEl);
+    this.#resolveResultsEl.hidden = true;
+  }
+
   // ── Behaviour ─────────────────────────────────────────────────────────────
 
   #changed() {
     if (this.#showErrors) this.#revalidate();
     this.#dialog.clearError();
+    this.#scheduleResolveCheck();
+    this.#clearProbeResult(); // a field edit invalidates the last test
   }
 
   #updateBindWarning() {

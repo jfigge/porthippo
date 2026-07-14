@@ -93,6 +93,23 @@ export const EN = {
   "editor.duplicateSuffix": " (copy)",
   "editor.saveError": "Couldn’t save: {message}",
 
+  // ── Resolution validation (Feature 100) ─────────────────────────────────
+  "editor.resolve.unresolved": "“{host}” doesn’t resolve on this machine.",
+  "editor.resolve.test": "Test resolution",
+  "editor.resolve.testing": "Testing…",
+  "editor.resolve.cancel": "Cancel test",
+  "editor.resolve.hint":
+    "Walks the jump chain and checks each host resolves from where it’s reached.",
+  "editor.resolve.jump": "Jump {n}",
+  "editor.resolve.sshServer": "SSH server",
+  "editor.resolve.destinationRow": "Destination",
+  "editor.resolve.ok": "reachable",
+  "editor.resolve.fail": "unreachable",
+  "editor.resolve.skipped": "not tested",
+  "editor.resolve.allOk": "Every host resolved and was reachable.",
+  "editor.resolve.someFailed": "Some hosts couldn’t be reached — see below.",
+  "editor.resolve.error": "Couldn’t run the test: {message}",
+
   // ── Credential editor / picker ──────────────────────────────────────────
   "cred.newTitle": "New credential",
   "cred.editTitle": "Edit credential",

@@ -53,13 +53,15 @@ function channelsFor(source, fnPattern) {
 // The main-process IPC surface is split across main.js (app:version), the store
 // IPC module (tunnels:list|get|create|update|delete / settings:*), the engine
 // IPC module (tunnels:arm|disarm|status|pause|resume / hostkeys:trust|reject),
-// the dialog IPC module (dialog:open-key-file), the shell IPC module (i18n:load
-// / diagnostics:copy — Feature 60) and the secret-storage IPC module
+// the resolve IPC module (resolve:lookup|test|cancel — Feature 100), the dialog
+// IPC module (dialog:open-key-file), the shell IPC module (i18n:load /
+// diagnostics:copy — Feature 60) and the secret-storage IPC module
 // (secret-storage:get-mode|set-mode|unlock|lock — Feature 90).
 const mainProcessSource = [
   "main.js",
   "ipc/store.js",
   "ipc/engine.js",
+  "ipc/resolve.js",
   "ipc/dialog.js",
   "ipc/shell.js",
   "ipc/secret-storage.js",

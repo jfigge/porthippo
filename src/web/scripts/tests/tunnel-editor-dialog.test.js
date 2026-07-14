@@ -179,6 +179,147 @@ test("editing a tunnel whose credential was deleted drops the stale id from the 
   assert.equal(dlg.buildPayload().credentialId, "");
 });
 
+// ── Resolution validation (Feature 100) ──────────────────────────────────────
+
+const waitUntil = async (pred, timeout = 2000) => {
+  const start = Date.now();
+  while (!pred()) {
+    if (Date.now() - start > timeout) throw new Error("waitUntil timed out");
+    await new Promise((r) => setTimeout(r, 10));
+  }
+};
+
+function mountResolve({ lookup, test: testFn, existing = [] } = {}) {
+  resetDom();
+  const calls = { lookup: [], test: [], cancel: 0 };
+  const porthippo = {
+    ...stub(existing),
+    resolve: {
+      lookup: async (host) => {
+        calls.lookup.push(host);
+        return lookup ? lookup(host) : { resolved: true };
+      },
+      test: async (payload) => {
+        calls.test.push(payload);
+        return testFn
+          ? testFn(payload)
+          : { ok: true, hops: [], destination: null };
+      },
+      cancel: async () => {
+        calls.cancel++;
+        return { ok: true };
+      },
+    },
+  };
+  const dlg = new TunnelEditorDialog({ porthippo });
+  return { dlg, calls };
+}
+
+const destWarn = (dlg) =>
+  q(dlg, ".editor-input-destHost")
+    .closest(".editor-block")
+    .querySelector(".editor-resolve-warning");
+
+test("an unresolvable first-hop host raises a soft warning that clears when it resolves", async () => {
+  const { dlg } = mountResolve({
+    lookup: (host) => ({ resolved: host !== "bad.invalid" }),
+  });
+  await dlg.openEdit({
+    id: "t1",
+    name: "Bad host",
+    localPort: 5432,
+    destination: { host: "bad.invalid", port: 5432 },
+    credentialId: "c1",
+    jumpHostIds: [],
+  });
+
+  // No bastion + no jumps ⇒ the destination is the first (locally-resolved) hop.
+  await waitUntil(() => destWarn(dlg).hidden === false);
+  assert.match(destWarn(dlg).textContent, /bad\.invalid/);
+
+  setInput(dlg, "destHost", "good.example.com");
+  await waitUntil(() => destWarn(dlg).hidden === true);
+
+  // ...and a save is never blocked by resolution — advisory only.
+  assert.equal(dlg.buildPayload().destination.host, "good.example.com");
+});
+
+test("an IP-literal host never triggers a DNS lookup", async () => {
+  const { dlg, calls } = mountResolve();
+  await dlg.openEdit({
+    id: "t1",
+    name: "By IP",
+    localPort: 5432,
+    destination: { host: "10.0.0.9", port: 5432 },
+    credentialId: "c1",
+    jumpHostIds: [],
+  });
+  await waitUntil(() => true); // let any scheduled check settle
+  assert.ok(
+    !calls.lookup.includes("10.0.0.9"),
+    "an IP literal short-circuits without a lookup",
+  );
+  assert.equal(destWarn(dlg).hidden, true);
+});
+
+test("Test resolution runs the probe and renders a per-hop result", async () => {
+  const { dlg, calls } = mountResolve({
+    test: () => ({
+      ok: false,
+      hops: [
+        { hopLabel: "sshServer", host: "db.internal", port: 22, status: "ok" },
+      ],
+      destination: {
+        host: "db.internal",
+        port: 5432,
+        status: "fail",
+        reason: "refused",
+      },
+    }),
+  });
+  await dlg.openCreate();
+  fillValid(dlg);
+
+  q(dlg, ".editor-resolve-btn").click();
+  await waitUntil(() => q(dlg, ".editor-resolve-results").hidden === false);
+  await waitUntil(
+    () => dlg.element.querySelectorAll(".editor-resolve-row").length === 2,
+  );
+
+  assert.equal(calls.test.length, 1, "the probe was invoked once");
+  const rows = [...dlg.element.querySelectorAll(".editor-resolve-row")];
+  assert.match(rows[0].textContent, /SSH server/);
+  assert.match(rows[0].textContent, /reachable/);
+  assert.match(rows[1].textContent, /Destination/);
+  assert.match(rows[1].textContent, /unreachable/);
+  assert.match(rows[1].textContent, /refused/);
+});
+
+test("a failing resolution never blocks the save", async () => {
+  const calls = [];
+  resetDom();
+  const dlg = new TunnelEditorDialog({
+    porthippo: {
+      ...stub(),
+      resolve: {
+        lookup: async () => ({ resolved: false }), // everything fails to resolve
+        test: async () => ({ ok: false, hops: [], destination: null }),
+        cancel: async () => ({ ok: true }),
+      },
+    },
+    onSubmit: (payload) => (calls.push(payload), { id: "t1", ...payload }),
+  });
+  await dlg.openCreate();
+  fillValid(dlg);
+  await waitUntil(() => destWarn(dlg).hidden === false); // the warning is showing
+
+  dlg.element
+    .querySelector("form")
+    .dispatchEvent(new Event("submit", { cancelable: true }));
+  await flush();
+  assert.equal(calls.length, 1, "save proceeds despite the unresolved warning");
+});
+
 test("a store __hippoError maps back onto the fields", async () => {
   const dlg = mount({
     onSubmit: () => ({

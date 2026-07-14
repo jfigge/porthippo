@@ -1,0 +1,98 @@
+/*
+ * Copyright 2026 Jason Figge
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/**
+ * ipc/resolve.js — hostname-resolution validation IPC (Feature 100).
+ *
+ * Two intents from the editor, both request/response:
+ *   - `resolve:lookup` — does a single host resolve *from this machine*? (the live
+ *     bind-host / first-hop warnings). Pure DNS, no connection.
+ *   - `resolve:test` — walk the real jump chain and probe the destination from the
+ *     far end, reporting a per-hop result. This decrypts the referenced credentials
+ *     in main (`tunnelStore().resolveDecrypted`) and hands the engine-shaped def to
+ *     the engine's disposable probe; only host/port/status/reason cross back — never
+ *     a secret. An unknown host key surfaces over the existing
+ *     `porthippo:hostkey-unknown` broadcast + `hostkeys:trust|reject`, not here.
+ *   - `resolve:cancel` — abort the in-flight `resolve:test`.
+ *
+ * Only one probe runs at a time: a fresh `resolve:test` supersedes (aborts) any prior
+ * run, so a user hammering the button can't stack live SSH connections.
+ *
+ * Every channel registered here MUST have a matching `window.porthippo.*` exposure in
+ * preload.js — the ipc-parity test (which scans this file) fails the build otherwise.
+ *
+ * @param {object} deps
+ * @param {Electron.IpcMain} deps.ipcMain
+ * @param {() => import('../store/stores').Stores} deps.getStores
+ * @param {() => import('../tunnel/engine').TunnelEngine} deps.getEngine
+ */
+const { lookupHost } = require("../tunnel/resolve-check");
+
+function registerResolveIPC({ ipcMain, getStores, getEngine }) {
+  let active = null; // the in-flight probe's AbortController, or null
+
+  const wrap =
+    (channel, fn) =>
+    async (_event, ...args) => {
+      try {
+        const result = await fn(...args);
+        return result === undefined ? null : result;
+      } catch (err) {
+        console.error(`[main] ${channel} error:`, err && err.message);
+        return {
+          __hippoError: true,
+          channel,
+          message: err && err.message,
+          code: err && err.code,
+        };
+      }
+    };
+
+  ipcMain.handle(
+    "resolve:lookup",
+    wrap("resolve:lookup", ({ host } = {}) => lookupHost(host)),
+  );
+
+  ipcMain.handle(
+    "resolve:test",
+    wrap("resolve:test", async ({ payload } = {}) => {
+      if (active) active.abort(); // a new run supersedes the previous one
+      const controller = new AbortController();
+      active = controller;
+      try {
+        const def = getStores().tunnelStore().resolveDecrypted(payload);
+        return await getEngine().probeDefinition(def, {
+          signal: controller.signal,
+        });
+      } finally {
+        if (active === controller) active = null;
+      }
+    }),
+  );
+
+  ipcMain.handle(
+    "resolve:cancel",
+    wrap("resolve:cancel", () => {
+      if (active) {
+        active.abort();
+        active = null;
+      }
+      return { ok: true };
+    }),
+  );
+}
+
+module.exports = { registerResolveIPC };

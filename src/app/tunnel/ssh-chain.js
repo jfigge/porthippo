@@ -218,8 +218,193 @@ async function connectChain({
   }
 }
 
+/** The friendly hop label used everywhere the chain is reported. */
+function hopLabelFor(index, count) {
+  return index === count - 1 ? "sshServer" : `jump[${index}]`;
+}
+
+/**
+ * Walk the chain the way `connectChain` does, but instead of throwing at the first
+ * failure, report a **per-hop** resolvability/reachability result and then probe the
+ * destination from the far end — the Feature 100 "Test resolution" path.
+ *
+ * Each hop is validated from its real vantage point: hop 0 over plain TCP (local
+ * resolution), each later hop over a `forwardOut` from the previous hop (resolution
+ * *there*), and finally the destination over a `forwardOut` from the last hop
+ * (resolution on the SSH server). A hop that can't be SSH-connected, or that the
+ * previous hop can't `forwardOut` to, is the resolvability/reachability failure for
+ * that hop; every hop past the first failure is `skipped`. Nothing is relayed — the
+ * destination probe channel is opened only to prove it can be, then closed.
+ *
+ * Host-key verification runs through the same injected `hostVerifierFactory` as a
+ * real connection, so an unknown key prompts (and, once trusted, is persisted) here
+ * too — which is what makes a passing hop a genuine validation of that jump host.
+ *
+ * Resolves (never rejects for an expected failure) to
+ * `{ ok, hops: [{ hopLabel, host, port, status:"ok"|"fail"|"skipped", reason? }],
+ *    destination: { host, port, status, reason? } }`. Always disposes every hop.
+ *
+ * @param {object} opts
+ * @param {Array<object>} opts.hops         `[...jumps, sshServer]`, decrypted, in order
+ * @param {{host: string, port: number}} opts.destination  the far target to probe
+ * @param {string} opts.tunnelId
+ * @param {Function} opts.hostVerifierFactory  same factory `connectChain` takes
+ * @param {typeof fs.readFileSync} [opts.readFileSync]
+ * @param {AbortSignal} [opts.signal]        abort → dispose the in-flight chain
+ * @returns {Promise<object>}
+ */
+async function probeChain({
+  hops,
+  destination,
+  tunnelId,
+  hostVerifierFactory,
+  readFileSync,
+  signal,
+}) {
+  const count = Array.isArray(hops) ? hops.length : 0;
+  const entryFor = (i) => ({
+    hopLabel: hopLabelFor(i, count),
+    host: hops[i]?.host ?? "",
+    port: hops[i]?.port,
+  });
+  const result = { ok: false, hops: [], destination: null };
+  const dest = destination || {};
+
+  const clients = [];
+  const dispose = () => {
+    for (const client of clients) {
+      try {
+        client.end();
+      } catch {
+        // Ending an already-closed client is a no-op we don't care about.
+      }
+    }
+  };
+  // An abort ends every open hop, which makes any in-flight connect/forward reject
+  // and unwinds the walk without leaving a connection behind.
+  const onAbort = () => dispose();
+  signal?.addEventListener("abort", onAbort, { once: true });
+
+  // Mark hop `from` (inclusive) through the destination as not-tested.
+  const skipRest = (from) => {
+    for (let j = from; j < count; j++) {
+      result.hops.push({ ...entryFor(j), status: "skipped" });
+    }
+    result.destination = {
+      host: dest.host,
+      port: dest.port,
+      status: "skipped",
+    };
+  };
+
+  try {
+    if (count === 0) {
+      result.destination = {
+        host: dest.host,
+        port: dest.port,
+        status: "skipped",
+      };
+      return result;
+    }
+
+    let sock; // the forwarded stream feeding the next hop (undefined for the first)
+    for (let i = 0; i < count; i++) {
+      if (signal?.aborted) {
+        skipRest(i);
+        return result;
+      }
+      const hop = hops[i];
+      const hopLabel = hopLabelFor(i, count);
+      const hostVerifier = hostVerifierFactory({
+        host: hop.host,
+        port: hop.port,
+        hopLabel,
+        tunnelId,
+      });
+
+      let client;
+      try {
+        client = await connectHop({
+          hop,
+          hopLabel,
+          sock,
+          hostVerifier,
+          readFileSync,
+        });
+      } catch (err) {
+        result.hops.push({
+          ...entryFor(i),
+          status: "fail",
+          reason: (err && err.message) || "connection failed",
+        });
+        skipRest(i + 1);
+        return result;
+      }
+      clients.push(client);
+      result.hops.push({ ...entryFor(i), status: "ok" });
+
+      if (i < count - 1) {
+        // Reaching hop i+1 means hop i could resolve+connect to it — validating it.
+        const next = hops[i + 1];
+        try {
+          sock = await forwardOut(client, "127.0.0.1", 0, next.host, next.port);
+        } catch (err) {
+          result.hops.push({
+            ...entryFor(i + 1),
+            status: "fail",
+            reason: (err && err.message) || "unreachable from the previous hop",
+          });
+          skipRest(i + 2);
+          return result;
+        }
+      }
+    }
+
+    // Every hop connected — probe the destination from the final (sshServer) hop.
+    if (signal?.aborted) {
+      result.destination = {
+        host: dest.host,
+        port: dest.port,
+        status: "skipped",
+      };
+      return result;
+    }
+    const finalClient = clients[clients.length - 1];
+    try {
+      const stream = await forwardOut(
+        finalClient,
+        "127.0.0.1",
+        0,
+        dest.host,
+        dest.port,
+      );
+      // Never relay a byte — opening the channel already proved resolve+reach.
+      try {
+        stream.end();
+        stream.destroy();
+      } catch {
+        // stream already torn down
+      }
+      result.destination = { host: dest.host, port: dest.port, status: "ok" };
+      result.ok = true;
+    } catch (err) {
+      result.destination = {
+        host: dest.host,
+        port: dest.port,
+        status: "fail",
+        reason: (err && err.message) || "unreachable",
+      };
+    }
+    return result;
+  } finally {
+    signal?.removeEventListener("abort", onAbort);
+    dispose();
+  }
+}
+
 module.exports = {
   connectChain,
+  probeChain,
   forwardOut,
   buildAuthHandler,
   resolveAgent,

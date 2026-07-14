@@ -46,6 +46,7 @@ const { parseArgs } = require("./cli-args");
 const { Stores } = require("./store/stores");
 const { registerStoreIPC } = require("./ipc/store");
 const { registerEngineIPC } = require("./ipc/engine");
+const { registerResolveIPC } = require("./ipc/resolve");
 const { registerDialogIPC } = require("./ipc/dialog");
 const { registerShellIPC } = require("./ipc/shell");
 const { registerSecretStorageIPC } = require("./ipc/secret-storage");
@@ -410,6 +411,11 @@ function registerIpc() {
   });
 
   registerEngineIPC({ ipcMain, getEngine });
+
+  // Hostname-resolution validation (Feature 100): live local DNS lookups + the
+  // "Test resolution" probe that walks the real chain (host-key prompts flow over
+  // the engine's existing porthippo:hostkey-unknown broadcast).
+  registerResolveIPC({ ipcMain, getStores, getEngine });
 
   registerDialogIPC({ ipcMain, dialog, getMainWindow: () => mainWindow });
 
