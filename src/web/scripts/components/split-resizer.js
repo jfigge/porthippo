@@ -28,6 +28,7 @@ import { el } from "../dom.js";
 
 export class SplitResizer {
   #container;
+  #target;
   #divider;
   #minLeft;
   #minRight;
@@ -43,7 +44,12 @@ export class SplitResizer {
 
   /**
    * @param {object} opts
-   * @param {HTMLElement} opts.container   the `.tunnels-split` grid element
+   * @param {HTMLElement} opts.container   the element whose width is measured and
+   *        against whose left edge the pointer is offset (e.g. `.tunnels-split`)
+   * @param {HTMLElement} [opts.target]    the element the `--split-left` custom
+   *        property is written to (defaults to `container`). Point several
+   *        resizers at one shared ancestor so a single split width drives every
+   *        view that inherits the property.
    * @param {number} [opts.minLeft=150]    minimum width of the left column (px)
    * @param {number} [opts.minRight=300]   minimum width of the right column (px)
    * @param {string} [opts.label]          accessible label for the divider
@@ -52,12 +58,14 @@ export class SplitResizer {
    */
   constructor({
     container,
+    target,
     minLeft = 150,
     minRight = 300,
     label,
     onCommit,
   } = {}) {
     this.#container = container;
+    this.#target = target || container;
     this.#minLeft = minLeft;
     this.#minRight = minRight;
     this.#onCommit = onCommit;
@@ -125,7 +133,7 @@ export class SplitResizer {
       this.#container.clientWidth > 0
         ? this.#clamp(this.#preferred)
         : Math.max(this.#preferred, this.#minLeft);
-    this.#container.style.setProperty("--split-left", `${px}px`);
+    this.#target.style.setProperty("--split-left", `${px}px`);
   }
 
   // ── Pointer drag ────────────────────────────────────────────────────────────
@@ -150,7 +158,7 @@ export class SplitResizer {
     if (!this.#dragging) return;
     const rect = this.#container.getBoundingClientRect();
     this.#preferred = this.#clamp(e.clientX - rect.left);
-    this.#container.style.setProperty("--split-left", `${this.#preferred}px`);
+    this.#target.style.setProperty("--split-left", `${this.#preferred}px`);
   }
 
   #onPointerUp() {

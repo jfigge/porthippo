@@ -289,7 +289,7 @@ test("setSelected highlights the row; a row click reports the selection", () => 
   assert.deepEqual(calls.select, ["a"]);
 });
 
-test("Add reports; edit/delete report without selecting the row", () => {
+test("Add + edit report without selecting the row; delete is context-menu only", () => {
   const { table, calls } = mount();
   table.setCardOrder([]);
   table.setData(DEFS, STATES, SNAPS, "a");
@@ -299,10 +299,15 @@ test("Add reports; edit/delete report without selecting the row", () => {
 
   const rowA = table.element.querySelector('.tt-row[data-id="a"]');
   rowA.querySelector(".tunnel-edit-btn").click();
-  rowA.querySelector(".tunnel-delete-btn").click();
   assert.deepEqual(calls.edit, ["a"]);
-  assert.deepEqual(calls.delete, ["a"]);
-  assert.equal(calls.select.length, 0, "edit/delete stop propagation");
+  assert.equal(calls.select.length, 0, "edit stops propagation");
+
+  // Delete moved to the row context menu — no inline delete button in list view.
+  assert.equal(
+    rowA.querySelector(".tunnel-delete-btn"),
+    null,
+    "no inline delete button in list view",
+  );
 });
 
 // ── Selected-tunnel arm/pause controls (toolbar) ─────────────────────────────

@@ -78,7 +78,6 @@ export class TunnelTable {
   #onSelect;
   #onAdd;
   #onEdit;
-  #onDelete;
   #onCardsChange;
   #onSortChange;
   #onToggleArm;
@@ -90,7 +89,6 @@ export class TunnelTable {
     onSelect,
     onAdd,
     onEdit,
-    onDelete,
     onCardsChange,
     onSortChange,
     onToggleArm,
@@ -101,7 +99,6 @@ export class TunnelTable {
     this.#onSelect = onSelect || (() => {});
     this.#onAdd = onAdd || (() => {});
     this.#onEdit = onEdit || (() => {});
-    this.#onDelete = onDelete || (() => {});
     this.#onCardsChange = onCardsChange || (() => {});
     this.#onSortChange = onSortChange || (() => {});
     this.#onToggleArm = onToggleArm || (() => {});
@@ -320,19 +317,25 @@ export class TunnelTable {
       props.onDragend = () => this.#clearHeaderMarks();
     }
 
+    // The label + sort arrow live in an inner flex box (see .tt-th-inner): a
+    // sticky <th> defeats vertical-align, so the flex box does the bottom/left
+    // alignment while the cell stays sticky.
     return el("th", props, [
-      el("span", { class: "tt-th-label", text: label }),
-      el("span", {
-        class: "tt-th-arrow",
-        "aria-hidden": "true",
-        text: active ? (dir === "asc" ? "▲" : "▼") : "",
-      }),
+      el("div", { class: "tt-th-inner" }, [
+        el("span", { class: "tt-th-label", text: label }),
+        el("span", {
+          class: "tt-th-arrow",
+          "aria-hidden": "true",
+          text: active ? (dir === "asc" ? "▲" : "▼") : "",
+        }),
+      ]),
     ]);
   }
 
   #buildRow(def) {
     const id = def.id;
     const dot = el("span", { class: "tunnel-dot" });
+    // Only Edit lives inline; Delete is reachable from the row context menu.
     const tools = el("div", { class: "tunnel-row-tools" }, [
       el("button", {
         class: "btn--icon tunnel-row-btn tunnel-edit-btn",
@@ -343,17 +346,6 @@ export class TunnelTable {
         onClick: (e) => {
           e.stopPropagation();
           this.#onEdit(id);
-        },
-      }),
-      el("button", {
-        class: "btn--icon tunnel-row-btn tunnel-delete-btn",
-        type: "button",
-        title: t("tunnels.delete"),
-        "aria-label": t("tunnels.delete"),
-        html: icons.delete(),
-        onClick: (e) => {
-          e.stopPropagation();
-          this.#onDelete(id);
         },
       }),
     ]);

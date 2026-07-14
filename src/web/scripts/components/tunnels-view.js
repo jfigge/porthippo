@@ -56,6 +56,7 @@ export class TunnelsView {
 
   #split;
   #resizer;
+  #listResizer;
   #tableEl;
   #mode = "cards";
 
@@ -116,23 +117,42 @@ export class TunnelsView {
       this.#list.element,
       this.#detail.element,
     ]);
-    // A draggable divider between the list and the detail cards; its committed
-    // width is persisted so the split is restored on the next launch.
+    this.#tableEl = this.#table.element;
+
+    // Both splitters write `--split-left` to the view root, so a single split
+    // width is inherited by the Cards grid AND the List table — the divider
+    // looks and behaves the same in either view.
+    this.#el = el("div", { class: "tunnels-view" }, [
+      this.#split,
+      this.#tableEl,
+      this.#editor.element,
+    ]);
+
+    // Cards view: a draggable divider between the master list and the detail
+    // cards. Its committed width is persisted so the split restores on launch.
     this.#resizer = new SplitResizer({
       container: this.#split,
+      target: this.#el,
       minLeft: MIN_LEFT,
       minRight: MIN_RIGHT,
       label: t("tunnels.split.resize"),
       onCommit: (px) => this.#persistSplit(px),
     });
     this.#split.insertBefore(this.#resizer.element, this.#detail.element);
-    this.#tableEl = this.#table.element;
 
-    this.#el = el("div", { class: "tunnels-view" }, [
-      this.#split,
-      this.#tableEl,
-      this.#editor.element,
-    ]);
+    // List view: the same split width fixes the tunnel-name column; an overlay
+    // divider on the table drags the shared `--split-left` (persisted alike).
+    this.#listResizer = new SplitResizer({
+      container: this.#tableEl,
+      target: this.#el,
+      minLeft: MIN_LEFT,
+      minRight: MIN_RIGHT,
+      label: t("tunnels.split.resize"),
+      onCommit: (px) => this.#persistSplit(px),
+    });
+    this.#listResizer.element.classList.add("tunnels-splitter--overlay");
+    this.#tableEl.appendChild(this.#listResizer.element);
+
     this.#applyMode(); // default: cards
 
     this.#onStats = (e) => this.#applyStats(e.detail);
@@ -175,10 +195,11 @@ export class TunnelsView {
     this.#detail.setCardOrder(this.#cardOrder);
     this.#table.setCardOrder(this.#cardOrder);
     // Restore the persisted splitter position (falls back to the default width).
+    // Both splitters share the one value so Cards and List stay in lockstep.
     const splitLeft = Number(settings?.splitLeft);
-    this.#resizer.setLeft(
-      Number.isFinite(splitLeft) ? splitLeft : DEFAULT_SPLIT_LEFT,
-    );
+    const width = Number.isFinite(splitLeft) ? splitLeft : DEFAULT_SPLIT_LEFT;
+    this.#resizer.setLeft(width);
+    this.#listResizer.setLeft(width);
     if (settings && settings.listSort) this.#table.setSort(settings.listSort);
     // Always (re)apply so the header selector syncs, even for the default.
     this.#setMode(settings?.detailMode, { persist: false });
@@ -213,6 +234,7 @@ export class TunnelsView {
     window.removeEventListener("porthippo:tunnel-state", this.#onTunnelState);
     window.removeEventListener("porthippo:set-detail-mode", this.#onSetMode);
     this.#resizer.destroy();
+    this.#listResizer.destroy();
   }
 
   // ── View mode ─────────────────────────────────────────────────────────────
@@ -235,9 +257,10 @@ export class TunnelsView {
     this.#split.hidden = list;
     this.#tableEl.hidden = !list;
     this.#el.classList.toggle("tunnels-view--list", list);
-    // The split was zero-width while hidden in list mode, so re-clamp its stored
-    // width against the now-measurable container the moment it's shown again.
-    if (!list) this.#resizer.refresh();
+    // A splitter's container is zero-width while its view is hidden, so re-clamp
+    // the stored width against the now-measurable container the moment it shows.
+    if (list) this.#listResizer.refresh();
+    else this.#resizer.refresh();
   }
 
   // ── Selection ─────────────────────────────────────────────────────────────

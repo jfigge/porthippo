@@ -1761,6 +1761,7 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
+  position: relative; /* positioning context for the overlay column splitter */
 }
 
 .tunnel-table-view[hidden] {
@@ -1791,7 +1792,9 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  padding: 0 var(--space-4) var(--space-4);
+  /* Flush-left so the tunnel-name column edge sits at the view's left edge —
+     that makes its width equal to --split-left and aligns the drag splitter. */
+  padding: 0 var(--space-4) var(--space-4) 0;
 }
 
 .tunnel-table {
@@ -1809,9 +1812,7 @@
   position: sticky;
   top: 0;
   z-index: 1;
-  padding: var(--space-2) var(--space-3);
-  text-align: right;
-  white-space: nowrap;
+  padding: 0; /* the inner flex owns the padding so it can fill the cell height */
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.6px;
@@ -1819,12 +1820,36 @@
   color: var(--color-muted);
   background: var(--color-base);
   border-bottom: 1px solid var(--color-crust);
+  /* Vertical grid line between columns. */
+  border-right: 1px solid var(--color-surface-0);
   cursor: pointer;
   user-select: none;
 }
 
+/* A sticky table-cell defeats its own `vertical-align` (Chromium), so the header
+   text is aligned by an inner flex box that fills the cell height instead: bottom
+   (align-items) + left (default justify). Multi-word labels wrap to two lines —
+   there's more vertical room than horizontal — and each single-line header then
+   sits on the same baseline as a wrapped header's last line. */
+.tt-th-inner {
+  display: flex;
+  align-items: flex-end;
+  height: 100%;
+  padding: var(--space-1) var(--space-1);
+  line-height: 1.2;
+}
+
 .tt-th--identity {
   text-align: left;
+  /* Darker tint + stronger seam, matching the Cards-view sidebar. */
+  background: var(--color-mantle);
+  border-right: 1px solid var(--color-crust);
+}
+
+/* No trailing grid line on the outer-right edge. */
+.tt-th:last-child,
+.tt-td:last-child {
+  border-right: none;
 }
 
 .tt-th:hover,
@@ -1869,26 +1894,69 @@
 }
 
 .tt-td {
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-1) var(--space-2);
   text-align: right;
   white-space: nowrap;
   font-family: var(--font-mono);
   color: var(--color-subtext);
+  /* Vertical grid line between columns. */
+  border-right: 1px solid var(--color-surface-0);
 }
 
 .tt-td--identity {
   text-align: left;
   font-family: inherit;
+  /* Darker tunnel-name column + seam, matching the Cards-view sidebar. */
+  background: var(--color-mantle);
+  border-right: 1px solid var(--color-crust);
+}
+
+/* The tinted identity cell paints over the row background, so mirror the row's
+   hover/selected state on the cell too. */
+.tt-row:hover .tt-td--identity {
+  background: var(--color-surface-0);
+}
+
+.tt-row--selected .tt-td--identity,
+.tt-row--selected:hover .tt-td--identity {
+  background: var(--color-surface-1);
+}
+
+/* The tunnel-name column is a fixed width shared with the Cards-view split
+   (--split-left, inherited from .tunnels-view), dragged by the overlay splitter
+   below. min = max pins it in the auto-layout table regardless of content. */
+.tt-th--identity,
+.tt-td--identity {
+  width: var(--split-left, 240px);
+  min-width: var(--split-left, 240px);
+  max-width: var(--split-left, 240px);
 }
 
 .tt-identity {
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  min-width: 0; /* let the name truncate instead of forcing the column wider */
 }
 
 .tt-identity .tunnel-row-name {
   flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The List-view column splitter: a fixed overlay at the name column's right edge
+   that drags --split-left. It reuses .tunnels-splitter (transparent seam, grab
+   line on hover) but is absolutely positioned rather than a grid track. */
+.tunnels-splitter--overlay {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--split-left, 240px);
+  transform: translateX(-50%);
+  z-index: 2;
 }
 
 .tt-row .tunnel-row-tools {
