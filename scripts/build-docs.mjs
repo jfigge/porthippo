@@ -81,16 +81,19 @@ function decodeEntities(s) {
     .replace(/&amp;/g, "&"); // last, so the others aren't double-decoded
 }
 
-// Match GitHub's heading slugger so author-written #fragment links resolve: strip
-// tags, decode entities, lowercase, drop punctuation, and turn each whitespace
-// char into a single hyphen. Consecutive hyphens are NOT collapsed — this mirrors
-// the in-app DocsViewer, but note it collapses runs; keep fragment links simple.
+// Match GitHub's heading slugger — and, crucially, the in-app DocsViewer's own
+// slugifyHeading — so an author-written #fragment link resolves identically in both
+// renderers: strip tags, decode entities, lowercase, drop punctuation, then collapse
+// whitespace RUNS to a single hyphen and coalesce any resulting hyphen runs. (The
+// tag-strip/decode is this context's extra step: here we slug raw heading markup,
+// whereas DocsViewer slugs already-parsed text.)
 function slugifyHeading(text) {
   return decodeEntities(text.replace(/<[^>]+>/g, ""))
     .toLowerCase()
     .trim()
     .replace(/[^\w\s-]/g, "")
-    .replace(/\s/g, "-");
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-");
 }
 
 function esc(s) {
