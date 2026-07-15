@@ -61,6 +61,9 @@ class Stats {
   activeConnections = 0; // live relay connections right now
   connectionCount = 0; // cumulative relay connections since the current arm
   errorCount = 0; // cumulative connect/forward/listener errors since the current arm
+  peakConnections = 0; // high-water mark of activeConnections since the current arm
+  peakRateUp = 0; // high-water mark of the sampled up rate (bytes/sec) since arm
+  peakRateDown = 0; // high-water mark of the sampled down rate (bytes/sec) since arm
   lastActiveAt = null;
   openedAt = null; // ms epoch the CURRENT SSH session connected (null if not connected)
   firstConnectedAt = null; // ms epoch the FIRST SSH session connected since the arm
@@ -109,6 +112,9 @@ class Stats {
   connOpened() {
     this.activeConnections += 1;
     this.connectionCount += 1; // cumulative — never decremented
+    if (this.activeConnections > this.peakConnections) {
+      this.peakConnections = this.activeConnections; // high-water mark
+    }
   }
 
   /** A relay closed. */
@@ -156,6 +162,9 @@ class Stats {
     this.activeConnections = 0;
     this.connectionCount = 0;
     this.errorCount = 0;
+    this.peakConnections = 0;
+    this.peakRateUp = 0;
+    this.peakRateDown = 0;
     this.lastActiveAt = null;
     this.openedAt = null;
     this.firstConnectedAt = null;
@@ -198,15 +207,25 @@ class Stats {
       down += bucket.down;
     }
     const perSec = RATE_WINDOW_MS / 1000;
+    const rateUp = Math.round(up / perSec);
+    const rateDown = Math.round(down / perSec);
+    // Peak rates are the high-water mark of the sampled (windowed) rate: each
+    // snapshot the heartbeat takes advances them, so a peak sustained across the
+    // rolling window is captured. Reset only on re-arm, like the byte totals.
+    if (rateUp > this.peakRateUp) this.peakRateUp = rateUp;
+    if (rateDown > this.peakRateDown) this.peakRateDown = rateDown;
     return {
       activeConnections: this.activeConnections,
       connectionCount: this.connectionCount,
       errorCount: this.errorCount,
+      peakConnections: this.peakConnections,
       bytesUp: this.bytesUp,
       bytesDown: this.bytesDown,
       totalBytes: this.bytesUp + this.bytesDown,
-      rateUp: Math.round(up / perSec),
-      rateDown: Math.round(down / perSec),
+      rateUp,
+      rateDown,
+      peakRateUp: this.peakRateUp,
+      peakRateDown: this.peakRateDown,
       openedAt: this.openedAt,
       firstConnectedAt: this.firstConnectedAt,
       lastDisconnectedAt: this.lastDisconnectedAt,

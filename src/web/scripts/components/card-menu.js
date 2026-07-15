@@ -24,7 +24,7 @@
 import { el } from "../dom.js";
 import { t } from "../i18n.js";
 import { icons } from "../icons.js";
-import { DEFAULT_CARD_ORDER, cardLabel } from "./card-catalog.js";
+import { cardsByCategory, cardLabel } from "./card-catalog.js";
 
 export class CardMenu {
   #wrap;
@@ -92,28 +92,41 @@ export class CardMenu {
     });
     this.#btn.append(document.createTextNode(t(buttonLabelKey)), this.#caret);
 
-    const items = DEFAULT_CARD_ORDER.map((key) => {
-      const box = el("input", {
-        type: "checkbox",
-        class: "card-menu-check",
-        dataset: { card: key },
-        onChange: (e) => this.#onToggle(key, e.target.checked),
-      });
-      this.#boxes.set(key, box);
-      return el("label", { class: "card-menu-item" }, [
-        box,
-        el("span", { class: "card-menu-label", text: cardLabel(key) }),
-      ]);
-    });
+    // A single grid over every category (each a full-width heading row followed
+    // by its alphabetical cards), so all three columns share one track sizing:
+    // equal 1fr columns under the popup's max-content width resolve to the widest
+    // card's width, so every item is the same width and lines up across sections.
+    const grid = el("div", { class: "card-menu-grid" });
+    for (const { labelKey, keys } of cardsByCategory()) {
+      grid.append(
+        el("div", { class: "card-menu-category", text: t(labelKey) }),
+        ...keys.map((k) => this.#item(k)),
+      );
+    }
 
     this.#menu = el("div", { class: "card-menu", role: "menu", hidden: true }, [
       el("div", { class: "card-menu-title", text: t(titleKey) }),
-      el("div", { class: "card-menu-grid" }, items),
+      grid,
     ]);
 
     this.#wrap = el("div", { class: "detail-cards-menu-wrap" }, [
       this.#btn,
       this.#menu,
+    ]);
+  }
+
+  /** A single checklist row (checkbox + label), registering its box for sync. */
+  #item(key) {
+    const box = el("input", {
+      type: "checkbox",
+      class: "card-menu-check",
+      dataset: { card: key },
+      onChange: (e) => this.#onToggle(key, e.target.checked),
+    });
+    this.#boxes.set(key, box);
+    return el("label", { class: "card-menu-item" }, [
+      box,
+      el("span", { class: "card-menu-label", text: cardLabel(key) }),
     ]);
   }
 

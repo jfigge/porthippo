@@ -89,6 +89,52 @@ test("rate rises under a burst and decays to zero once traffic stops", () => {
   assert.equal(cold.totalBytes, 39000);
 });
 
+test("peaks track the high-water mark and reset only on re-arm", () => {
+  const clock = fakeClock();
+  const stats = new Stats({ now: clock.now });
+  stats.onArmed();
+  stats.onConnected();
+
+  // Concurrent connections crest at 3, then some close — the peak holds.
+  stats.connOpened();
+  stats.connOpened();
+  stats.connOpened();
+  stats.connClosed();
+  stats.connClosed();
+  assert.equal(stats.snapshot().activeConnections, 1, "one still live");
+  assert.equal(
+    stats.snapshot().peakConnections,
+    3,
+    "peak is the high-water mark",
+  );
+
+  // A burst sets the rate peaks; a sampling snapshot records them.
+  stats.addUp(9000);
+  stats.addDown(30000);
+  const hot = stats.snapshot();
+  assert.ok(hot.peakRateUp >= hot.rateUp && hot.peakRateUp > 0, "up peak set");
+  assert.ok(
+    hot.peakRateDown >= hot.rateDown && hot.peakRateDown > 0,
+    "down peak set",
+  );
+  const { peakRateUp, peakRateDown } = hot;
+
+  // Idle past the window: the live rate decays to zero but the peaks persist.
+  clock.advance(3500);
+  const cold = stats.snapshot();
+  assert.equal(cold.rateUp, 0, "live up rate decays");
+  assert.equal(cold.rateDown, 0, "live down rate decays");
+  assert.equal(cold.peakRateUp, peakRateUp, "up peak survives the decay");
+  assert.equal(cold.peakRateDown, peakRateDown, "down peak survives the decay");
+
+  // Re-arming zeroes every peak with the rest of the session.
+  stats.onArmed();
+  const fresh = stats.snapshot();
+  assert.equal(fresh.peakConnections, 0);
+  assert.equal(fresh.peakRateUp, 0);
+  assert.equal(fresh.peakRateDown, 0);
+});
+
 test("connection counting tracks opens and closes and never goes negative", () => {
   const stats = new Stats({ now: fakeClock().now });
   stats.onArmed();

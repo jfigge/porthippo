@@ -22,14 +22,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { t } from "../i18n.js";
 import {
   CARDS,
+  CATEGORIES,
   DEFAULT_CARD_ORDER,
   getCard,
   visibleCards,
   hiddenCards,
   reorderCards,
   cardLabel,
+  cardsByCategory,
   cardToneClasses,
 } from "../components/card-catalog.js";
 
@@ -45,6 +48,38 @@ test("every card exposes value() and sortValue()", () => {
   for (const c of CARDS) {
     assert.equal(typeof c.value, "function", `${c.key} value()`);
     assert.equal(typeof c.sortValue, "function", `${c.key} sortValue()`);
+  }
+});
+
+// ── Category grouping (the selector menu) ────────────────────────────────────
+
+test("every card declares a known category", () => {
+  for (const c of CARDS) {
+    assert.ok(c.category, `${c.key} has no category`);
+    assert.ok(
+      Object.prototype.hasOwnProperty.call(CATEGORIES, c.category),
+      `${c.key} has unknown category ${c.category}`,
+    );
+  }
+});
+
+test("cardsByCategory partitions every card, groups and cards alphabetical", () => {
+  const alpha = (arr) => [...arr].sort((a, b) => a.localeCompare(b));
+  const groups = cardsByCategory();
+
+  // Category headings are alphabetical by their (localised) label.
+  const labels = groups.map((g) => t(g.labelKey));
+  assert.deepEqual(labels, alpha(labels), "categories not alphabetical");
+
+  // Every catalogue card appears exactly once across the groups (a partition).
+  const flat = groups.flatMap((g) => g.keys);
+  assert.equal(flat.length, DEFAULT_CARD_ORDER.length, "no card dropped/dup'd");
+  assert.deepEqual(alpha(flat), alpha(DEFAULT_CARD_ORDER));
+
+  // Within each group the cards are alphabetical by their label.
+  for (const g of groups) {
+    const gLabels = g.keys.map(cardLabel);
+    assert.deepEqual(gLabels, alpha(gLabels), `${g.category} not alphabetical`);
   }
 });
 
@@ -88,6 +123,48 @@ test("numeric cards sort by their snapshot field", () => {
   assert.equal(card("connections").sortValue(ctx({ activeConnections: 4 })), 4);
   assert.equal(card("transferred").sortValue(ctx({ totalBytes: 2048 })), 2048);
   assert.equal(card("errors").sortValue(ctx({ errorCount: 3 })), 3);
+});
+
+test("peak and combined-throughput cards sort by their snapshot fields", () => {
+  const ctx = (snap) => ({ snap, now: NOW, state: "connected" });
+  assert.equal(
+    card("peakDownload").sortValue(ctx({ peakRateDown: 2048 })),
+    2048,
+  );
+  assert.equal(card("peakUpload").sortValue(ctx({ peakRateUp: 512 })), 512);
+  assert.equal(
+    card("peakConnections").sortValue(ctx({ peakConnections: 7 })),
+    7,
+  );
+  assert.equal(
+    card("combinedThroughput").sortValue(ctx({ rateUp: 100, rateDown: 400 })),
+    500,
+  );
+  assert.equal(
+    card("combinedThroughput").value(ctx({ rateUp: 100, rateDown: 400 })),
+    "500 B/s",
+  );
+});
+
+test("avgThroughput is total bytes over the armed lifetime", () => {
+  // 6000 bytes across 3s armed → 2000 B/s.
+  const armed = {
+    snap: { totalBytes: 6000, armedAt: NOW - 3000 },
+    now: NOW,
+    state: "connected",
+  };
+  assert.equal(card("avgThroughput").sortValue(armed), 2000);
+  assert.equal(card("avgThroughput").value(armed), "2.0 KB/s");
+
+  // Not armed, or no time elapsed → zero (no divide-by-zero, no first-tick spike).
+  const notArmed = { snap: { totalBytes: 6000 }, now: NOW, state: "disarmed" };
+  assert.equal(card("avgThroughput").sortValue(notArmed), 0);
+  const zeroElapsed = {
+    snap: { totalBytes: 6000, armedAt: NOW },
+    now: NOW,
+    state: "connected",
+  };
+  assert.equal(card("avgThroughput").sortValue(zeroElapsed), 0);
 });
 
 test("a missing snapshot sorts numerics as 0 and durations as -1", () => {

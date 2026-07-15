@@ -2000,8 +2000,10 @@
   top: calc(100% + var(--space-1));
   right: 0;
   z-index: 20;
-  width: 320px;
-  max-width: 80vw;
+  /* Only as wide as the content needs: the widest section's three no-wrap
+     columns. Capped at the viewport so a long translation can't overflow. */
+  width: max-content;
+  max-width: 90vw;
   max-height: 60vh;
   overflow-y: auto;
   padding: var(--space-3);
@@ -2024,21 +2026,41 @@
   margin-bottom: var(--space-2);
 }
 
+/* Category headings are full-width rows in the single grid below. */
+.card-menu-category {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--color-text);
+}
+
+/* Extra breathing room before each section, except the first (the grid's
+   row-gap already separates a heading from the cards below it). */
+.card-menu-category:not(:first-child) {
+  margin-top: var(--space-2);
+}
+
 .card-menu-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* One grid for the whole menu so every column shares a single track sizing.
+     Equal 1fr columns, resolved under the popup's max-content width, all take
+     the widest card's width — so every item is the same width and aligned. */
+  grid-template-columns: repeat(3, 1fr);
+  align-items: center;
   gap: var(--space-1) var(--space-3);
 }
 
 .card-menu-item {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-1) var(--space-1);
+  gap: var(--space-1);
   border-radius: var(--radius-sm);
   font-size: 13px;
   color: var(--color-text);
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .card-menu-item:hover {
