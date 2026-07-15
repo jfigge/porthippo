@@ -500,6 +500,14 @@ sandbox-seed:
 sandbox-verify:
 	@bash $(SANDBOX_DIR)/verify.sh
 
+# Exercise Port Hippo's OWN tunnel engine over the sandbox — one real round-trip per
+# forwarding type (local direct, local via jump, dynamic/SOCKS, reverse). Where
+# sandbox-verify uses raw ssh to prove the topology, this drives the actual
+# listener → ssh-chain → relay/socks5 code. Requires the sandbox running
+# ('make sandbox-start'); exits non-zero on any failure, so it is CI-friendly.
+sandbox-e2e:
+	@node $(SANDBOX_DIR)/e2e.js
+
 # Run the host-side echo the REMOTE (reverse, Feature 110) tunnel forwards back to.
 # Leave it running in its own terminal, then arm "Sandbox — reverse forward" in the
 # debug app and trigger it from the jump container (see 'make sandbox-access').
@@ -558,7 +566,8 @@ help:
 	@echo "    sandbox-stop    Stop the containers (keep state)"
 	@echo "    sandbox-destroy Remove containers + networks (keeps image + keys)"
 	@echo "    sandbox-seed    Seed Port Hippo with the sandbox tunnels/credentials"
-	@echo "    sandbox-verify  Prove local + dynamic + reverse forwarding all work"
+	@echo "    sandbox-verify  Prove local + dynamic + reverse forwarding all work (raw ssh)"
+	@echo "    sandbox-e2e     Exercise Port Hippo's engine over the sandbox (all 4 tunnel types)"
 	@echo "    sandbox-host-echo  Run the host-side echo the reverse tunnel targets"
 	@echo "    sandbox-access  Re-print the access details"
 	@echo "    sandbox-status  docker compose ps  ·  sandbox-logs  Follow logs"
@@ -569,4 +578,4 @@ help:
         build-setup build-install icons sign-dmg sign-all dist dist-mac dist-linux dist-win \
         staple-dmg release sync-mac sync-win clean help \
         sandbox-keys sandbox-create sandbox-start sandbox-stop sandbox-destroy \
-        sandbox-seed sandbox-verify sandbox-host-echo sandbox-access sandbox-status sandbox-logs
+        sandbox-seed sandbox-verify sandbox-e2e sandbox-host-echo sandbox-access sandbox-status sandbox-logs

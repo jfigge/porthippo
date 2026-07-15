@@ -41,14 +41,16 @@ weak and must never be exposed.
 | `make sandbox-start`   | Start the containers, then print access details |
 | `make sandbox-stop`    | Stop the containers (fast restart; state kept) |
 | `make sandbox-destroy` | Remove the containers + networks (keeps the image + keys) |
-| `make sandbox-verify`  | Prove local (direct + via jump), dynamic (jump → sealed dest) and reverse (jump → host echo) forwarding all work |
+| `make sandbox-verify`  | Prove the topology with **raw ssh**: local (direct + via jump), dynamic (jump → sealed dest) and reverse (jump → host echo) forwarding all work |
+| `make sandbox-e2e`     | Drive **Port Hippo's own tunnel engine** over the sandbox — one real round-trip per forwarding type (local direct, local via jump, dynamic/SOCKS, reverse). Exits non-zero on any failure |
 | `make sandbox-host-echo` | Run the host-side echo the **reverse** tunnel forwards back to (leave running in its own terminal) |
 | `make sandbox-access`  | Re-print the access details |
 | `make sandbox-status`  | `docker compose ps` |
 | `make sandbox-logs`    | Follow both containers' logs |
 
 `make sandbox-start` alone also creates anything missing, so the quick path is
-`make sandbox-start` → `make sandbox-verify`.
+`make sandbox-start` → `make sandbox-verify` (topology, raw ssh) →
+`make sandbox-e2e` (Port Hippo's engine, all four tunnel types).
 
 ## Credentials
 

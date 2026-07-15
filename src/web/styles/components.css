@@ -1545,18 +1545,6 @@
   box-shadow: 0 0 6px color-mix(in srgb, var(--color-success) 60%, transparent);
 }
 
-.tunnel-row-port {
-  flex: 0 0 auto;
-  min-width: 42px;
-  font-family: var(--font-mono);
-  font-size: 13px;
-  color: var(--color-subtext);
-}
-
-.tunnel-row--selected .tunnel-row-port {
-  color: var(--color-text);
-}
-
 .tunnel-row-name {
   flex: 1 1 auto;
   min-width: 0;

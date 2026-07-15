@@ -15,7 +15,7 @@
  */
 
 // tunnel-list.js — the master sidebar: a flat list of tunnels, one row each with
-// a status dot, the local port, the name, and (on hover/focus) a quick-edit icon
+// a status dot, the name, and (on hover/focus) a quick-edit icon
 // button. An Add icon sits in the header; delete (and the other row actions) live
 // on the row's right-click context menu, owned by TunnelsView. Selection, add,
 // edit and context-menu requests are reported to the owning TunnelsView via
@@ -63,7 +63,7 @@ export function signalLamp(state) {
  * @param {string} state
  * @returns {HTMLElement}
  */
-function buildSignal(state) {
+export function buildSignal(state) {
   const lamp = signalLamp(state);
   return el(
     "span",
@@ -243,10 +243,6 @@ export class TunnelList {
       },
       [
         signal,
-        el("span", {
-          class: "tunnel-row-port",
-          text: String(def.localPort ?? "—"),
-        }),
         typeBadge(def),
         el("span", {
           class: "tunnel-row-name",

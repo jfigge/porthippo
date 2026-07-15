@@ -6,16 +6,18 @@ the tunnel.
 
 ## Tunnel states
 
-The status dot next to each tunnel reflects its live state:
+Each tunnel shows a three-lamp status signal — red, amber, green from left to
+right — lighting a single lamp (or none) so position, not colour alone, tells you
+the live state:
 
-| State | Meaning |
-| --- | --- |
-| **Disarmed** | Defined but not bound. No local port, no SSH. |
-| **Listening** | Armed — the entry port is bound and waiting. No SSH connection yet. |
-| **Connecting** | A client connected; Port Hippo is opening the SSH chain. |
-| **Connected** | The SSH connection is live and relaying traffic. |
-| **Paused** | Live but frozen — traffic is held; the connection is not torn down. |
-| **Error** | The last connection attempt failed. Hover / open the tunnel for the reason. |
+| State | Signal | Meaning |
+| --- | --- | --- |
+| **Disarmed** | *(all off)* | Defined but not bound. No local port, no SSH. |
+| **Listening** | Amber | Armed — the entry port is bound and waiting. No SSH connection yet. |
+| **Connecting** | Amber | A client connected; Port Hippo is opening the SSH chain. |
+| **Connected** | Green | The SSH connection is live and relaying traffic. |
+| **Paused** | Amber | Live but frozen — traffic is held; the connection is not torn down. |
+| **Error** | Red | The last connection attempt failed. Hover / open the tunnel for the reason. |
 
 A tunnel moves **Listening → Connecting → Connected** on first access, and back to
 **Listening** after it idles out (see [Getting Started](getting-started.md)).

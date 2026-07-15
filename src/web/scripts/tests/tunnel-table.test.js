@@ -131,13 +131,16 @@ test("renders an identity column, one column per visible card, and a row per tun
   assert.equal(table.element.querySelectorAll(".tt-row").length, 3);
 });
 
-test("the identity cell shows the status dot, local port and name", () => {
+test("the identity cell shows the status signal and name", () => {
   const { table } = mount();
   table.setCardOrder([]);
   table.setData(DEFS, STATES, SNAPS, "a");
   const rowA = table.element.querySelector('.tt-row[data-id="a"]');
-  assert.ok(rowA.querySelector(".tunnel-dot--armed"), "connected → armed dot");
-  assert.equal(rowA.querySelector(".tunnel-row-port").textContent, "18003");
+  assert.ok(
+    rowA.querySelector(".tunnel-signal--green"),
+    "connected → green lamp",
+  );
+  assert.equal(rowA.querySelector(".tunnel-row-port"), null);
   assert.ok(rowA.textContent.includes("Charlie"));
 });
 
@@ -262,14 +265,14 @@ test("applyStats updates metric cells in place without a re-sort", () => {
   assert.deepEqual(rowIds(table), ["b", "c", "a"], "order unchanged");
 });
 
-test("updateState re-tones the row's dot", () => {
+test("updateState relights the row's signal", () => {
   const { table } = mount();
   table.setCardOrder([]);
   // Clone: updateState mutates the passed-in states map — keep the shared one clean.
   table.setData(DEFS, new Map(STATES), SNAPS, "a");
   table.updateState("b", "error");
   const rowB = table.element.querySelector('.tt-row[data-id="b"]');
-  assert.ok(rowB.querySelector(".tunnel-dot--error"));
+  assert.ok(rowB.querySelector(".tunnel-signal--red"));
 });
 
 // ── Selection + actions ──────────────────────────────────────────────────────

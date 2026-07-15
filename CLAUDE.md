@@ -219,6 +219,13 @@ make clean     # Remove build/ and dist/
   seams rather than letting one file own everything. This applies to both main-process and
   renderer code.
 - Components are class-based ES modules; follow the pattern in existing files.
+- **Card view ↔ list view parity**: `TunnelsView` offers two presentations of the same
+  tunnels — **"cards"** (the master `TunnelList` sidebar + per-tunnel `TunnelDetail`) and
+  **"list"** (the all-tunnels `TunnelTable`). They deliberately share behaviour (the row
+  identity — status signal, type badge, name — the shared card order/columns, sorting,
+  arm/pause, context menu). **When you change a feature that both views present, apply the
+  same change to the other view (and its tests) in the same change, or explicitly flag why
+  it should differ.** Don't let the two drift.
 - **CSS** uses the custom properties in `src/web/styles/theme.css` — use them, don't
   hardcode colours or sizes.
 - **CSS class naming**: `prefix-name` for elements (flat, hyphen-delimited, e.g.

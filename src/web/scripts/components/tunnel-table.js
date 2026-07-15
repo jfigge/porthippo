@@ -15,7 +15,7 @@
  */
 
 // tunnel-table.js — the "list" view: every tunnel as a row in one sortable table.
-// The fixed first column is the tunnel identity (status dot · local port · name,
+// The fixed first column is the tunnel identity (three-lamp status signal · name,
 // with edit/delete on hover); the remaining columns are the SAME metric cards the
 // detail view shows, in the SAME shared order (card-catalog.js), so the "Cards"
 // checklist doubles as the column chooser. Clicking a header sorts by that column
@@ -36,7 +36,7 @@ import {
   cardToneClasses,
 } from "./card-catalog.js";
 import { CardMenu } from "./card-menu.js";
-import { dotState, typeBadge } from "./tunnel-list.js";
+import { signalLamp, buildSignal, typeBadge } from "./tunnel-list.js";
 
 /** The synthetic key of the fixed identity column (sorts by tunnel name). */
 export const TABLE_TUNNEL_COLUMN = "__tunnel";
@@ -70,7 +70,7 @@ export class TunnelTable {
   #selectedId = null;
   #visible = [...DEFAULT_CARD_ORDER]; // ordered VISIBLE columns (= shared cards)
   #sort = { key: TABLE_TUNNEL_COLUMN, dir: "asc" };
-  #rowNodes = new Map(); // id → { tr, dot, cells: Map<colKey, td> }
+  #rowNodes = new Map(); // id → { tr, signal, cells: Map<colKey, td> }
   #dragCol = null;
 
   #now;
@@ -216,7 +216,7 @@ export class TunnelTable {
     this.#updateControls();
   }
 
-  /** A discrete state change: refresh that row's dot + cells in place. */
+  /** A discrete state change: relight that row's signal + refresh cells in place. */
   updateState(id, state) {
     this.#states.set(id, state);
     this.#refreshValues();
@@ -328,7 +328,7 @@ export class TunnelTable {
 
   #buildRow(def) {
     const id = def.id;
-    const dot = el("span", { class: "tunnel-dot" });
+    const signal = buildSignal(this.#states.get(id) || "disarmed");
     // Only Edit lives inline; Delete is reachable from the row context menu.
     const tools = el("div", { class: "tunnel-row-tools" }, [
       el("button", {
@@ -346,11 +346,7 @@ export class TunnelTable {
 
     const identityCell = el("td", { class: "tt-td tt-td--identity" }, [
       el("div", { class: "tt-identity" }, [
-        dot,
-        el("span", {
-          class: "tunnel-row-port",
-          text: String(def.localPort ?? "—"),
-        }),
+        signal,
         typeBadge(def),
         el("span", {
           class: "tunnel-row-name",
@@ -389,7 +385,7 @@ export class TunnelTable {
       [identityCell, ...metricCells],
     );
 
-    return { tr, dot, cells };
+    return { tr, signal, cells };
   }
 
   /** Recompute every visible cell (+ dot) in place — no re-sort. */
@@ -399,8 +395,10 @@ export class TunnelTable {
       const state = this.#states.get(id) || "disarmed";
       const snap = this.#snaps.get(id) || null;
       const ctx = { snap, now, state };
-      rec.dot.className = `tunnel-dot tunnel-dot--${dotState(state)}`;
-      rec.dot.title = t(`state.${state}`);
+      const lamp = signalLamp(state);
+      rec.signal.className = `tunnel-signal${lamp === "off" ? "" : ` tunnel-signal--${lamp}`}`;
+      rec.signal.title = t(`state.${state}`);
+      rec.signal.setAttribute("aria-label", t(`state.${state}`));
       for (const [colKey, cell] of rec.cells) {
         const card = getCard(colKey);
         if (!card) continue;

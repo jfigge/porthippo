@@ -62,7 +62,7 @@ test("signalLamp maps live states to the lit traffic-light lamp", () => {
   assert.equal(signalLamp("error"), "red");
 });
 
-test("renders a row per definition with signal, port and name", () => {
+test("renders a row per definition with signal and name", () => {
   const { list } = mount();
   list.setData(
     DEFS,
@@ -73,7 +73,7 @@ test("renders a row per definition with signal, port and name", () => {
   );
   const r = rows(list);
   assert.equal(r.length, 2);
-  assert.equal(r[0].querySelector(".tunnel-row-port").textContent, "5432");
+  assert.equal(r[0].querySelector(".tunnel-row-port"), null);
   assert.equal(r[0].querySelector(".tunnel-row-name").textContent, "Postgres");
   assert.ok(
     r[0].querySelector(".tunnel-signal--green"),
