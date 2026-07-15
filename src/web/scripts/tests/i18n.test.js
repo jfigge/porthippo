@@ -125,6 +125,63 @@ test("locales/en.json is byte-identical to the embedded EN catalog", () => {
   }
 });
 
+test("every shipped locale is in parity with EN (keys, shape, placeholders)", () => {
+  // Feature 180: a translation is values-only. Each locale MUST carry EN's exact
+  // key set, keep every value's shape (a string stays a string; a plural group
+  // stays an object with the same form keys), and preserve each value's set of
+  // {placeholder} tokens. Runtime still falls back to English for a gap — this
+  // test forbids SHIPPING one, so a translation can never silently drift from EN.
+  const localesDir = fileURLToPath(new URL("../../locales", import.meta.url));
+  const files = fs
+    .readdirSync(localesDir)
+    .filter((f) => f.endsWith(".json") && f !== "en.json")
+    .sort();
+  assert.ok(files.length > 0, "no locale catalogs found to check");
+
+  const enKeys = Object.keys(EN);
+  const enKeySet = new Set(enKeys);
+
+  // Order-independent set of {placeholder} token names reachable from a value —
+  // a plain string, or the union across a plural group's string forms.
+  const tokens = (v) => {
+    const strs = v && typeof v === "object" ? Object.values(v) : [v];
+    return new Set(
+      strs.flatMap((s) =>
+        [...String(s).matchAll(/\{(\w+)\}/g)].map((m) => m[1]),
+      ),
+    );
+  };
+  // Structural signature: "string", or the sorted plural-form keys of a group.
+  const shape = (v) =>
+    v && typeof v === "object" ? Object.keys(v).sort().join(",") : typeof v;
+  const sorted = (set) => [...set].sort();
+
+  for (const file of files) {
+    const lang = file.replace(/\.json$/, "");
+    const cat = JSON.parse(readWeb(`../../locales/${file}`));
+
+    // (1) Key set equals EN's — no missing, no extra.
+    const missing = enKeys.filter((k) => !(k in cat));
+    const extra = Object.keys(cat).filter((k) => !enKeySet.has(k));
+    assert.deepEqual(missing, [], `${lang}.json is missing keys: ${missing}`);
+    assert.deepEqual(extra, [], `${lang}.json has unknown keys: ${extra}`);
+
+    // (2) shape parity + (3) {placeholder}-token parity, per key.
+    for (const key of enKeys) {
+      assert.equal(
+        shape(cat[key]),
+        shape(EN[key]),
+        `${lang}.json shape mismatch at "${key}"`,
+      );
+      assert.deepEqual(
+        sorted(tokens(cat[key])),
+        sorted(tokens(EN[key])),
+        `${lang}.json placeholder-token mismatch at "${key}"`,
+      );
+    }
+  }
+});
+
 test('every literal t("…") key used in the renderer exists in EN', () => {
   // Walk the renderer source (excluding tests, vendored third-party bundles, and
   // the i18n module itself).

@@ -128,11 +128,15 @@ contextBridge.exposeInMainWorld("porthippo", {
   },
 
   // ── Accepted SSH host keys (TOFU) ─────────────────────────────────────────
-  // Resolve an unknown-host-key prompt raised during a connection (TOFU). The
-  // engine holds the connection pending until one of these is called.
+  // `trust`/`reject` resolve an unknown-host-key prompt raised during a
+  // connection (the engine holds it pending until one is called). `list`/`revoke`
+  // manage the persisted accepted-key store shown in Settings → Host Keys; a
+  // revoke forgets a fingerprint so the next connection re-prompts (TOFU).
   hostkeys: {
     trust: (promptId) => ipcRenderer.invoke("hostkeys:trust", promptId),
     reject: (promptId) => ipcRenderer.invoke("hostkeys:reject", promptId),
+    list: () => ipcRenderer.invoke("hostkeys:list"),
+    revoke: (hostPort) => ipcRenderer.invoke("hostkeys:revoke", hostPort),
   },
 
   // ── Hostname-resolution validation (Feature 100) ──────────────────────────

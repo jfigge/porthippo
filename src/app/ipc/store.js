@@ -171,6 +171,22 @@ function registerStoreIPC({
     ),
   );
 
+  // ── Accepted SSH host keys (TOFU) ─────────────────────────────────────────────
+  // The trust/reject *prompt* answers live in ipc/engine.js; these two manage the
+  // persisted accepted-key store surfaced in Settings → Host Keys. Revoking only
+  // affects the NEXT handshake — a live connection keeps its socket until it next
+  // drops — so there is no engine reconcile hook here.
+
+  ipcMain.handle("hostkeys:list", () =>
+    safeCall("hostkeys:list", () => getStores().knownHostsStore().list(), []),
+  );
+
+  ipcMain.handle("hostkeys:revoke", (_event, hostPort) =>
+    safeCallWrite("hostkeys:revoke", () =>
+      getStores().knownHostsStore().revoke(hostPort),
+    ),
+  );
+
   // ── App settings ────────────────────────────────────────────────────────────
 
   ipcMain.handle("settings:get", () =>

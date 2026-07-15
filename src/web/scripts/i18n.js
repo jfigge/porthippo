@@ -355,6 +355,7 @@ export const EN = {
   "settings.nav.defaults": "Defaults",
   "settings.nav.behaviour": "Behaviour",
   "settings.nav.security": "Security",
+  "settings.nav.hostkeys": "Host Keys",
 
   "settings.appearance.theme": "Theme",
   "settings.appearance.theme.system": "System",
@@ -427,6 +428,16 @@ export const EN = {
     "Unlock your secrets first, then switch storage method.",
   "settings.security.error.generic": "Something went wrong. Please try again.",
 
+  // ── Host Keys tab (accepted SSH host-key fingerprints, TOFU) ────────────
+  "settings.hostkeys.heading": "Trusted SSH host keys",
+  "settings.hostkeys.help":
+    "Fingerprints you accepted the first time you connected to each host. Forget one to be prompted to trust it again on the next connection — this is also how you re-trust a host after its key legitimately changes.",
+  "settings.hostkeys.empty": "No host keys trusted yet.",
+  "settings.hostkeys.added": "Added {date}",
+  "settings.hostkeys.forget": "Forget",
+  "settings.hostkeys.forgetAria": "Forget host key for {host}",
+  "settings.hostkeys.confirm": "Forget this key?",
+
   // ── Unlock-on-launch prompt (master-password mode boots locked) ─────────
   "unlock.title": "Unlock secrets",
   "unlock.later": "Not now",
@@ -484,10 +495,23 @@ let _messages = EN;
 let _fallback = EN;
 let _pluralRules = null;
 
-/** Locale options for the settings picker. `system` follows the OS locale. */
+/**
+ * Locale options for the settings picker. `system` follows the OS locale; every
+ * other row is a shipped `locales/<value>.json` catalog. Labels are ENDONYMS —
+ * each language's own name — so a speaker recognises it whatever the UI's current
+ * language is (matching how `English` is a literal label, not a `t()` key). `zh`
+ * ships Simplified Chinese; the label says so since the subtag-only resolver can't
+ * distinguish Traditional.
+ */
 export const LOCALE_OPTIONS = [
   { value: "system", labelKey: "settings.appearance.language.system" },
   { value: "en", label: "English" },
+  { value: "fr", label: "Français" },
+  { value: "de", label: "Deutsch" },
+  { value: "es", label: "Español" },
+  { value: "zh", label: "中文（简体）" },
+  { value: "ja", label: "日本語" },
+  { value: "it", label: "Italiano" },
 ];
 
 function lookup(catalog, key) {

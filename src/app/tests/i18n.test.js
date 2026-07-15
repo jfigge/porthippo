@@ -35,12 +35,42 @@ test("loadCatalog defaults to English for system / undefined / en", () => {
   }
 });
 
-test("a requested locale with no catalog falls back to English", () => {
-  // No fr.json ships yet, so "fr" resolves to English but reports its request.
+test("a shipped locale resolves to its own catalog (Feature 180)", () => {
+  // fr.json now ships, so "fr" resolves to French — not the English fallback.
   const cat = loadCatalog({ requested: "fr", systemLocale: "en-US" });
-  assert.equal(cat.active, "en");
+  assert.equal(cat.active, "fr");
+  assert.equal(cat.lang, "fr");
   assert.equal(cat.requested, "fr");
+  assert.equal(cat.messages["state.connected"], "Connecté");
+  // English is still loaded as the fallback for any key a locale might omit.
+  assert.equal(cat.fallback["state.connected"], "Connected");
+});
+
+test("every shipped locale loads its own catalog, not English", () => {
+  for (const lang of ["de", "es", "zh", "ja", "it"]) {
+    const cat = loadCatalog({ requested: lang, systemLocale: "en-US" });
+    assert.equal(cat.active, lang, `${lang} should resolve to itself`);
+    assert.equal(cat.lang, lang);
+    // Proves the locale's own catalog loaded, not the English fallback.
+    assert.notEqual(cat.messages["state.connected"], "Connected");
+  }
+});
+
+test("an unshipped locale falls back to English but reports its request", () => {
+  // No pt.json ships, so "pt" resolves to English while reporting the request.
+  const cat = loadCatalog({ requested: "pt", systemLocale: "en-US" });
+  assert.equal(cat.active, "en");
+  assert.equal(cat.requested, "pt");
   assert.equal(cat.messages["common.cancel"], "Cancel");
+});
+
+test("system locale selects a shipped catalog by its primary subtag", () => {
+  // "System default" on a machine whose OS locale is one of the six lands there;
+  // zh-Hans / zh-CN etc. all key on the primary "zh" subtag.
+  const ja = loadCatalog({ requested: "system", systemLocale: "ja-JP" });
+  assert.equal(ja.active, "ja");
+  const zh = loadCatalog({ requested: "system", systemLocale: "zh-Hans-CN" });
+  assert.equal(zh.active, "zh");
 });
 
 test("system locale is used when no explicit language is set", () => {

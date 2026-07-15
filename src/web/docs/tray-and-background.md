@@ -69,3 +69,25 @@ The application menu carries the same actions plus standard fare:
   `Cmd/Ctrl +` `-` `0`), full screen.
 - **Help** — this User Guide, Copy Diagnostics, Show Logs Folder, Check for
   Updates.
+
+## Appearance & language
+
+**Settings → Appearance** controls how Port Hippo looks: the **Theme**
+(System / Light / Dark), the interface **Font** and **Font size**, and the
+**Language**.
+
+Port Hippo ships in seven languages:
+
+- **English**, **Français** (French), **Deutsch** (German), **Español**
+  (Spanish), **中文（简体）** (Simplified Chinese), **日本語** (Japanese), and
+  **Italiano** (Italian).
+
+Pick one from the **Language** menu and the window reloads into that language —
+the whole interface, the native menu, and the tray. Choose **System default** to
+follow your operating system's language: if that's one of the seven above, Port
+Hippo uses it automatically; otherwise it falls back to English. Any phrase a
+translation hasn't covered also falls back to English, so you'll never see a
+blank label.
+
+> The product name **Port Hippo** and protocol terms (SSH, SOCKS) are the same in
+> every language. This User Guide is currently available in English only.

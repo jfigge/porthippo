@@ -39,16 +39,24 @@ import {
 let tunnelsView = null;
 let settingsPopup = null;
 
+// System CJK faces, appended to every Latin stack so Chinese/Japanese render
+// real glyphs (Inter and the other Latin faces carry no CJK) — the OS supplies
+// them, and Latin text still resolves to the pinned Latin face first. No webfont
+// (house rule: never load fonts from a CDN) and no bundled multi-MB CJK font;
+// this mirrors the `--font-sans` tail in theme.css. (Feature 180)
+const CJK_FALLBACK =
+  '"PingFang SC", "Hiragino Sans", "Microsoft YaHei", "Yu Gothic", "Noto Sans CJK SC"';
+
 // UI typeface stacks keyed by the fontFamily setting. Only Inter is bundled
 // (src/web/fonts/); the rest resolve to platform/system faces. Mirrors Rest Hippo.
+// Each stack ends with the shared CJK fallback before the generic `sans-serif`.
 const FONT_STACKS = {
-  inter: '"Inter", "Segoe UI", system-ui, -apple-system, sans-serif',
-  system:
-    'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-  "sf-pro": '-apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif',
-  segoe: '"Segoe UI", system-ui, sans-serif',
-  ubuntu: '"Ubuntu", "Cantarell", system-ui, sans-serif',
-  roboto: '"Roboto", "Helvetica Neue", system-ui, sans-serif',
+  inter: `"Inter", "Segoe UI", system-ui, -apple-system, ${CJK_FALLBACK}, sans-serif`,
+  system: `system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", ${CJK_FALLBACK}, sans-serif`,
+  "sf-pro": `-apple-system, BlinkMacSystemFont, "Helvetica Neue", ${CJK_FALLBACK}, sans-serif`,
+  segoe: `"Segoe UI", system-ui, ${CJK_FALLBACK}, sans-serif`,
+  ubuntu: `"Ubuntu", "Cantarell", system-ui, ${CJK_FALLBACK}, sans-serif`,
+  roboto: `"Roboto", "Helvetica Neue", system-ui, ${CJK_FALLBACK}, sans-serif`,
 };
 
 // The live UI font size (px); the zoom factor is fontSize / DEFAULT_FONT_SIZE.

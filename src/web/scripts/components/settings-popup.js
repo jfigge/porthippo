@@ -31,8 +31,9 @@ import { field } from "../field.js";
 import { PopupManager } from "../popup-manager.js";
 import { t, LOCALE_OPTIONS } from "../i18n.js";
 import { SecuritySettings } from "./settings-security.js";
+import { HostKeysPanel } from "./host-keys-panel.js";
 
-const PANELS = ["appearance", "defaults", "behaviour", "security"];
+const PANELS = ["appearance", "defaults", "behaviour", "security", "hostkeys"];
 
 export class SettingsPopup {
   #porthippo;
@@ -40,12 +41,15 @@ export class SettingsPopup {
   #built = false;
   #loadedLanguage = null;
   #security; // the Settings → Security panel (selectable secret storage)
+  #hostKeys; // the Settings → Host Keys panel (accepted TOFU fingerprints)
 
   constructor({ porthippo } = {}) {
     this.#porthippo = porthippo || window.porthippo;
     // Owns the Security tab (its DOM, state, and the secret-storage-changed
     // subscription); the popup just mounts it and asks it to reload on reveal.
     this.#security = new SecuritySettings({ porthippo: this.#porthippo });
+    // Likewise owns the Host Keys tab: mounted here, reloaded on reveal.
+    this.#hostKeys = new HostKeysPanel({ porthippo: this.#porthippo });
   }
 
   /** Load current settings and open the popup. */
@@ -109,6 +113,7 @@ export class SettingsPopup {
       this.#defaultsPanel(),
       this.#behaviourPanel(),
       this.#security.element,
+      this.#hostKeys.element,
     ]);
 
     const closeBtn = el("button", {
@@ -306,8 +311,10 @@ export class SettingsPopup {
     for (const panel of this.#el.querySelectorAll(".settings-panel")) {
       panel.hidden = panel.dataset.panel !== name;
     }
-    // The Security tab reads live main-process state, so refresh it each reveal.
+    // The Security and Host Keys tabs read live main-process state, so refresh
+    // whichever is being revealed.
     if (name === "security") this.#security.load();
+    if (name === "hostkeys") this.#hostKeys.load();
   }
 
   #get(id) {

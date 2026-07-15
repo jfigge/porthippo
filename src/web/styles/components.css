@@ -879,8 +879,24 @@
   border-bottom-color: var(--color-accent);
 }
 
+/* Stack every tab in a single grid cell so the settings body is always as tall as
+   the TALLEST tab — the dialog then keeps one fixed height instead of resizing as
+   you switch tabs. Hidden tabs stay in the layout (invisible + inert) so they still
+   count toward that height; the active tab paints over them. */
+.settings-panels {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.settings-panel {
+  grid-area: 1 / 1;
+  min-width: 0;
+}
+
 .settings-panel[hidden] {
-  display: none;
+  display: block; /* override the UA [hidden] display:none so it keeps its cell */
+  visibility: hidden;
+  pointer-events: none;
 }
 
 /* Checkbox rows: an inline [✓] label plus an optional hint beneath. Override the
@@ -1065,6 +1081,86 @@
 
 .security-status--error {
   color: var(--color-danger);
+}
+
+/* ── Host Keys tab (accepted SSH host-key fingerprints, TOFU) ──────────────── */
+/* Cap the list so a long trust history scrolls inside the tab instead of pushing
+   the (fixed-height) dialog taller than the other tabs need. */
+.hostkeys-list-region {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.hostkeys-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.hostkeys-empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-muted);
+}
+
+.hostkeys-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--color-surface-0);
+  border: 1px solid var(--color-overlay);
+  border-radius: var(--radius-md);
+}
+
+/* The row glows caution while its inline forget-confirm is showing. */
+.hostkeys-item--confirming {
+  border-color: var(--color-warning);
+}
+
+.hostkeys-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.hostkeys-host {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text);
+  word-break: break-all;
+}
+
+.hostkeys-fingerprint {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-subtext);
+  word-break: break-all;
+}
+
+.hostkeys-meta {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.hostkeys-added {
+  font-size: 11px;
+  color: var(--color-muted);
+}
+
+.hostkeys-actions {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.hostkeys-confirm-label {
+  font-size: 12px;
+  color: var(--color-warning);
 }
 
 /* ── Narrow layouts (e.g. a small window) ─────────────────────────────────── */
