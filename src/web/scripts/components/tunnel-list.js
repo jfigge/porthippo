@@ -15,12 +15,11 @@
  */
 
 // tunnel-list.js — the master sidebar: a flat list of tunnels, one row each with
-// a status dot, the name, and (on hover/focus) a quick-edit icon
-// button. An Add icon sits in the header; delete (and the other row actions) live
-// on the row's right-click context menu, owned by TunnelsView. Selection, add,
-// edit and context-menu requests are reported to the owning TunnelsView via
-// constructor callbacks; the list itself holds no IPC and computes nothing —
-// state is fed in.
+// a status dot, the type icon, and the name. An Add icon sits in the header; edit,
+// delete and the other row actions all live on the row's right-click context menu,
+// owned by TunnelsView. Selection, add and context-menu requests are reported to
+// the owning TunnelsView via constructor callbacks; the list itself holds no IPC
+// and computes nothing — state is fed in.
 
 import { el, clear } from "../dom.js";
 import { t } from "../i18n.js";
@@ -127,13 +126,11 @@ export class TunnelList {
   #rows = new Map(); // id → { root, signal }
   #onSelect;
   #onAdd;
-  #onEdit;
   #onContextMenu;
 
-  constructor({ onSelect, onAdd, onEdit, onContextMenu } = {}) {
+  constructor({ onSelect, onAdd, onContextMenu } = {}) {
     this.#onSelect = onSelect || (() => {});
     this.#onAdd = onAdd || (() => {});
-    this.#onEdit = onEdit || (() => {});
     this.#onContextMenu = onContextMenu || (() => {});
     this.#el = this.#build();
   }
@@ -224,22 +221,8 @@ export class TunnelList {
   #buildRow(def) {
     const state = this.#states.get(def.id) || "disarmed";
     const signal = buildSignal(state);
-    // Delete is offered from the row's right-click context menu (TunnelsView),
-    // so the sidebar row keeps only the quick-edit affordance on hover.
-    const tools = el("div", { class: "tunnel-row-tools" }, [
-      el("button", {
-        class: "btn--icon tunnel-row-btn tunnel-edit-btn",
-        type: "button",
-        title: t("tunnels.edit"),
-        "aria-label": t("tunnels.edit"),
-        html: icons.edit(),
-        onClick: (e) => {
-          e.stopPropagation();
-          this.#onEdit(def.id);
-        },
-      }),
-    ]);
-
+    // Edit, delete and the other row actions all live on the row's right-click
+    // context menu (owned by TunnelsView), so the row carries no inline buttons.
     const root = el(
       "div",
       {
@@ -267,7 +250,6 @@ export class TunnelList {
           class: "tunnel-row-name",
           text: def.name || t("def.unnamed"),
         }),
-        tools,
       ],
     );
 

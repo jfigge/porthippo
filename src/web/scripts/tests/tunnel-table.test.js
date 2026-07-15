@@ -70,7 +70,6 @@ function mount() {
   const calls = {
     select: [],
     add: [],
-    edit: [],
     delete: [],
     cards: [],
     sort: [],
@@ -81,7 +80,6 @@ function mount() {
     now: () => NOW,
     onSelect: (id) => calls.select.push(id),
     onAdd: () => calls.add.push(true),
-    onEdit: (id) => calls.edit.push(id),
     onDelete: (id) => calls.delete.push(id),
     onCardsChange: (o) => calls.cards.push(o),
     onSortChange: (s) => calls.sort.push(s),
@@ -315,7 +313,7 @@ test("setSelected highlights the row; a row click reports the selection", () => 
   assert.deepEqual(calls.select, ["a"]);
 });
 
-test("Add + edit report without selecting the row; delete is context-menu only", () => {
+test("Add reports without selecting; edit + delete are context-menu only", () => {
   const { table, calls } = mount();
   table.setCardOrder([]);
   table.setData(DEFS, STATES, SNAPS, "a");
@@ -323,12 +321,13 @@ test("Add + edit report without selecting the row; delete is context-menu only",
   table.element.querySelector(".tunnel-add-btn").click();
   assert.equal(calls.add.length, 1);
 
+  // Edit + delete moved to the row context menu — no inline row buttons in list view.
   const rowA = table.element.querySelector('.tt-row[data-id="a"]');
-  rowA.querySelector(".tunnel-edit-btn").click();
-  assert.deepEqual(calls.edit, ["a"]);
-  assert.equal(calls.select.length, 0, "edit stops propagation");
-
-  // Delete moved to the row context menu — no inline delete button in list view.
+  assert.equal(
+    rowA.querySelector(".tunnel-edit-btn"),
+    null,
+    "no inline edit button in list view",
+  );
   assert.equal(
     rowA.querySelector(".tunnel-delete-btn"),
     null,

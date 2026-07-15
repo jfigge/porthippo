@@ -15,14 +15,15 @@
  */
 
 // tunnel-table.js — the "list" view: every tunnel as a row in one sortable table.
-// The fixed first column is the tunnel identity (three-lamp status signal · name,
-// with edit/delete on hover); the remaining columns are the SAME metric cards the
-// detail view shows, in the SAME shared order (card-catalog.js), so the "Cards"
-// checklist doubles as the column chooser. Clicking a header sorts by that column
-// (clicking the sorted one reverses); dragging a metric header reorders columns
-// (which persists as the shared card order). A pure view: data + live snapshots
-// are fed in, and selection / add / edit / delete / sort / column-order changes
-// are reported back through constructor callbacks.
+// The fixed first column is the tunnel identity (three-lamp status signal · name);
+// the remaining columns are the SAME metric cards the detail view shows, in the
+// SAME shared order (card-catalog.js), so the "Cards" checklist doubles as the
+// column chooser. Clicking a header sorts by that column (clicking the sorted one
+// reverses); dragging a metric header reorders columns (which persists as the
+// shared card order). Row actions (edit, delete, …) live on the right-click
+// context menu. A pure view: data + live snapshots are fed in, and selection /
+// add / sort / column-order changes are reported back through constructor
+// callbacks.
 
 import { el, clear } from "../dom.js";
 import { t } from "../i18n.js";
@@ -76,7 +77,6 @@ export class TunnelTable {
   #now;
   #onSelect;
   #onAdd;
-  #onEdit;
   #onCardsChange;
   #onSortChange;
   #onToggleArm;
@@ -87,7 +87,6 @@ export class TunnelTable {
     now,
     onSelect,
     onAdd,
-    onEdit,
     onCardsChange,
     onSortChange,
     onToggleArm,
@@ -97,7 +96,6 @@ export class TunnelTable {
     this.#now = now || Date.now;
     this.#onSelect = onSelect || (() => {});
     this.#onAdd = onAdd || (() => {});
-    this.#onEdit = onEdit || (() => {});
     this.#onCardsChange = onCardsChange || (() => {});
     this.#onSortChange = onSortChange || (() => {});
     this.#onToggleArm = onToggleArm || (() => {});
@@ -331,21 +329,8 @@ export class TunnelTable {
   #buildRow(def) {
     const id = def.id;
     const signal = buildSignal(this.#states.get(id) || "disarmed");
-    // Only Edit lives inline; Delete is reachable from the row context menu.
-    const tools = el("div", { class: "tunnel-row-tools" }, [
-      el("button", {
-        class: "btn--icon tunnel-row-btn tunnel-edit-btn",
-        type: "button",
-        title: t("tunnels.edit"),
-        "aria-label": t("tunnels.edit"),
-        html: icons.edit(),
-        onClick: (e) => {
-          e.stopPropagation();
-          this.#onEdit(id);
-        },
-      }),
-    ]);
-
+    // Row actions (edit, delete, …) all live on the right-click context menu, so
+    // the identity cell carries no inline buttons.
     const identityCell = el("td", { class: "tt-td tt-td--identity" }, [
       el("div", { class: "tt-identity" }, [
         signal,
@@ -354,7 +339,6 @@ export class TunnelTable {
           class: "tunnel-row-name",
           text: def.name || t("def.unnamed"),
         }),
-        tools,
       ]),
     ]);
 

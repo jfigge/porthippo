@@ -87,8 +87,7 @@ export class TunnelsView {
     this.#list = new TunnelList({
       onSelect: (id) => this.#select(id),
       onAdd: () => this.#editor.openCreate(),
-      onEdit: (id) => this.#editById(id),
-      // Delete is offered from the sidebar row's right-click menu, not an icon.
+      // Edit, delete and the other row actions live on the row's right-click menu.
       onContextMenu: (id) => this.#showContextMenu(id),
     });
 
@@ -106,7 +105,6 @@ export class TunnelsView {
       now: this.#now,
       onSelect: (id) => this.#select(id),
       onAdd: () => this.#editor.openCreate(),
-      onEdit: (id) => this.#editById(id),
       onDelete: (id) => this.#confirmDelete(id),
       onCardsChange: (order) => this.#persistCardOrder(order),
       onSortChange: (sort) => this.#persistListSort(sort),

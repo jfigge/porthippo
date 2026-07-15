@@ -1579,30 +1579,6 @@
   color: var(--color-text);
 }
 
-.tunnel-row-tools {
-  flex: 0 0 auto;
-  display: flex;
-  gap: 2px;
-  opacity: 0;
-  transition: opacity 0.1s ease;
-}
-
-.tunnel-row:hover .tunnel-row-tools,
-.tunnel-row:focus-within .tunnel-row-tools,
-.tunnel-row--selected .tunnel-row-tools {
-  opacity: 1;
-}
-
-.tunnel-row-btn {
-  width: 24px;
-  height: 24px;
-}
-
-.tunnel-delete-btn:hover {
-  color: var(--color-danger);
-}
-
-.tunnel-row-btn svg,
 .tunnel-add-btn svg,
 .detail-ctrl svg {
   display: block;
@@ -2339,16 +2315,6 @@
   left: var(--split-left, 240px);
   transform: translateX(-50%);
   z-index: 2;
-}
-
-.tt-row .tunnel-row-tools {
-  margin-left: auto;
-}
-
-.tt-row:hover .tunnel-row-tools,
-.tt-row:focus-within .tunnel-row-tools,
-.tt-row--selected .tunnel-row-tools {
-  opacity: 1;
 }
 
 .tunnel-table-empty {

@@ -27,11 +27,10 @@ import { t } from "../i18n.js";
 
 function mount() {
   resetDom();
-  const calls = { select: [], add: 0, edit: [], context: [] };
+  const calls = { select: [], add: 0, context: [] };
   const list = new TunnelList({
     onSelect: (id) => calls.select.push(id),
     onAdd: () => (calls.add += 1),
-    onEdit: (id) => calls.edit.push(id),
     onContextMenu: (id) => calls.context.push(id),
   });
   document.body.appendChild(list.element);
@@ -125,24 +124,20 @@ test("empty state shows when there are no tunnels", () => {
   assert.equal(list.element.querySelector(".tunnel-list").hidden, true);
 });
 
-test("clicking a row selects it; edit acts without selecting", () => {
+test("clicking a row selects it", () => {
   const { list, calls } = mount();
   list.setData(DEFS, new Map());
   const r = rows(list);
 
   r[1].click();
   assert.deepEqual(calls.select, ["b"]);
-
-  r[0].querySelector(".tunnel-edit-btn").click();
-  assert.deepEqual(calls.edit, ["a"]);
-  // The edit click did NOT also fire selection.
-  assert.deepEqual(calls.select, ["b"], "edit stops propagation");
 });
 
-test("delete is no longer an inline row icon (it lives on the context menu)", () => {
+test("edit and delete are no longer inline row icons (they live on the context menu)", () => {
   const { list, calls } = mount();
   list.setData(DEFS, new Map());
   const r = rows(list);
+  assert.equal(r[0].querySelector(".tunnel-edit-btn"), null, "no edit icon");
   assert.equal(
     r[0].querySelector(".tunnel-delete-btn"),
     null,
