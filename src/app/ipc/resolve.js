@@ -43,26 +43,10 @@
  * @param {() => import('../tunnel/engine').TunnelEngine} deps.getEngine
  */
 const { lookupHost, classifyBindHost } = require("../tunnel/resolve-check");
+const { wrap } = require("./wrap");
 
 function registerResolveIPC({ ipcMain, getStores, getEngine }) {
   let active = null; // the in-flight probe's AbortController, or null
-
-  const wrap =
-    (channel, fn) =>
-    async (_event, ...args) => {
-      try {
-        const result = await fn(...args);
-        return result === undefined ? null : result;
-      } catch (err) {
-        console.error(`[main] ${channel} error:`, err && err.message);
-        return {
-          __hippoError: true,
-          channel,
-          message: err && err.message,
-          code: err && err.code,
-        };
-      }
-    };
 
   ipcMain.handle(
     "resolve:lookup",

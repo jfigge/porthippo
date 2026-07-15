@@ -34,27 +34,9 @@
  * @param {Electron.IpcMain} deps.ipcMain
  * @param {() => import('../tunnel/engine').TunnelEngine} deps.getEngine
  */
-function registerEngineIPC({ ipcMain, getEngine }) {
-  // Await the engine call; a throw/rejection becomes an error envelope. Returns the
-  // handler function — each call site passes the channel as a string LITERAL to
-  // ipcMain.handle so the ipc-parity guard can see it.
-  const wrap =
-    (channel, fn) =>
-    async (_event, ...args) => {
-      try {
-        const result = await fn(...args);
-        return result === undefined ? null : result;
-      } catch (err) {
-        console.error(`[main] ${channel} error:`, err && err.message);
-        return {
-          __hippoError: true,
-          channel,
-          message: err && err.message,
-          code: err && err.code,
-        };
-      }
-    };
+const { wrap } = require("./wrap");
 
+function registerEngineIPC({ ipcMain, getEngine }) {
   // ── Arm / disarm / status ─────────────────────────────────────────────────────
 
   ipcMain.handle(
