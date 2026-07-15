@@ -187,5 +187,28 @@ export function blankForm() {
     keepAlive: false,
     enabled: true,
     autoReconnect: false,
+    // Feature 130 — the optional per-tunnel reconnect-policy override. Blank means
+    // "inherit the global setting"; each field is independent.
+    retryBaseMs: "",
+    retryMaxMs: "",
+    retryMaxAttempts: "",
   };
+}
+
+/**
+ * Fold the three raw retry-override strings into a `retry` object for the payload,
+ * or `undefined` when all three are blank (inherit the global setting). Each field
+ * is omitted individually when blank so a partial override is preserved.
+ * @param {{retryBaseMs:string, retryMaxMs:string, retryMaxAttempts:string}} form
+ * @returns {object|undefined}
+ */
+export function buildRetryOverride(form) {
+  const retry = {};
+  const base = toInt(form.retryBaseMs);
+  const max = toInt(form.retryMaxMs);
+  const attempts = toInt(form.retryMaxAttempts);
+  if (base !== undefined) retry.baseMs = base;
+  if (max !== undefined) retry.maxMs = max;
+  if (attempts !== undefined) retry.maxAttempts = attempts;
+  return Object.keys(retry).length ? retry : undefined;
 }

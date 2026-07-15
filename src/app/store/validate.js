@@ -204,6 +204,33 @@ function validateDefinition(def) {
     errors.autoReconnect = "autoReconnect must be a boolean";
   }
 
+  // Optional per-tunnel reconnect-policy override (Feature 130). Any field left
+  // out inherits the global setting; each present field must be a sane integer.
+  if (def.retry !== undefined) {
+    if (
+      def.retry === null ||
+      typeof def.retry !== "object" ||
+      Array.isArray(def.retry)
+    ) {
+      errors.retry = "retry must be an object when set";
+    } else {
+      const posInt = (v) => Number.isInteger(v) && v >= 1;
+      if (def.retry.baseMs !== undefined && !posInt(def.retry.baseMs)) {
+        errors["retry.baseMs"] = "retry.baseMs must be an integer ≥ 1";
+      }
+      if (def.retry.maxMs !== undefined && !posInt(def.retry.maxMs)) {
+        errors["retry.maxMs"] = "retry.maxMs must be an integer ≥ 1";
+      }
+      if (
+        def.retry.maxAttempts !== undefined &&
+        !(Number.isInteger(def.retry.maxAttempts) && def.retry.maxAttempts >= 0)
+      ) {
+        errors["retry.maxAttempts"] =
+          "retry.maxAttempts must be an integer ≥ 0";
+      }
+    }
+  }
+
   // Verbatim Entry / Exit strings the editor stores for faithful round-trip. The
   // extracted concrete fields above carry the real constraints, so only the type
   // is checked here.

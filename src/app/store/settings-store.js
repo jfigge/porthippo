@@ -47,6 +47,17 @@ const DEFAULTS = Object.freeze({
   startMinimized: false, // when launched at login, start hidden in the tray
   armOnLaunch: true, // arm enabled definitions on startup (bind their listeners)
   confirmOnQuit: false, // ask before quitting (tears down live tunnels)
+
+  // ── Feature 130: failure notifications & connection health ────────────────
+  notificationsEnabled: true, // master switch for all desktop notifications
+  notifyOnDrop: true, // notify when an armed tunnel's SSH connection drops
+  notifyOnRecover: true, // notify when a dropped tunnel reconnects
+  notifyOnGiveUp: true, // notify when reconnection is exhausted (gave up)
+  notifyCooldownMs: 60000, // per-tunnel debounce so a flapping tunnel can't spam
+  sshKeepaliveSeconds: 15, // SSH-layer keepalive probe interval (0 = off)
+  reconnectBaseMs: 1000, // reconnect backoff base (first delay)
+  reconnectMaxMs: 30000, // reconnect backoff ceiling
+  reconnectMaxAttempts: 6, // attempts before a non-held-open tunnel gives up
 });
 
 class SettingsStore {

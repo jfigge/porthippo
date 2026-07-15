@@ -37,6 +37,15 @@ const { probeChain } = require("./ssh-chain");
 
 const DEFAULT_LINGER_MS = 10000;
 
+// Reconnect-policy + keepalive defaults (Feature 130). These mirror the seeds in
+// settings-store's DEFAULTS and the fallbacks in tunnel.js; they only apply when
+// the settings store can't be read (pre-store / error), so the engine never hands
+// the tunnel a broken policy.
+const DEFAULT_RECONNECT_BASE_MS = 1000;
+const DEFAULT_RECONNECT_MAX_MS = 30000;
+const DEFAULT_RECONNECT_MAX_ATTEMPTS = 6;
+const DEFAULT_SSH_KEEPALIVE_SECONDS = 15;
+
 // A resolution probe (Feature 100) is time-boxed so a black-holed hop can't hang the
 // editor's "Test resolution" spinner forever; the run aborts and reports the reach.
 const PROBE_TIMEOUT_MS = 20000;
@@ -280,11 +289,62 @@ class TunnelEngine {
     return new Tunnel(def, {
       hostVerifierFactory: (ctx) => this.#buildHostVerifier(ctx),
       getLingerMs: (d) => this.#effectiveLinger(d),
+      // Feature 130 — reconnect policy (settings + per-tunnel override) and the
+      // SSH-layer keepalive interval, both read live so a settings edit lands on
+      // the next reconnect / connect without re-arming.
+      getRetryPolicy: (d) => this.#effectiveRetry(d),
+      getSshKeepaliveMs: () => this.#sshKeepaliveMs(),
       onStateChange: (snapshot) => {
         this.#broadcast?.("porthippo:tunnel-state", snapshot);
         this.#onTunnelStateChange();
       },
     });
+  }
+
+  #settings() {
+    try {
+      return this.#getStores().settingsStore().get();
+    } catch {
+      return {};
+    }
+  }
+
+  /**
+   * The effective reconnect policy for a def: the global settings seeds, then any
+   * per-tunnel `retry` override (each field independent). Sanitised so a corrupt
+   * value can never hand the tunnel a non-positive backoff.
+   */
+  #effectiveRetry(def) {
+    const s = this.#settings();
+    const intOr = (v, dflt, min) =>
+      Number.isInteger(v) && v >= min ? v : dflt;
+    const policy = {
+      baseMs: intOr(s.reconnectBaseMs, DEFAULT_RECONNECT_BASE_MS, 1),
+      maxMs: intOr(s.reconnectMaxMs, DEFAULT_RECONNECT_MAX_MS, 1),
+      maxAttempts: intOr(
+        s.reconnectMaxAttempts,
+        DEFAULT_RECONNECT_MAX_ATTEMPTS,
+        0,
+      ),
+    };
+    const o = def && def.retry;
+    if (o && typeof o === "object") {
+      if (Number.isInteger(o.baseMs) && o.baseMs >= 1) policy.baseMs = o.baseMs;
+      if (Number.isInteger(o.maxMs) && o.maxMs >= 1) policy.maxMs = o.maxMs;
+      if (Number.isInteger(o.maxAttempts) && o.maxAttempts >= 0) {
+        policy.maxAttempts = o.maxAttempts;
+      }
+    }
+    return policy;
+  }
+
+  /** The SSH keepalive probe interval in ms (0 = off). */
+  #sshKeepaliveMs() {
+    const s = this.#settings();
+    const secs = Number.isFinite(Number(s.sshKeepaliveSeconds))
+      ? Number(s.sshKeepaliveSeconds)
+      : DEFAULT_SSH_KEEPALIVE_SECONDS;
+    return secs > 0 ? Math.round(secs * 1000) : 0;
   }
 
   // ── Stats heartbeat (Feature 30) ──────────────────────────────────────────────

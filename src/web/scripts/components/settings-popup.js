@@ -38,6 +38,7 @@ const PANELS = [
   "appearance",
   "defaults",
   "behaviour",
+  "reliability",
   "security",
   "hostkeys",
   "data",
@@ -129,6 +130,7 @@ export class SettingsPopup {
       this.#appearancePanel(),
       this.#defaultsPanel(),
       this.#behaviourPanel(),
+      this.#reliabilityPanel(),
       this.#security.element,
       this.#hostKeys.element,
       this.#dataPanel(),
@@ -288,6 +290,71 @@ export class SettingsPopup {
     ]);
   }
 
+  // Notifications & reliability (Feature 130): desktop notification prefs (master
+  // + per-event toggles, flap cooldown), the SSH keepalive probe interval, and the
+  // reconnect backoff policy. All read live by the engine / notifier in main; the
+  // per-tunnel reconnect override lives in the tunnel editor's Advanced section.
+  #reliabilityPanel() {
+    return this.#panel("reliability", [
+      el("p", { class: "settings-help", text: t("settings.reliability.help") }),
+      this.#check(
+        "setting-notificationsEnabled",
+        "settings.reliability.notificationsEnabled",
+        "settings.reliability.notificationsEnabled.hint",
+      ),
+      this.#check("setting-notifyOnDrop", "settings.reliability.notifyOnDrop"),
+      this.#check(
+        "setting-notifyOnRecover",
+        "settings.reliability.notifyOnRecover",
+      ),
+      this.#check(
+        "setting-notifyOnGiveUp",
+        "settings.reliability.notifyOnGiveUp",
+      ),
+      field({
+        label: t("settings.reliability.cooldown"),
+        labelFor: "setting-notifyCooldownMs",
+        control: this.#num("setting-notifyCooldownMs", "0", "1000"),
+        hint: t("settings.reliability.cooldown.hint"),
+      }),
+      field({
+        label: t("settings.reliability.keepalive"),
+        labelFor: "setting-sshKeepaliveSeconds",
+        control: this.#num("setting-sshKeepaliveSeconds", "0", "1"),
+        hint: t("settings.reliability.keepalive.hint"),
+      }),
+      field({
+        label: t("settings.reliability.reconnectBase"),
+        labelFor: "setting-reconnectBaseMs",
+        control: this.#num("setting-reconnectBaseMs", "1", "100"),
+        hint: t("settings.reliability.reconnectBase.hint"),
+      }),
+      field({
+        label: t("settings.reliability.reconnectMax"),
+        labelFor: "setting-reconnectMaxMs",
+        control: this.#num("setting-reconnectMaxMs", "1", "1000"),
+      }),
+      field({
+        label: t("settings.reliability.reconnectAttempts"),
+        labelFor: "setting-reconnectMaxAttempts",
+        control: this.#num("setting-reconnectMaxAttempts", "0", "1"),
+        hint: t("settings.reliability.reconnectAttempts.hint"),
+      }),
+    ]);
+  }
+
+  // A number <input> that emits on change (shared by the reliability fields).
+  #num(id, min, step) {
+    return el("input", {
+      id,
+      class: "settings-input",
+      type: "number",
+      min,
+      step,
+      onChange: () => this.#emitChange(),
+    });
+  }
+
   // Import / export (Feature 120). Each action opens the ImportExportDialog, which
   // stacks over this popup as a native modal; the file pickers themselves open in
   // main. All the work happens there — this panel is just the three entry points.
@@ -392,6 +459,37 @@ export class SettingsPopup {
       this.#get("setting-armOnLaunch").checked = Boolean(s.armOnLaunch);
     if (s.confirmOnQuit !== undefined)
       this.#get("setting-confirmOnQuit").checked = Boolean(s.confirmOnQuit);
+    // Feature 130 — notifications & reliability.
+    if (s.notificationsEnabled !== undefined)
+      this.#get("setting-notificationsEnabled").checked = Boolean(
+        s.notificationsEnabled,
+      );
+    if (s.notifyOnDrop !== undefined)
+      this.#get("setting-notifyOnDrop").checked = Boolean(s.notifyOnDrop);
+    if (s.notifyOnRecover !== undefined)
+      this.#get("setting-notifyOnRecover").checked = Boolean(s.notifyOnRecover);
+    if (s.notifyOnGiveUp !== undefined)
+      this.#get("setting-notifyOnGiveUp").checked = Boolean(s.notifyOnGiveUp);
+    if (s.notifyCooldownMs !== undefined)
+      this.#get("setting-notifyCooldownMs").value = String(s.notifyCooldownMs);
+    if (s.sshKeepaliveSeconds !== undefined)
+      this.#get("setting-sshKeepaliveSeconds").value = String(
+        s.sshKeepaliveSeconds,
+      );
+    if (s.reconnectBaseMs !== undefined)
+      this.#get("setting-reconnectBaseMs").value = String(s.reconnectBaseMs);
+    if (s.reconnectMaxMs !== undefined)
+      this.#get("setting-reconnectMaxMs").value = String(s.reconnectMaxMs);
+    if (s.reconnectMaxAttempts !== undefined)
+      this.#get("setting-reconnectMaxAttempts").value = String(
+        s.reconnectMaxAttempts,
+      );
+  }
+
+  /** Read an integer control, clamped to `min`, falling back to `dflt`. */
+  #intVal(id, dflt, min) {
+    const n = parseInt(this.#get(id).value, 10);
+    return Number.isFinite(n) && n >= min ? n : dflt;
   }
 
   #readValues() {
@@ -409,6 +507,16 @@ export class SettingsPopup {
       startMinimized: this.#get("setting-startMinimized").checked,
       armOnLaunch: this.#get("setting-armOnLaunch").checked,
       confirmOnQuit: this.#get("setting-confirmOnQuit").checked,
+      // Feature 130 — notifications & reliability (defaults mirror settings-store).
+      notificationsEnabled: this.#get("setting-notificationsEnabled").checked,
+      notifyOnDrop: this.#get("setting-notifyOnDrop").checked,
+      notifyOnRecover: this.#get("setting-notifyOnRecover").checked,
+      notifyOnGiveUp: this.#get("setting-notifyOnGiveUp").checked,
+      notifyCooldownMs: this.#intVal("setting-notifyCooldownMs", 60000, 0),
+      sshKeepaliveSeconds: this.#intVal("setting-sshKeepaliveSeconds", 15, 0),
+      reconnectBaseMs: this.#intVal("setting-reconnectBaseMs", 1000, 1),
+      reconnectMaxMs: this.#intVal("setting-reconnectMaxMs", 30000, 1),
+      reconnectMaxAttempts: this.#intVal("setting-reconnectMaxAttempts", 6, 0),
     };
   }
 

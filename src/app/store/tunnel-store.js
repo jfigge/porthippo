@@ -79,6 +79,10 @@ const OPTIONAL_FIELDS = [
   "exitAddress",
   "entryAddress",
   "remoteBind",
+  // Feature 130: the per-tunnel reconnect-policy override — absent from the
+  // editor's payload means "inherit the global setting", so a shallow merge must
+  // drop the stored value rather than resurrect a cleared override.
+  "retry",
 ];
 
 /** Index an array of `{ id }` records into a Map for O(1) reference lookup. */

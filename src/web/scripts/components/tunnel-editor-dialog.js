@@ -62,9 +62,13 @@ import {
   reconstructExitField,
   reconstructTarget,
   blankForm,
+  buildRetryOverride,
 } from "./tunnel-editor-fields.js";
 
 const RESOLVE_DEBOUNCE_MS = 300;
+
+/** Render a stored number as an editor field string ("" for absent). */
+const numStr = (v) => (v === undefined || v === null ? "" : String(v));
 
 export class TunnelEditorDialog {
   #dialog;
@@ -192,6 +196,10 @@ export class TunnelEditorDialog {
       keepAlive: d.keepAlive === true,
       enabled: d.enabled !== false, // default arm-on-startup for a new tunnel
       autoReconnect: d.autoReconnect === true,
+      // Feature 130 — the per-tunnel reconnect override (blank = inherit global).
+      retryBaseMs: numStr(d.retry?.baseMs),
+      retryMaxMs: numStr(d.retry?.maxMs),
+      retryMaxAttempts: numStr(d.retry?.maxAttempts),
     };
     for (const [key, input] of Object.entries(this.#controls)) {
       if (input.type === "checkbox") input.checked = this.#form[key];
@@ -222,7 +230,10 @@ export class TunnelEditorDialog {
       this.#form.jumpHostIds.length ||
       this.#form.keepAlive ||
       this.#form.autoReconnect ||
-      this.#form.lingerMs !== "",
+      this.#form.lingerMs !== "" ||
+      this.#form.retryBaseMs !== "" ||
+      this.#form.retryMaxMs !== "" ||
+      this.#form.retryMaxAttempts !== "",
     );
   }
 
@@ -258,6 +269,11 @@ export class TunnelEditorDialog {
 
     const linger = toInt(this.#form.lingerMs);
     if (linger !== undefined) payload.lingerMs = linger;
+
+    // Feature 130 — the per-tunnel reconnect override (all types); omitted when
+    // blank so the tunnel inherits the global policy.
+    const retry = buildRetryOverride(this.#form);
+    if (retry) payload.retry = retry;
 
     if (type === "dynamic") {
       // Entry slot = the local SOCKS listener. No destination.
@@ -335,6 +351,39 @@ export class TunnelEditorDialog {
         this.#check("enabled", t("editor.enabled")),
         this.#check("keepAlive", t("editor.keepAlive")),
         this.#check("autoReconnect", t("editor.autoReconnect")),
+      ]),
+      // Feature 130 — the optional per-tunnel reconnect override. Blank inherits
+      // the global Settings → Notifications & reliability policy.
+      this.#section([
+        el("span", { class: "field-label", text: t("editor.retry") }),
+        el("p", { class: "field-hint", text: t("editor.retry.hint") }),
+        field({
+          label: t("editor.retry.baseMs"),
+          control: this.#input(
+            "retryBaseMs",
+            t("editor.retry.inherit"),
+            "number",
+          ),
+          errorKey: "retryBaseMs",
+        }),
+        field({
+          label: t("editor.retry.maxMs"),
+          control: this.#input(
+            "retryMaxMs",
+            t("editor.retry.inherit"),
+            "number",
+          ),
+          errorKey: "retryMaxMs",
+        }),
+        field({
+          label: t("editor.retry.maxAttempts"),
+          control: this.#input(
+            "retryMaxAttempts",
+            t("editor.retry.inherit"),
+            "number",
+          ),
+          errorKey: "retryMaxAttempts",
+        }),
       ]),
       this.#buildResolveBlock(),
     ]);
@@ -811,7 +860,10 @@ export class TunnelEditorDialog {
         key === "destination.port"
       ) {
         target = "exitAddress";
-      }
+      } else if (key === "retry" || key === "retry.baseMs") {
+        target = "retryBaseMs";
+      } else if (key === "retry.maxMs") target = "retryMaxMs";
+      else if (key === "retry.maxAttempts") target = "retryMaxAttempts";
       if (!out[target]) out[target] = message;
     }
     return out;
@@ -889,7 +941,10 @@ export class TunnelEditorDialog {
 
   #hasAdvancedError(errors) {
     return Object.keys(errors).some(
-      (k) => k === "lingerMs" || k.startsWith("jumpHostIds"),
+      (k) =>
+        k === "lingerMs" ||
+        k.startsWith("jumpHostIds") ||
+        k.startsWith("retry"),
     );
   }
 }

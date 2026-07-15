@@ -54,10 +54,10 @@ async function waitFor(pred, { timeout = 3000, interval = 10 } = {}) {
   }
 }
 
-function listen(server, host = "127.0.0.1") {
+function listen(server, host = "127.0.0.1", port = 0) {
   return new Promise((resolve, reject) => {
     server.once("error", reject);
-    server.listen(0, host, () => resolve(server.address().port));
+    server.listen(port, host, () => resolve(server.address().port));
   });
 }
 
@@ -118,7 +118,11 @@ async function startEcho({ transform } = {}) {
   return { port, close: () => closeServer(server) };
 }
 
-async function startSsh({ rejectForward = false, remoteForward = false } = {}) {
+async function startSsh({
+  rejectForward = false,
+  remoteForward = false,
+  port = 0,
+} = {}) {
   const clients = new Set();
   const forwards = new Set(); // net.Servers bound for remote (tcpip-forward) forwards
   let total = 0;
@@ -207,9 +211,9 @@ async function startSsh({ rejectForward = false, remoteForward = false } = {}) {
       });
     });
   });
-  const port = await listen(server);
+  const boundPort = await listen(server, "127.0.0.1", port);
   return {
-    port,
+    port: boundPort,
     total: () => total,
     active: () => clients.size,
     close: async () => {
@@ -300,6 +304,8 @@ function makeDef({
   jumps = [],
   keepAlive = false,
   enabled = true,
+  autoReconnect = false,
+  retry,
 }) {
   return {
     id: `t${idSeq++}`,
@@ -311,7 +317,8 @@ function makeDef({
     sshServer: sshHop(sshPort),
     jumps,
     keepAlive,
-    autoReconnect: false,
+    autoReconnect,
+    ...(retry ? { retry } : {}),
   };
 }
 
@@ -400,7 +407,7 @@ function gatedVerifier() {
   return { factory, release: () => release() };
 }
 
-function fakeStores(defs, { defaultLingerMs = 10000 } = {}) {
+function fakeStores(defs, { defaultLingerMs = 10000, settings = {} } = {}) {
   const byId = new Map(defs.map((d) => [d.id, d]));
   return {
     tunnelStore: () => ({
@@ -408,7 +415,9 @@ function fakeStores(defs, { defaultLingerMs = 10000 } = {}) {
       getDecrypted: (id) => byId.get(id) || null,
     }),
     knownHostsStore: () => ({ get: () => null, trust: () => {} }),
-    settingsStore: () => ({ get: () => ({ defaultLingerMs }) }),
+    // Feature 130 tests seed the reconnect policy / keepalive here (they layer
+    // over defaultLingerMs, so existing callers are unchanged).
+    settingsStore: () => ({ get: () => ({ defaultLingerMs, ...settings }) }),
   };
 }
 

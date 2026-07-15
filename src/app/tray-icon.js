@@ -81,6 +81,8 @@ const GLYPHS = {
   "8": [0b111, 0b101, 0b111, 0b101, 0b111],
   "9": [0b111, 0b101, 0b111, 0b001, 0b111],
   "+": [0b000, 0b010, 0b111, 0b010, 0b000],
+  // A bang for the error-health badge (Feature 130): a stroke over a gap + dot.
+  "!": [0b010, 0b010, 0b010, 0b000, 0b010],
 };
 
 // ── Shape containment (in canvas-pixel space) ──────────────────────────────────
@@ -244,8 +246,10 @@ function clearDisc(rgba, size, cx, cy, radius) {
 }
 
 /**
- * Composite a connected-count badge onto a premultiplied-RGBA buffer, in place.
- * Counts above nine render as "9+". A count below one leaves the buffer untouched.
+ * Composite a corner badge onto a premultiplied-RGBA buffer, in place. `value` is
+ * either a connected-tunnel COUNT (a number — counts above nine render as "9+", a
+ * count below one leaves the buffer untouched) or a short TEXT badge (a string,
+ * e.g. "!" for the error-health state, Feature 130 — capped at two glyphs).
  *
  * The badge is a filled black disc ringed by a transparent moat (so it stands off
  * the hippo) with the digits punched out as transparent holes — an alpha-only
@@ -253,12 +257,18 @@ function clearDisc(rgba, size, cx, cy, radius) {
  *
  * @param {Buffer|Uint8ClampedArray} rgba  premultiplied RGBA, length size*size*4
  * @param {number} size  square edge in pixels
- * @param {number} count connected-tunnel count
+ * @param {number|string} value  connected-tunnel count, or a short text badge
  * @returns {typeof rgba} the same buffer, for chaining
  */
-function drawBadge(rgba, size, count) {
-  if (!count || count < 1) return rgba;
-  const text = count > 9 ? "9+" : String(count);
+function drawBadge(rgba, size, value) {
+  let text;
+  if (typeof value === "string") {
+    if (!value) return rgba;
+    text = value.slice(0, 2);
+  } else {
+    if (!value || value < 1) return rgba;
+    text = value > 9 ? "9+" : String(value);
+  }
 
   // Disc tucked into the bottom-right corner, held off the hippo by a moat.
   const r = size * 0.32;
@@ -305,16 +315,28 @@ function drawBadge(rgba, size, count) {
  * retina menu bars. When `template` is set (macOS), the image is flagged as a
  * template so the menu bar tints it for the active light/dark appearance.
  *
+ * When `health` is "error" (Feature 130) the badge shows a bang instead of the
+ * count, so a gave-up / errored tunnel is visible at a glance in the menu bar;
+ * "reconnecting" and "healthy" keep the connected-count badge (the tooltip / menu
+ * carry the finer health text).
+ *
  * @param {object} deps
  * @param {typeof Electron.nativeImage} deps.nativeImage
  * @param {number} [deps.count=0]  connected-tunnel count to badge
  * @param {boolean} [deps.template=false]  flag the image as a macOS template
+ * @param {"healthy"|"reconnecting"|"error"} [deps.health="healthy"]  rollup state
  * @returns {Electron.NativeImage}
  */
-function buildTrayImage({ nativeImage, count = 0, template = false } = {}) {
+function buildTrayImage({
+  nativeImage,
+  count = 0,
+  template = false,
+  health = "healthy",
+} = {}) {
   const buf = Buffer.alloc(SIZE * SIZE * 4); // transparent, pure-black pixels
   drawHippo(buf, SIZE);
-  if (count > 0) drawBadge(buf, SIZE, count);
+  if (health === "error") drawBadge(buf, SIZE, "!");
+  else if (count > 0) drawBadge(buf, SIZE, count);
 
   // The buffer is pure-black premultiplied RGBA; with R=B=0 it is byte-identical
   // to the BGRA order createFromBitmap expects, so no channel swap is needed.

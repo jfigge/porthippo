@@ -49,6 +49,26 @@ function avgRate(c) {
   return Math.round(num(c.snap?.totalBytes) / elapsedS);
 }
 
+/**
+ * Is the tunnel mid-reconnect? The engine rides an `attempt` (+ `nextRetryAt`
+ * countdown) on the stats snapshot while a backoff retry is scheduled (Feature
+ * 130); either being present means a reconnect loop is live.
+ */
+function isReconnecting(c) {
+  return Boolean(c.snap && (c.snap.nextRetryAt || c.snap.attempt));
+}
+
+/** The Reconnect card value: "attempt N · retry in Ms" while retrying, else "—". */
+function reconnectValue(c) {
+  if (!isReconnecting(c)) return t("card.none");
+  const attempt = c.snap.attempt || 1;
+  if (c.snap.nextRetryAt) {
+    const seconds = Math.max(0, Math.ceil((c.snap.nextRetryAt - c.now) / 1000));
+    return t("card.reconnect.retrying", { attempt, seconds });
+  }
+  return t("card.reconnect.attempt", { attempt });
+}
+
 // A meaningful sort order for the (non-numeric) State column: quietest → busiest.
 const STATE_RANK = {
   disarmed: 0,
@@ -188,6 +208,16 @@ export const CARDS = [
     toneFn: (c) => ((c.snap?.errorCount ?? 0) > 0 ? "error" : null),
     value: (c) => String(c.snap?.errorCount ?? 0),
     sortValue: (c) => num(c.snap?.errorCount),
+  },
+  {
+    // Feature 130 — the live reconnect badge: attempt count + a ticking countdown
+    // to the next retry while a dropped tunnel is backing off; "—" otherwise.
+    key: "reconnect",
+    labelKey: "card.reconnect",
+    category: "status",
+    toneFn: (c) => (isReconnecting(c) ? "warn" : null),
+    value: (c) => reconnectValue(c),
+    sortValue: (c) => (isReconnecting(c) ? 1 : 0),
   },
   {
     key: "idle",

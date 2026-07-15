@@ -67,6 +67,18 @@ const DEF_FIXTURES = [
   def({ keepAlive: "yes" }),
   def({ enabled: 1 }),
   def({ autoReconnect: "no" }),
+  // Feature 130 — per-tunnel retry override bounds.
+  def({ retry: { baseMs: 100, maxMs: 5000, maxAttempts: 5 } }),
+  def({ retry: {} }),
+  def({ retry: { maxAttempts: 0 } }),
+  def({ retry: null }),
+  def({ retry: [] }),
+  def({ retry: "nope" }),
+  def({ retry: { baseMs: 0 } }),
+  def({ retry: { baseMs: 1.5 } }),
+  def({ retry: { maxMs: -1 } }),
+  def({ retry: { maxAttempts: -1 } }),
+  def({ retry: { baseMs: 100, maxMs: "x", maxAttempts: 2 } }),
 ];
 
 const CRED_FIXTURES = [

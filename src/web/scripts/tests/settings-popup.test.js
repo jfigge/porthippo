@@ -138,6 +138,36 @@ test("changing a control persists the full settings and broadcasts", async () =>
   assert.equal(events[0].theme, "light");
 });
 
+test("the reliability panel round-trips notification + reconnect settings (Feature 130)", async () => {
+  PopupManager.close();
+  const { porthippo, calls } = stubBridge({
+    notificationsEnabled: true,
+    notifyOnDrop: true,
+    notifyCooldownMs: 60000,
+    sshKeepaliveSeconds: 15,
+    reconnectBaseMs: 1000,
+    reconnectMaxMs: 30000,
+    reconnectMaxAttempts: 6,
+  });
+  const popup = new SettingsPopup({ porthippo });
+  await popup.open();
+  const el = document.querySelector(".popup-settings");
+
+  // Loaded values populate the controls.
+  assert.equal(el.querySelector("#setting-notifyOnDrop").checked, true);
+  assert.equal(el.querySelector("#setting-sshKeepaliveSeconds").value, "15");
+  assert.equal(el.querySelector("#setting-reconnectMaxAttempts").value, "6");
+
+  // Editing a reliability field persists the whole (typed) settings object.
+  change(el.querySelector("#setting-notifyOnDrop"), false);
+  change(el.querySelector("#setting-sshKeepaliveSeconds"), "30");
+  const last = calls.set[calls.set.length - 1];
+  assert.equal(last.notifyOnDrop, false);
+  assert.equal(last.sshKeepaliveSeconds, 30);
+  assert.equal(last.reconnectMaxAttempts, 6); // untouched fields ride along
+  assert.equal(typeof last.reconnectBaseMs, "number");
+});
+
 test("switching tabs shows the matching panel", async () => {
   PopupManager.close(); // start from an idle host (popups now queue, not replace)
   const { porthippo } = stubBridge();

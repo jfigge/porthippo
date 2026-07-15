@@ -75,6 +75,30 @@ function createTray({ Tray, Menu, image, renderImage, t, getStatus, actions }) {
     };
   }
 
+  // The aggregate-health summary line (Feature 130), shown only when the fleet
+  // isn't fully healthy so the tray stays quiet when everything is up.
+  function healthItems(status) {
+    if (status.health === "error") {
+      return [
+        {
+          label: t("tray.health.error", { n: status.errored || 0 }),
+          enabled: false,
+        },
+        { type: "separator" },
+      ];
+    }
+    if (status.health === "reconnecting") {
+      return [
+        {
+          label: t("tray.health.reconnecting", { n: status.reconnecting || 0 }),
+          enabled: false,
+        },
+        { type: "separator" },
+      ];
+    }
+    return [];
+  }
+
   function build() {
     const status = getStatus?.() || {
       tunnels: [],
@@ -84,7 +108,7 @@ function createTray({ Tray, Menu, image, renderImage, t, getStatus, actions }) {
     };
     const { tunnels, total, active } = status;
 
-    // Refresh the icon so its connected-count badge reflects the latest status.
+    // Refresh the icon so its badge reflects the latest count / health rollup.
     if (renderImage) {
       try {
         tray.setImage(renderImage(status));
@@ -101,6 +125,7 @@ function createTray({ Tray, Menu, image, renderImage, t, getStatus, actions }) {
     const menu = Menu.buildFromTemplate([
       { label: t("tray.show"), click: () => a.showWindow?.() },
       { type: "separator" },
+      ...healthItems(status),
       { label: t("tray.tunnels"), enabled: false },
       ...tunnelSection,
       { type: "separator" },

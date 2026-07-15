@@ -2067,6 +2067,10 @@
 .card-value--error {
   color: var(--color-danger);
 }
+/* Reconnect card while a backoff retry is scheduled (Feature 130). */
+.card-value--warn {
+  color: var(--color-warning);
+}
 
 /* State card value coloured by the live state. */
 .card-value--state-connected {

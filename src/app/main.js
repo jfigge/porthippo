@@ -64,6 +64,7 @@ const { buildReport } = require("./diagnostics");
 const { installAppMenu } = require("./menu");
 const { createTray, LIVE_STATES } = require("./tray");
 const { buildTrayImage } = require("./tray-icon");
+const { createNotifications } = require("./notifications");
 const { createLoginItem } = require("./login-item");
 const {
   DEFAULT_BOUNDS,
@@ -148,12 +149,18 @@ function broadcastToRenderer(channel, payload) {
   }
 }
 
-// The engine's broadcaster: fan out to the renderer AND refresh the tray on a
-// state change (byte-rate `porthippo:stats` heartbeats don't affect the tray's
-// count/tooltip, so those are skipped to avoid rebuilding the menu every second).
+// The engine's broadcaster: fan out to the renderer AND refresh the tray + raise
+// desktop notifications on the relevant one-way events (byte-rate
+// `porthippo:stats` heartbeats don't affect the tray's count/tooltip, so those
+// are skipped to avoid rebuilding the menu every second).
 function broadcast(channel, payload) {
   broadcastToRenderer(channel, payload);
-  if (channel === "porthippo:tunnel-state") _tray?.update();
+  if (channel === "porthippo:tunnel-state") {
+    _tray?.update(); // count/tooltip + health rollup
+    _notifications?.onTunnelState(payload); // drop / recover / gave-up notices
+  } else if (channel === "porthippo:hostkey-changed") {
+    _notifications?.onHostKeyChanged(payload); // security alert (name only)
+  }
 }
 
 /** Send a one-way command to the (single) renderer window. */
@@ -274,6 +281,7 @@ function copyDiagnostics() {
 
 // ─── Tray + status ─────────────────────────────────────────────────────────────
 let _tray = null;
+let _notifications = null; // desktop failure/health notifications (Feature 130)
 
 /** A snapshot of every definition's name + engine state for the tray. */
 function getStatus() {
@@ -283,8 +291,14 @@ function getStatus() {
     [],
   );
   const states = new Map();
+  // Ids the engine reports as mid-reconnect (an `attempt` / `nextRetryAt` rides
+  // the status snapshot while a backoff retry is scheduled — Feature 130).
+  const reconnecting = new Set();
   try {
-    for (const s of getEngine()?.status() || []) states.set(s.id, s.state);
+    for (const s of getEngine()?.status() || []) {
+      states.set(s.id, s.state);
+      if (s.attempt || s.nextRetryAt) reconnecting.add(s.id);
+    }
   } catch (err) {
     console.error("[main] status snapshot failed:", err && err.message);
   }
@@ -295,7 +309,38 @@ function getStatus() {
   }));
   const active = tunnels.filter((x) => LIVE_STATES.has(x.state)).length;
   const connected = tunnels.filter((x) => x.state === "connected").length;
-  return { tunnels, total: tunnels.length, active, connected };
+  // Aggregate health (Feature 130): error if any tunnel gave up / errored,
+  // reconnecting if any is mid-retry, else healthy. Computed once here and fed to
+  // the tray glyph + menu so there's no second source of truth.
+  const reconnectingCount = tunnels.filter((x) =>
+    reconnecting.has(x.id),
+  ).length;
+  const errorCount = tunnels.filter((x) => x.state === "error").length;
+  const health =
+    errorCount > 0
+      ? "error"
+      : reconnectingCount > 0
+        ? "reconnecting"
+        : "healthy";
+  return {
+    tunnels,
+    total: tunnels.length,
+    active,
+    connected,
+    health,
+    reconnecting: reconnectingCount,
+    errored: errorCount,
+  };
+}
+
+/** Resolve a tunnel id to its display name (for a name-only notification). */
+function tunnelName(id) {
+  const def = safeCall(
+    "notify:name",
+    () => getStores().tunnelStore().get(id),
+    null,
+  );
+  return (def && def.name) || undefined;
 }
 
 const armAll = () =>
@@ -355,6 +400,7 @@ function createTrayPresence() {
       nativeImage,
       template,
       count: (status && status.connected) || 0,
+      health: (status && status.health) || "healthy",
     });
   _tray = createTray({
     Tray,
@@ -811,6 +857,17 @@ function bootstrap() {
     // fan out to the renderer + tray).
     refreshCatalog();
     _engine = new TunnelEngine({ getStores, broadcast });
+
+    // Desktop failure/health notifications (Feature 130): fed by the broadcast tee
+    // above. Reads notification prefs live, resolves the tunnel NAME only, and a
+    // click focuses the window (the single-instance focus path).
+    _notifications = createNotifications({
+      Notification,
+      t,
+      getSettings: () => getStores().settingsStore().get(),
+      resolveName: tunnelName,
+      focusWindow: showWindow,
+    });
 
     registerIpc();
 

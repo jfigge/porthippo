@@ -107,6 +107,11 @@ class Tunnel {
   #reconnectTimer = null;
   #reconnectAttempts = 0;
 
+  // Feature 130 — reconnect visibility (surfaced, never algorithm-changing):
+  #reconnecting = false; // in a backoff reconnect loop (drives `recovered` detection)
+  #nextRetryAt = null; // epoch ms of the scheduled reconnect (Monitoring countdown)
+  #transition = null; // one-shot lifecycle event carried on the NEXT emit only
+
   #pendingDef = null; // a connection-affecting edit awaiting an idle moment
   #disposed = false;
 
@@ -121,6 +126,10 @@ class Tunnel {
    * @param {number} [deps.baseBackoffMs]  reconnect backoff base (tests shrink it)
    * @param {number} [deps.maxBackoffMs]  reconnect backoff ceiling (tests)
    * @param {number} [deps.maxReconnectAttempts]  attempts before give-up (tests)
+   * @param {(def: object) => {baseMs:number,maxMs:number,maxAttempts:number}} [deps.getRetryPolicy]
+   *        effective reconnect policy for a def (settings + per-tunnel override, F130)
+   * @param {() => number} [deps.getSshKeepaliveMs]  ssh2 keepalive interval in ms
+   *        (0 = off) threaded into every hop (F130)
    */
   constructor(def, deps) {
     this.#def = def;
@@ -168,13 +177,26 @@ class Tunnel {
 
   /** A serializable snapshot for IPC status + `porthippo:tunnel-state` broadcasts. */
   status() {
-    return {
+    const snap = {
       id: this.#def.id,
       state: this.state,
       error: this.#error || undefined,
       pendingChanges: Boolean(this.#pendingDef),
       connections: this.#connections.size,
     };
+    // Feature 130: the one-shot lifecycle transition (dropped / reconnecting /
+    // recovered / gave-up) rides the broadcast that announces it, and the live
+    // reconnect progress (attempt + countdown) rides every emit while retrying.
+    if (this.#transition) snap.transition = this.#transition;
+    this.#addReconnectFields(snap);
+    return snap;
+  }
+
+  /** Fold the live reconnect progress (attempt + `nextRetryAt`) into a snapshot. */
+  #addReconnectFields(snap) {
+    if (!this.#reconnecting) return;
+    snap.attempt = this.#reconnectAttempts + 1; // the attempt currently in flight
+    if (this.#nextRetryAt) snap.nextRetryAt = this.#nextRetryAt;
   }
 
   /**
@@ -183,12 +205,16 @@ class Tunnel {
    * Plain serializable data — no live handles cross IPC.
    */
   statsSnapshot() {
-    return {
+    const snap = {
       id: this.#def.id,
       state: this.state,
       error: this.#error || null,
       ...this.#stats.snapshot(),
     };
+    // Carry the reconnect progress on the heartbeat too so Monitoring's countdown
+    // keeps ticking between the discrete state broadcasts (Feature 130).
+    this.#addReconnectFields(snap);
+    return snap;
   }
 
   /** The bounded error/warning event log (oldest first) the "Errors" card opens. */
@@ -547,6 +573,7 @@ class Tunnel {
       tunnelId: this.#def.id,
       hostVerifierFactory: this.#deps.hostVerifierFactory,
       readFileSync: this.#deps.readFileSync,
+      keepaliveInterval: this.#deps.getSshKeepaliveMs?.() ?? 0,
     })
       .then((sshConn) => {
         this.#connectPromise = null;
@@ -564,12 +591,17 @@ class Tunnel {
           }
           return sshConn;
         }
+        // A reconnect loop that finally connected is a *recovery* — flag it so the
+        // state broadcast carries the `recovered` transition (drives the notice).
+        const wasReconnecting = this.#reconnecting;
         this.#sshConnection = sshConn;
         this.#reconnectAttempts = 0;
+        this.#reconnecting = false;
+        this.#nextRetryAt = null;
         this.#error = null;
         this.#stats.onConnected(); // stamp openedAt for this SSH session
         this.#wireDrop(sshConn);
-        this.#setState("connected");
+        this.#setState("connected", wasReconnecting ? "recovered" : undefined);
         if (this.#isRemote()) {
           // Bind the remote port + wire inbound; a bind failure drops the session
           // and re-enters the reconnect policy.
@@ -608,6 +640,10 @@ class Tunnel {
     this.#failAllConnections();
     this.#cancelLinger();
 
+    // Announce the unexpected drop (Feature 130) before deciding the next move,
+    // so the notification / health layers see it whether or not we reconnect.
+    this.#emitState("dropped");
+
     if (this.#shouldStayHot()) {
       this.#attemptReconnect();
     } else {
@@ -640,12 +676,36 @@ class Tunnel {
     return this.#holdsOpen() || Boolean(this.#def.autoReconnect);
   }
 
+  /**
+   * The effective reconnect policy: the test-injected shrink values win (harness),
+   * then the engine-supplied settings + per-tunnel override (Feature 130), then the
+   * module defaults. Read live on each schedule so a settings edit takes effect on
+   * the next attempt without re-arming.
+   */
+  #retryPolicy() {
+    const resolved = this.#deps.getRetryPolicy?.(this.#def) || {};
+    return {
+      baseMs: this.#deps.baseBackoffMs ?? resolved.baseMs ?? BASE_BACKOFF_MS,
+      maxMs: this.#deps.maxBackoffMs ?? resolved.maxMs ?? MAX_BACKOFF_MS,
+      maxAttempts:
+        this.#deps.maxReconnectAttempts ??
+        resolved.maxAttempts ??
+        MAX_RECONNECT_ATTEMPTS,
+    };
+  }
+
+  #nowMs() {
+    return (this.#deps.now || Date.now)();
+  }
+
   #attemptReconnect() {
     if (this.#disposed || this.#reconnectTimer) return;
-    this.#setState("connecting");
-    const base = this.#deps.baseBackoffMs ?? BASE_BACKOFF_MS;
-    const max = this.#deps.maxBackoffMs ?? MAX_BACKOFF_MS;
-    const delay = Math.min(max, base * 2 ** this.#reconnectAttempts);
+    this.#reconnecting = true;
+    const { baseMs, maxMs } = this.#retryPolicy();
+    const delay = Math.min(maxMs, baseMs * 2 ** this.#reconnectAttempts);
+    this.#nextRetryAt = this.#nowMs() + delay;
+    // Surface the scheduled retry (attempt + countdown ride the snapshot).
+    this.#setState("connecting", "reconnecting");
     this.#reconnectTimer = setTimeout(() => {
       this.#reconnectTimer = null;
       // Armed (not listener) is the gate: a `remote` tunnel has no listener but is
@@ -657,8 +717,7 @@ class Tunnel {
 
   /** A backoff reconnect attempt failed: retry, hold, or (finally) give up. */
   #onReconnectFailed() {
-    const maxAttempts =
-      this.#deps.maxReconnectAttempts ?? MAX_RECONNECT_ATTEMPTS;
+    const { maxAttempts } = this.#retryPolicy();
     this.#reconnectAttempts += 1;
     if (this.#reconnectAttempts < maxAttempts) {
       this.#attemptReconnect();
@@ -673,8 +732,12 @@ class Tunnel {
       this.#attemptReconnect();
       return;
     }
+    // Reconnection is exhausted: announce it (Feature 130) and latch to error;
+    // the next local access re-establishes the chain.
     this.#reconnectAttempts = 0;
-    this.#setState("error"); // next local access re-establishes the chain
+    this.#reconnecting = false;
+    this.#nextRetryAt = null;
+    this.#setState("error", "gave-up");
   }
 
   /** A connect attempt failed (lazy connect, eager keepAlive/remote, or reconnect). */
@@ -722,6 +785,8 @@ class Tunnel {
       this.#reconnectTimer = null;
     }
     this.#reconnectAttempts = 0;
+    this.#reconnecting = false;
+    this.#nextRetryAt = null;
   }
 
   // ── Teardown helpers ──────────────────────────────────────────────────────────
@@ -780,13 +845,20 @@ class Tunnel {
 
   // ── State emission ────────────────────────────────────────────────────────────
 
-  #setState(state) {
+  #setState(state, transition) {
     this.#state = state;
-    this.#emitState();
+    this.#emitState(transition);
   }
 
-  #emitState() {
+  /**
+   * Emit the current status. `transition` (Feature 130) is a one-shot lifecycle
+   * event (dropped / reconnecting / recovered / gave-up) carried ONLY on this
+   * broadcast, so a later plain status() poll never re-reports a stale transition.
+   */
+  #emitState(transition) {
+    this.#transition = transition || null;
     this.#deps.onStateChange?.(this.status());
+    this.#transition = null;
   }
 }
 

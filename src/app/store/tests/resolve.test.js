@@ -81,6 +81,17 @@ test("a blank sshHost implies the destination box + loopback forward", () => {
   assert.equal(out.bindHost, "127.0.0.1");
 });
 
+test("the per-tunnel retry override passes through to the engine shape (Feature 130)", () => {
+  const retry = { baseMs: 200, maxMs: 5000, maxAttempts: 4 };
+  const out = resolveDefinition(baseTunnel({ retry }), {
+    credentialsById: CREDS,
+  });
+  assert.deepEqual(out.retry, retry);
+  // Absent when the tunnel has no override, so the engine falls back to settings.
+  const none = resolveDefinition(baseTunnel(), { credentialsById: CREDS });
+  assert.equal(none.retry, undefined);
+});
+
 test("a non-blank sshHost is a bastion forwarding to the dest host", () => {
   const out = resolveDefinition(
     baseTunnel({ sshHost: "bastion", sshPort: 2222 }),

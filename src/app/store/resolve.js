@@ -122,6 +122,9 @@ function resolveDefinition(tunnel, { credentialsById, jumpHostsById } = {}) {
     keepAlive: t.keepAlive,
     autoReconnect: t.autoReconnect,
     lingerMs: t.lingerMs,
+    // Feature 130: the optional per-tunnel reconnect-policy override, read live
+    // by the engine (like lingerMs / autoReconnect). Undefined ⇒ inherit settings.
+    retry: t.retry,
     bindHost: t.bindHost || DEFAULT_BIND_HOST,
     jumps: jumpHops,
   };

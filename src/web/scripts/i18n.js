@@ -144,6 +144,14 @@ export const EN = {
   "editor.keepAlive": "Keep SSH connected while armed",
   "editor.enabled": "Arm on startup",
   "editor.autoReconnect": "Reconnect automatically if the connection drops",
+  // Per-tunnel reconnect-policy override (Feature 130); blank inherits the global.
+  "editor.retry": "Reconnect policy (override)",
+  "editor.retry.hint":
+    "Override the global reconnect policy for this tunnel. Leave a field blank to inherit the Settings value.",
+  "editor.retry.inherit": "inherit",
+  "editor.retry.baseMs": "Base backoff (ms)",
+  "editor.retry.maxMs": "Max backoff (ms)",
+  "editor.retry.maxAttempts": "Max attempts",
   "editor.duplicateSuffix": " (copy)",
   "editor.saveError": "Couldn’t save: {message}",
 
@@ -272,6 +280,7 @@ export const EN = {
   "detail.disarm": "Disarm tunnel",
   "detail.pause": "Pause traffic",
   "detail.resume": "Resume traffic",
+  "detail.retryNow": "Retry now", // re-arm a tunnel that gave up (Feature 130)
   "detail.reorderHint": "Drag to rearrange",
   "detail.route.local": "Local",
   "detail.route.target": "Target",
@@ -305,6 +314,10 @@ export const EN = {
   "card.lastDisconnect": "Last disconnect",
   "card.errors": "Errors",
   "card.state": "State",
+  // Reconnect card (Feature 130): live attempt count + countdown while retrying.
+  "card.reconnect": "Reconnect",
+  "card.reconnect.retrying": "attempt {attempt} · retry in {seconds}s",
+  "card.reconnect.attempt": "attempt {attempt}…",
   "card.none": "—",
 
   // ── Tunnel error card → full-error dialog ───────────────────────────────
@@ -370,6 +383,7 @@ export const EN = {
   "settings.nav.appearance": "Appearance",
   "settings.nav.defaults": "Defaults",
   "settings.nav.behaviour": "Behaviour",
+  "settings.nav.reliability": "Notifications",
   "settings.nav.security": "Security",
   "settings.nav.hostkeys": "Host Keys",
   "settings.nav.data": "Import/Export",
@@ -404,6 +418,30 @@ export const EN = {
   "settings.behaviour.confirmOnQuit": "Confirm before quitting",
   "settings.behaviour.confirmOnQuit.hint":
     "Quitting disarms every tunnel and closes its SSH connections.",
+
+  // ── Settings → Notifications & reliability (Feature 130) ─────────────────
+  "settings.reliability.help":
+    "Get told when a tunnel drops, recovers or gives up — and tune how Port Hippo detects a dead connection and retries it.",
+  "settings.reliability.notificationsEnabled": "Show desktop notifications",
+  "settings.reliability.notificationsEnabled.hint":
+    "The master switch. Your operating system’s Do Not Disturb is always respected.",
+  "settings.reliability.notifyOnDrop": "Notify when a tunnel drops",
+  "settings.reliability.notifyOnRecover": "Notify when a tunnel recovers",
+  "settings.reliability.notifyOnGiveUp": "Notify when a tunnel gives up",
+  "settings.reliability.cooldown": "Notification cooldown (ms)",
+  "settings.reliability.cooldown.hint":
+    "The minimum gap between repeated drop notices for one tunnel, so a flapping connection can’t spam you.",
+  "settings.reliability.keepalive": "SSH keepalive interval (seconds)",
+  "settings.reliability.keepalive.hint":
+    "How often to probe an idle SSH connection so a dead peer is detected in seconds instead of minutes. 0 turns probing off.",
+  "settings.reliability.reconnectBase": "Reconnect base backoff (ms)",
+  "settings.reliability.reconnectBase.hint":
+    "The first reconnect delay after a drop; it doubles each attempt up to the maximum.",
+  "settings.reliability.reconnectMax": "Reconnect max backoff (ms)",
+  "settings.reliability.reconnectAttempts":
+    "Reconnect attempts before giving up",
+  "settings.reliability.reconnectAttempts.hint":
+    "How many times to retry before a tunnel gives up (tunnels set to keep SSH connected always keep trying).",
 
   // ── Settings → Security (selectable secret storage, Feature 90) ─────────
   "settings.security.heading": "Secret storage",
@@ -575,6 +613,9 @@ export const EN = {
   "tray.quit": "Quit Port Hippo",
   "tray.tooltip": "Port Hippo — {active} of {total} active",
   "tray.tooltip.none": "Port Hippo — no tunnels",
+  // Aggregate-health summary line, shown only when not fully healthy (Feature 130).
+  "tray.health.reconnecting": "Reconnecting {n} tunnel(s)…",
+  "tray.health.error": "{n} tunnel(s) need attention",
 
   // ── Shell notifications / dialogs (MAIN process) ────────────────────────
   "shell.hide.title": "Port Hippo is still running",
@@ -585,6 +626,19 @@ export const EN = {
     "Quitting disarms every tunnel and closes its SSH connections.",
   "shell.quit.confirm": "Quit",
   "shell.diagnostics.copied": "Diagnostics copied to the clipboard.",
+
+  // ── Health notifications (MAIN process, Feature 130) ────────────────────
+  // Payloads carry the tunnel NAME only — never a host, user, or secret.
+  "notify.dropped.title": "Tunnel dropped",
+  "notify.dropped.body": "“{name}” lost its SSH connection. Reconnecting…",
+  "notify.recovered.title": "Tunnel recovered",
+  "notify.recovered.body": "“{name}” reconnected.",
+  "notify.gaveUp.title": "Tunnel gave up",
+  "notify.gaveUp.body":
+    "“{name}” couldn’t reconnect. Open Port Hippo to retry.",
+  "notify.hostkeyChanged.title": "⚠ SSH host key changed",
+  "notify.hostkeyChanged.body":
+    "“{name}” was refused because its host key changed. Review it in Port Hippo.",
 };
 
 // ── Module state ─────────────────────────────────────────────────────────────

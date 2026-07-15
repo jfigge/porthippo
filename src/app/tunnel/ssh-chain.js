@@ -124,8 +124,61 @@ function forwardIn(client, bindHost, bindPort) {
   });
 }
 
+// ssh2's built-in keepalive fails a black-holed connection after this many
+// unanswered probes (Feature 130). With the default 15s interval that surfaces a
+// dead peer in ~tens of seconds instead of hanging on the OS TCP timeout.
+const DEFAULT_KEEPALIVE_COUNT_MAX = 3;
+
+/**
+ * Build the option bag handed to `ssh2.Client#connect` for one hop. Pure (no
+ * sockets) so the keepalive / auth wiring is unit-testable without a live server.
+ * A `keepaliveInterval` of 0 (or absent) leaves ssh2's probing off.
+ *
+ * @param {object} opts
+ * @param {object} opts.hop  decrypted hop `{ host, port, user }`
+ * @param {Array<object>} opts.authHandler  ssh2 authHandler array
+ * @param {*} [opts.sock]  forwarded stream from the prior hop (undefined = first)
+ * @param {Function} opts.hostVerifier
+ * @param {number} [opts.keepaliveInterval]  ms between SSH keepalive probes (0 = off)
+ * @param {number} [opts.keepaliveCountMax]  unanswered probes before disconnect
+ * @returns {object}
+ */
+function clientConnectOptions({
+  hop,
+  authHandler,
+  sock,
+  hostVerifier,
+  keepaliveInterval = 0,
+  keepaliveCountMax = DEFAULT_KEEPALIVE_COUNT_MAX,
+}) {
+  const options = {
+    host: hop.host,
+    port: hop.port,
+    username: hop.user,
+    sock, // undefined for the first hop → a direct TCP connection
+    authHandler,
+    hostVerifier,
+    // We never fall back to keyboard-interactive prompts in a headless engine.
+    tryKeyboard: false,
+  };
+  // Only enable probing when an interval is configured; ssh2 treats 0 as "off".
+  if (Number.isFinite(keepaliveInterval) && keepaliveInterval > 0) {
+    options.keepaliveInterval = keepaliveInterval;
+    options.keepaliveCountMax = keepaliveCountMax;
+  }
+  return options;
+}
+
 /** Connect a single hop, optionally over a forwarded `sock` from the prior hop. */
-function connectHop({ hop, hopLabel, sock, hostVerifier, readFileSync }) {
+function connectHop({
+  hop,
+  hopLabel,
+  sock,
+  hostVerifier,
+  readFileSync,
+  keepaliveInterval,
+  keepaliveCountMax,
+}) {
   return new Promise((resolve, reject) => {
     const authHandler = buildAuthHandler(hop, readFileSync);
     if (authHandler.length === 0) {
@@ -149,16 +202,16 @@ function connectHop({ hop, hopLabel, sock, hostVerifier, readFileSync }) {
     });
 
     try {
-      client.connect({
-        host: hop.host,
-        port: hop.port,
-        username: hop.user,
-        sock, // undefined for the first hop → a direct TCP connection
-        authHandler,
-        hostVerifier,
-        // We never fall back to keyboard-interactive prompts in a headless engine.
-        tryKeyboard: false,
-      });
+      client.connect(
+        clientConnectOptions({
+          hop,
+          authHandler,
+          sock,
+          hostVerifier,
+          keepaliveInterval,
+          keepaliveCountMax,
+        }),
+      );
     } catch (err) {
       if (!settled) {
         settled = true;
@@ -177,6 +230,8 @@ function connectHop({ hop, hopLabel, sock, hostVerifier, readFileSync }) {
  * @param {(ctx: {host: string, port: number, hopLabel: string, tunnelId: string}) =>
  *          ((key: Buffer, verify: (ok: boolean) => void) => void)} opts.hostVerifierFactory
  * @param {typeof fs.readFileSync} [opts.readFileSync]  injectable for tests
+ * @param {number} [opts.keepaliveInterval]  ms between ssh2 keepalive probes on
+ *        every hop (0 = off, Feature 130); detects a black-holed peer in seconds.
  * @returns {Promise<{ client: import('ssh2').Client, dispose: () => void }>}
  */
 async function connectChain({
@@ -184,6 +239,7 @@ async function connectChain({
   tunnelId,
   hostVerifierFactory,
   readFileSync,
+  keepaliveInterval = 0,
 }) {
   if (!Array.isArray(hops) || hops.length === 0) {
     throw new Error("connectChain requires at least one hop");
@@ -218,6 +274,7 @@ async function connectChain({
         sock,
         hostVerifier,
         readFileSync,
+        keepaliveInterval,
       });
       clients.push(client);
 
@@ -436,5 +493,6 @@ module.exports = {
   forwardOut,
   forwardIn,
   buildAuthHandler,
+  clientConnectOptions,
   resolveAgent,
 };

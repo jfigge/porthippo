@@ -161,6 +161,36 @@ test("buildTrayImage composites the badge when tunnels are connected", () => {
   assert.notDeepEqual(img.buf, plain);
 });
 
+test("buildTrayImage shows the error-health bang badge even with nothing connected (Feature 130)", () => {
+  const nativeImage = fakeNativeImage();
+  const errored = buildTrayImage({ nativeImage, count: 0, health: "error" });
+  const plain = drawHippo(Buffer.alloc(SIZE * SIZE * 4), SIZE);
+  // A zero-count healthy glyph is badge-free; the error health forces a bang badge.
+  assert.notDeepEqual(
+    errored.buf,
+    plain,
+    "error health draws a badge at count 0",
+  );
+
+  // "reconnecting"/"healthy" keep the plain count behaviour (badge-free at 0).
+  const reconnecting = buildTrayImage({
+    nativeImage: fakeNativeImage(),
+    count: 0,
+    health: "reconnecting",
+  });
+  assert.deepEqual(reconnecting.buf, plain);
+});
+
+test("drawBadge accepts a short text badge (Feature 130 health bang)", () => {
+  const bang = drawBadge(
+    drawHippo(Buffer.alloc(SIZE * SIZE * 4), SIZE),
+    SIZE,
+    "!",
+  );
+  const plain = drawHippo(Buffer.alloc(SIZE * SIZE * 4), SIZE);
+  assert.notDeepEqual(bang, plain, "a text badge composites onto the glyph");
+});
+
 test("buildTrayImage flags a template image only when asked", () => {
   const withTemplate = buildTrayImage({
     nativeImage: fakeNativeImage(),

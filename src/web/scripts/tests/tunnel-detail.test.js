@@ -199,6 +199,24 @@ test("pause control is disabled unless connected/paused and fires the intent", (
   assert.deepEqual(calls.pause, ["t1"]);
 });
 
+test("Retry now appears only in the error state and re-arms the tunnel (Feature 130)", () => {
+  const { detail, calls } = mount();
+  detail.show(
+    { id: "t1", localPort: 1, destination: { host: "h", port: 2 } },
+    { state: "connected" },
+  );
+  const retryBtn = detail.element.querySelector(".detail-retry-btn");
+  assert.equal(retryBtn.hidden, true, "hidden while healthy");
+
+  detail.updateState("error"); // gave up / errored
+  assert.equal(retryBtn.hidden, false, "shown once the tunnel gives up");
+  retryBtn.click();
+  assert.deepEqual(calls.arm, ["t1"], "Retry now re-arms the tunnel");
+
+  detail.updateState("listening");
+  assert.equal(retryBtn.hidden, true, "hidden again once recovered");
+});
+
 // ── Cards ───────────────────────────────────────────────────────────────────
 
 test("cards render values from the snapshot, incl. the new counters", () => {

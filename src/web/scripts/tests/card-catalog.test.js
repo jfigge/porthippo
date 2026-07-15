@@ -229,3 +229,38 @@ test("cardToneClasses reflects static, computed, and state tones", () => {
     "card-value--state-paused",
   ]);
 });
+
+// ── Reconnect card (Feature 130) ─────────────────────────────────────────────
+
+test("reconnect card: dash + no tone when the tunnel isn't reconnecting", () => {
+  const ctx = { snap: { rateUp: 0 }, now: NOW, state: "connected" };
+  assert.equal(card("reconnect").value(ctx), t("card.none"));
+  assert.deepEqual(cardToneClasses(card("reconnect"), ctx), []);
+  assert.equal(card("reconnect").sortValue(ctx), 0);
+});
+
+test("reconnect card: attempt + rounded-up countdown, warn-toned, while retrying", () => {
+  const ctx = {
+    snap: { attempt: 2, nextRetryAt: NOW + 2400 },
+    now: NOW,
+    state: "connecting",
+  };
+  const value = card("reconnect").value(ctx);
+  assert.match(value, /attempt 2/);
+  assert.match(value, /3s/); // ceil(2400 / 1000) = 3
+  assert.deepEqual(cardToneClasses(card("reconnect"), ctx), [
+    "card-value--warn",
+  ]);
+  assert.equal(card("reconnect").sortValue(ctx), 1);
+});
+
+test("reconnect card: a past-due countdown floors at zero", () => {
+  const ctx = { snap: { attempt: 5, nextRetryAt: NOW - 8000 }, now: NOW };
+  assert.match(card("reconnect").value(ctx), /0s/);
+});
+
+test("reconnect card: a bare attempt (no countdown) still reads as reconnecting", () => {
+  const ctx = { snap: { attempt: 3 }, now: NOW, state: "connecting" };
+  assert.match(card("reconnect").value(ctx), /attempt 3/);
+  assert.equal(card("reconnect").sortValue(ctx), 1);
+});
