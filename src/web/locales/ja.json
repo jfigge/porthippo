@@ -315,6 +315,13 @@
   "settings.hostkeys.forget": "破棄",
   "settings.hostkeys.forgetAria": "{host} のホスト鍵を破棄",
   "settings.hostkeys.confirm": "この鍵を破棄しますか？",
+  "settings.hostkeys.tab.porthippo": "Port Hippo",
+  "settings.hostkeys.tab.os": "オペレーティングシステム",
+  "settings.hostkeys.os.help":
+    "オペレーティングシステムの SSH 設定にあるホスト鍵です。Port Hippo もこれらを確認しますが、変更はできません。手動で管理してください。",
+  "settings.hostkeys.os.path": "場所: {path}",
+  "settings.hostkeys.os.empty": "OS の SSH 設定にホスト鍵が見つかりません。",
+  "settings.hostkeys.os.hashed": "(ハッシュ化されたホスト)",
   "unlock.title": "シークレットのロック解除",
   "unlock.later": "後で",
   "menu.file": "ファイル",

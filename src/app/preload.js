@@ -136,6 +136,7 @@ contextBridge.exposeInMainWorld("porthippo", {
     trust: (promptId) => ipcRenderer.invoke("hostkeys:trust", promptId),
     reject: (promptId) => ipcRenderer.invoke("hostkeys:reject", promptId),
     list: () => ipcRenderer.invoke("hostkeys:list"),
+    listOs: () => ipcRenderer.invoke("hostkeys:list-os"),
     revoke: (hostPort) => ipcRenderer.invoke("hostkeys:revoke", hostPort),
   },
 

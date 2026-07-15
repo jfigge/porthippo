@@ -30,7 +30,11 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
-const { makeHostVerifier, sha256Fingerprint } = require("../host-verifier");
+const {
+  makeHostVerifier,
+  sha256Fingerprint,
+  listOsKnownHosts,
+} = require("../host-verifier");
 
 // A minimal SSH public-key wire blob: uint32be(algoLen) ++ algo ++ material.
 function sshBlob(algo, material) {
@@ -208,4 +212,42 @@ test("a malformed key blob is rejected without throwing", async () => {
   // Too short to carry a uint32 length prefix → keyAlgorithm() throws internally.
   const verifier = makeHostVerifier(baseOpts());
   assert.equal(await runVerifier(verifier, Buffer.from([1, 2])), false);
+});
+
+// ── listOsKnownHosts (the read-only OS inventory for Settings → Host Keys) ─────
+
+test("listOsKnownHosts reports host/fingerprint/keyType, hashes → null, skips @revoked", () => {
+  const blobA = sshBlob("ssh-ed25519", "AAAA");
+  const blobHashed = sshBlob("ssh-rsa", "BBBB");
+  const blobRevoked = sshBlob("ssh-ed25519", "CCCC");
+  const content = [
+    knownHostsLine("github.com", "ssh-ed25519", blobA),
+    // A hashed host (|1|salt|hash) — OpenSSH's default on some distros.
+    knownHostsLine("|1|c2FsdA==|aGFzaA==", "ssh-rsa", blobHashed),
+    // @revoked marks distrust, not a trusted key → excluded.
+    knownHostsLine("evil.example.com", "ssh-ed25519", blobRevoked, "revoked"),
+    "# a comment line is ignored",
+    "",
+  ].join("\n");
+  const { file, cleanup } = tmpKnownHosts(content);
+  try {
+    const list = listOsKnownHosts(file);
+    assert.equal(list.length, 2, "the @revoked line and comment are excluded");
+
+    const named = list.find((e) => e.host === "github.com");
+    assert.ok(named, "the plain host is listed by name");
+    assert.equal(named.keyType, "ssh-ed25519");
+    assert.equal(named.fingerprint, sha256Fingerprint(blobA));
+
+    const hashed = list.find((e) => e.host === null);
+    assert.ok(hashed, "a hashed host reports host:null (can't be reversed)");
+    assert.equal(hashed.keyType, "ssh-rsa");
+    assert.equal(hashed.fingerprint, sha256Fingerprint(blobHashed));
+  } finally {
+    cleanup();
+  }
+});
+
+test("listOsKnownHosts tolerates an absent file", () => {
+  assert.deepEqual(listOsKnownHosts("/no/such/dir/known_hosts"), []);
 });

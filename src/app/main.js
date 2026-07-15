@@ -53,6 +53,10 @@ const { registerContextMenuIPC } = require("./ipc/context-menu");
 const { registerShellIPC } = require("./ipc/shell");
 const { registerSecretStorageIPC } = require("./ipc/secret-storage");
 const { TunnelEngine } = require("./tunnel/engine");
+const {
+  listOsKnownHosts,
+  defaultKnownHostsPath,
+} = require("./tunnel/host-verifier");
 const i18n = require("./i18n");
 const { createLogger } = require("./logger");
 const { buildReport } = require("./diagnostics");
@@ -426,6 +430,12 @@ function registerIpc() {
     getStores,
     safeCall,
     safeCallWrite,
+    // The Host Keys panel's "Operating System" tab reads ~/.ssh/known_hosts for a
+    // read-only inventory (Port Hippo never edits that file — the OS owns it).
+    readOsKnownHosts: () => ({
+      path: defaultKnownHostsPath(),
+      entries: listOsKnownHosts(),
+    }),
     afterWrite: (id) => {
       getEngine()
         ?.reconcile(id)

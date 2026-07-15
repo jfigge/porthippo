@@ -164,6 +164,42 @@ function loadKnownHosts(file) {
 }
 
 /**
+ * List the user's OS `~/.ssh/known_hosts` entries for a READ-ONLY inventory (the
+ * Settings → Host Keys "Operating System" tab): each entry's host pattern(s), its
+ * SHA-256 fingerprint, and its key type. Port Hippo never edits this file — it is
+ * managed by the OS / OpenSSH — so there is no revoke counterpart.
+ *
+ * Hashed host patterns (`|1|salt|hash`, OpenSSH's default on some distros) can't
+ * be reversed, so those report `host: null` and the caller shows a placeholder.
+ * `@revoked` lines are skipped (they mark distrust, not a trusted key). Only
+ * fingerprints ever leave — never key material. Tolerates an absent/unreadable
+ * file (returns []).
+ *
+ * @param {string} [file]  override the known_hosts path (tests)
+ * @returns {Array<{host: string|null, fingerprint: string, keyType: string}>}
+ */
+function listOsKnownHosts(file) {
+  const target = file || defaultKnownHostsPath();
+  const out = [];
+  for (const entry of loadKnownHosts(target)) {
+    if (entry.marker === "revoked") continue;
+    const named = entry.hostPatterns.filter((p) => !p.startsWith("|1|"));
+    let fingerprint;
+    try {
+      fingerprint = sha256Fingerprint(entry.keyBlob);
+    } catch {
+      continue;
+    }
+    out.push({
+      host: named.length ? named.join(", ") : null,
+      fingerprint,
+      keyType: entry.keyType,
+    });
+  }
+  return out;
+}
+
+/**
  * Build the ssh2 `hostVerifier` for one hop.
  *
  * @param {object} opts
@@ -268,4 +304,5 @@ module.exports = {
   matchHostList,
   sha256Fingerprint,
   defaultKnownHostsPath,
+  listOsKnownHosts,
 };

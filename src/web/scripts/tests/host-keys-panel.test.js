@@ -14,10 +14,11 @@
  * limitations under the License.
  */
 
-// host-keys-panel.test.js — the Settings → Host Keys tab: it lists the accepted
-// TOFU fingerprints from the bridge, and a per-row forget is a two-step inline
-// confirm (single-popup rule) that only calls hostkeys.revoke on the second click,
-// then re-pulls the list.
+// host-keys-panel.test.js — the Settings → Host Keys tab. Two sub-tabs: "Port
+// Hippo" (the accepted TOFU fingerprints, manageable — a per-row forget is a
+// two-step inline confirm, single-popup rule, that only calls hostkeys.revoke on
+// the second click, then re-pulls) and "Operating System" (~/.ssh/known_hosts,
+// read-only — no forget, with a reference to where the file lives).
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -27,8 +28,13 @@ import { HostKeysPanel } from "../components/host-keys-panel.js";
 
 // A fake bridge whose list() returns successive pages, so we can assert the panel
 // re-pulls after a revoke. `revoke` records its args and returns the store's shape.
-function stubBridge({ pages = [[]], revokeResult = { revoked: true } } = {}) {
-  const calls = { list: 0, revoke: [] };
+// Pass `os` (an object or a thunk) to also expose listOs() for the OS sub-tab.
+function stubBridge({
+  pages = [[]],
+  revokeResult = { revoked: true },
+  os,
+} = {}) {
+  const calls = { list: 0, revoke: [], listOs: 0 };
   const hostkeys = {
     list: async () => {
       const page = pages[Math.min(calls.list, pages.length - 1)];
@@ -40,8 +46,28 @@ function stubBridge({ pages = [[]], revokeResult = { revoked: true } } = {}) {
       return revokeResult;
     },
   };
+  if (os !== undefined) {
+    hostkeys.listOs = async () => {
+      calls.listOs++;
+      return typeof os === "function" ? os() : os;
+    };
+  }
   return { porthippo: { hostkeys }, calls };
 }
+
+const OS_DATA = {
+  path: "/home/u/.ssh/known_hosts",
+  entries: [
+    { host: "github.com", fingerprint: "SHA256:os1", keyType: "ssh-ed25519" },
+    // A hashed host: OpenSSH can't reverse it, so host is null.
+    { host: null, fingerprint: "SHA256:os2", keyType: "ssh-rsa" },
+  ],
+};
+
+const osTab = (panel) =>
+  panel.element.querySelector('.hostkeys-tab[data-tab="os"]');
+const porthippoTab = (panel) =>
+  panel.element.querySelector('.hostkeys-tab[data-tab="porthippo"]');
 
 const ENTRY = (hostPort, fingerprint) => ({
   hostPort,
@@ -240,5 +266,120 @@ test("a revoke that returns a write-error envelope leaves the row in place", asy
   assert.ok(
     panel.element.querySelector(".hostkeys-item"),
     "the row (and its forget affordance) remain for a retry",
+  );
+});
+
+// ── Sub-tabs: Port Hippo (managed) vs Operating System (read-only) ────────────
+
+test("renders two sub-tabs, Port Hippo active by default", async () => {
+  resetDom();
+  const { porthippo } = stubBridge({ pages: [[]], os: OS_DATA });
+  const panel = new HostKeysPanel({ porthippo });
+  const tabs = panel.element.querySelectorAll(".hostkeys-tab");
+  assert.equal(tabs.length, 2, "a Port Hippo and an Operating System tab");
+  const active = panel.element.querySelector(".hostkeys-tab--active");
+  assert.equal(active.dataset.tab, "porthippo", "Port Hippo is active first");
+});
+
+test("the OS tab lists read-only known_hosts with a path reference", async () => {
+  resetDom();
+  const { porthippo, calls } = stubBridge({ pages: [[]], os: OS_DATA });
+  const panel = new HostKeysPanel({ porthippo });
+  await panel.load(); // Port Hippo tab first
+
+  osTab(panel).click();
+  await tick();
+
+  assert.equal(calls.listOs, 1, "the OS inventory was pulled");
+  // The reference to where the OS keys live is shown.
+  const pathEl = panel.element.querySelector(".hostkeys-os-path");
+  assert.ok(pathEl, "the known_hosts path reference is shown");
+  assert.match(pathEl.textContent, /known_hosts/);
+  // Two rows, but NONE offer a forget action (read-only).
+  assert.equal(panel.element.querySelectorAll(".hostkeys-item").length, 2);
+  assert.equal(
+    panel.element.querySelector(".hostkeys-forget"),
+    null,
+    "OS keys can't be managed by Port Hippo",
+  );
+  // The named host, its fingerprint, and the key type all show.
+  assert.match(panel.element.textContent, /github\.com/);
+  assert.match(panel.element.textContent, /SHA256:os1/);
+  assert.match(panel.element.textContent, /ssh-ed25519/);
+});
+
+test("a hashed OS host shows the placeholder instead of a hostname", async () => {
+  resetDom();
+  const { porthippo } = stubBridge({ pages: [[]], os: OS_DATA });
+  const panel = new HostKeysPanel({ porthippo });
+  await panel.load();
+  osTab(panel).click();
+  await tick();
+
+  const hosts = [...panel.element.querySelectorAll(".hostkeys-host")].map(
+    (n) => n.textContent,
+  );
+  assert.ok(
+    hosts.some((h) => /hashed/i.test(h)),
+    "the null-host (hashed) entry renders a placeholder",
+  );
+});
+
+test("the OS tab shows its own empty state, keeping the path reference", async () => {
+  resetDom();
+  const { porthippo } = stubBridge({
+    pages: [[]],
+    os: { path: "/x/known_hosts", entries: [] },
+  });
+  const panel = new HostKeysPanel({ porthippo });
+  await panel.load();
+  osTab(panel).click();
+  await tick();
+
+  assert.ok(panel.element.querySelector(".hostkeys-empty"));
+  assert.equal(panel.element.querySelector(".hostkeys-item"), null);
+  assert.ok(
+    panel.element.querySelector(".hostkeys-os-path"),
+    "the path reference shows even with no keys",
+  );
+});
+
+test("a rejected listOs shows the load-error state on the OS tab", async () => {
+  resetDom();
+  const panel = new HostKeysPanel({
+    porthippo: {
+      hostkeys: {
+        list: async () => [],
+        listOs: async () => {
+          throw new Error("nope");
+        },
+      },
+    },
+  });
+  await panel.load();
+  osTab(panel).click();
+  await tick();
+  assert.ok(panel.element.querySelector(".hostkeys-error"));
+  assert.equal(panel.element.querySelector(".hostkeys-empty"), null);
+});
+
+test("switching back to the Port Hippo tab reloads its manageable keys", async () => {
+  resetDom();
+  const { porthippo, calls } = stubBridge({
+    pages: [[ENTRY("db.example.com:22", "SHA256:abc")]],
+    os: OS_DATA,
+  });
+  const panel = new HostKeysPanel({ porthippo });
+  await panel.load(); // list → 1
+
+  osTab(panel).click();
+  await tick();
+  porthippoTab(panel).click();
+  await tick();
+
+  assert.ok(calls.list >= 2, "the Port Hippo list is re-pulled on return");
+  assert.ok(
+    panel.element.querySelector(".hostkeys-forget"),
+    "the manageable rows (with forget) are back",
   );
 });

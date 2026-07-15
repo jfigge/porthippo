@@ -32,6 +32,8 @@
  * @param {() => import('../store/stores').Stores} deps.getStores
  * @param {(channel: string, fn: Function, fallback?: any) => any} deps.safeCall
  * @param {(channel: string, fn: Function) => any} deps.safeCallWrite
+ * @param {() => {path: string, entries: Array}} [deps.readOsKnownHosts]  reads the
+ *        user's ~/.ssh/known_hosts for the read-only "Operating System" host-keys tab.
  * @param {(id: string) => void} [deps.afterWrite]  notified with the affected id
  *        after a successful definition create/update/delete so the Feature 20 engine
  *        can reconcile the running tunnel.
@@ -47,6 +49,7 @@ function registerStoreIPC({
   getStores,
   safeCall,
   safeCallWrite,
+  readOsKnownHosts,
   afterWrite,
   afterRefsWrite,
   afterSettingsWrite,
@@ -179,6 +182,16 @@ function registerStoreIPC({
 
   ipcMain.handle("hostkeys:list", () =>
     safeCall("hostkeys:list", () => getStores().knownHostsStore().list(), []),
+  );
+
+  // The OS's own ~/.ssh/known_hosts, read-only (Port Hippo can't manage it — the
+  // "Operating System" tab surfaces it so the user knows where to manage it).
+  ipcMain.handle("hostkeys:list-os", () =>
+    safeCall(
+      "hostkeys:list-os",
+      () => readOsKnownHosts?.() ?? { path: "", entries: [] },
+      { path: "", entries: [] },
+    ),
   );
 
   ipcMain.handle("hostkeys:revoke", (_event, hostPort) =>

@@ -451,6 +451,14 @@ export const EN = {
   "settings.hostkeys.forget": "Forget",
   "settings.hostkeys.forgetAria": "Forget host key for {host}",
   "settings.hostkeys.confirm": "Forget this key?",
+  "settings.hostkeys.tab.porthippo": "Port Hippo",
+  "settings.hostkeys.tab.os": "Operating System",
+  "settings.hostkeys.os.help":
+    "Host keys from your operating system’s SSH configuration. Port Hippo checks these too but can’t change them — manage them manually.",
+  "settings.hostkeys.os.path": "Found in {path}",
+  "settings.hostkeys.os.empty":
+    "No host keys found in your OS SSH configuration.",
+  "settings.hostkeys.os.hashed": "(hashed host)",
 
   // ── Unlock-on-launch prompt (master-password mode boots locked) ─────────
   "unlock.title": "Unlock secrets",

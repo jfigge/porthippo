@@ -61,9 +61,17 @@ decision to you. Do **not** dismiss this lightly:
 
 ## Managing trusted keys
 
-Port Hippo keeps the fingerprints it has accepted (separately from your
-`known_hosts`). You can **revoke** a trusted key so the next connection to that
-host re-prompts — useful after a legitimate key rotation, or to force a re-check.
+**Settings → Host Keys** lists the fingerprints Port Hippo verifies against, split
+across two tabs:
+
+- **Port Hippo** — the keys you accepted through Port Hippo (its own accepted-keys
+  store, kept separately from `known_hosts`). These you can manage: **forget** a key
+  so the next connection to that host re-prompts — useful after a legitimate key
+  rotation, or to force a re-check.
+- **Operating System** — the keys already in your `~/.ssh/known_hosts`. Port Hippo
+  reads and verifies against these but **can't change them** — that file is owned by
+  your OS / OpenSSH. This tab is read-only and shows where the file lives; edit it
+  yourself (for example with `ssh-keygen -R <host>` to drop a key) to manage them.
 
 ## Why this matters
 

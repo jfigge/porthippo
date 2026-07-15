@@ -315,6 +315,13 @@
   "settings.hostkeys.forget": "忘记",
   "settings.hostkeys.forgetAria": "忘记 {host} 的主机密钥",
   "settings.hostkeys.confirm": "忘记此密钥？",
+  "settings.hostkeys.tab.porthippo": "Port Hippo",
+  "settings.hostkeys.tab.os": "操作系统",
+  "settings.hostkeys.os.help":
+    "来自操作系统 SSH 配置的主机密钥。Port Hippo 也会检查它们，但无法更改——请手动管理。",
+  "settings.hostkeys.os.path": "位于 {path}",
+  "settings.hostkeys.os.empty": "在操作系统的 SSH 配置中未找到主机密钥。",
+  "settings.hostkeys.os.hashed": "(哈希主机)",
   "unlock.title": "解锁密钥",
   "unlock.later": "暂不",
   "menu.file": "文件",

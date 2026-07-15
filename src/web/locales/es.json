@@ -315,6 +315,13 @@
   "settings.hostkeys.forget": "Olvidar",
   "settings.hostkeys.forgetAria": "Olvidar la clave de host de {host}",
   "settings.hostkeys.confirm": "¿Olvidar esta clave?",
+  "settings.hostkeys.tab.porthippo": "Port Hippo",
+  "settings.hostkeys.tab.os": "Sistema operativo",
+  "settings.hostkeys.os.help":
+    "Claves de host de la configuración SSH de tu sistema operativo. Port Hippo también las comprueba, pero no puede modificarlas: gestiónalas manualmente.",
+  "settings.hostkeys.os.path": "Se encuentra en {path}",
+  "settings.hostkeys.os.empty": "No se encontraron claves de host en la configuración SSH de tu sistema.",
+  "settings.hostkeys.os.hashed": "(host con hash)",
   "unlock.title": "Desbloquear secretos",
   "unlock.later": "Ahora no",
   "menu.file": "Archivo",

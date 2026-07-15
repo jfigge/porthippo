@@ -315,6 +315,13 @@
   "settings.hostkeys.forget": "Vergessen",
   "settings.hostkeys.forgetAria": "Hostschlüssel für {host} vergessen",
   "settings.hostkeys.confirm": "Diesen Schlüssel vergessen?",
+  "settings.hostkeys.tab.porthippo": "Port Hippo",
+  "settings.hostkeys.tab.os": "Betriebssystem",
+  "settings.hostkeys.os.help":
+    "Host-Schlüssel aus der SSH-Konfiguration Ihres Betriebssystems. Port Hippo prüft sie ebenfalls, kann sie aber nicht ändern — verwalten Sie sie manuell.",
+  "settings.hostkeys.os.path": "Zu finden unter {path}",
+  "settings.hostkeys.os.empty": "Keine Host-Schlüssel in der SSH-Konfiguration Ihres Systems gefunden.",
+  "settings.hostkeys.os.hashed": "(gehashter Host)",
   "unlock.title": "Geheimnisse entsperren",
   "unlock.later": "Jetzt nicht",
   "menu.file": "Datei",
