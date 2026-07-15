@@ -362,7 +362,7 @@
   "shell.diagnostics.copied": "诊断信息已复制到剪贴板。",
   "cred.needsSecret": "需要密码",
   "cred.needsSecret.hint": "此凭据在导入时未包含密码。请输入密码以连接。",
-  "settings.nav.data": "数据",
+  "settings.nav.data": "导入/导出",
   "io.data.help": "将你的隧道、凭据和跳板机备份到可移植文件，在另一台机器上恢复它们，或从你的 SSH 配置初始化 Port Hippo。",
   "io.data.export": "导出捆绑包…",
   "io.data.exportDesc": "将你的隧道、凭据和跳板机保存到 .porthippo 文件。",

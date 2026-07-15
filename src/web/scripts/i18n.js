@@ -372,7 +372,7 @@ export const EN = {
   "settings.nav.behaviour": "Behaviour",
   "settings.nav.security": "Security",
   "settings.nav.hostkeys": "Host Keys",
-  "settings.nav.data": "Data",
+  "settings.nav.data": "Import/Export",
 
   "settings.appearance.theme": "Theme",
   "settings.appearance.theme.system": "System",

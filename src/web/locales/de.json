@@ -362,7 +362,7 @@
   "shell.diagnostics.copied": "Diagnose in die Zwischenablage kopiert.",
   "cred.needsSecret": "Passwort erforderlich",
   "cred.needsSecret.hint": "Diese Anmeldedaten wurden ohne ihr Passwort importiert. Geben Sie es ein, um sich zu verbinden.",
-  "settings.nav.data": "Daten",
+  "settings.nav.data": "Import/Export",
   "io.data.help": "Sichern Sie Ihre Tunnel, Anmeldedaten und Jump-Hosts in einer portablen Datei, stellen Sie sie auf einem anderen Rechner wieder her oder befüllen Sie Port Hippo aus Ihrer SSH-Konfiguration.",
   "io.data.export": "Bundle exportieren…",
   "io.data.exportDesc": "Speichern Sie Ihre Tunnel, Anmeldedaten und Jump-Hosts in einer .porthippo-Datei.",

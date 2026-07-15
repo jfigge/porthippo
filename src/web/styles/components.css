@@ -859,58 +859,106 @@
 }
 
 /* ── Settings panel (Feature 60) ──────────────────────────────────────────── */
+/* The Settings popup is a fixed-size master–detail dialog: a header bar on top, a
+   body split into a left tab rail + a scrolling panel, and a footer bar below. The
+   card is a flex column that clips its own rounded corners so the bars meet the
+   edges cleanly and only the panel scrolls. */
 .popup-settings {
-  width: 520px;
-  max-width: 520px;
-}
-
-.settings-body {
-  padding: var(--space-3) var(--space-4);
-}
-
-.settings-nav {
   display: flex;
-  gap: var(--space-1);
-  margin-bottom: var(--space-4);
+  flex-direction: column;
+  width: 560px;
+  max-width: 560px;
+  height: 460px;
+  overflow: hidden;
+}
+
+/* Header / footer bars — a tinted strip fenced off from the body by a hairline.
+   The generic .popup header/footer carry no chrome, so add it only here. */
+.popup-settings .popup-header,
+.popup-settings .popup-footer {
+  flex-shrink: 0;
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-mantle);
+}
+
+.popup-settings .popup-header {
+  display: flex;
+  align-items: center;
   border-bottom: 1px solid var(--color-overlay);
 }
 
+.popup-settings .popup-footer {
+  border-top: 1px solid var(--color-overlay);
+}
+
+/* Body: the left tab rail and the right panel share the row and, being flex:1 over
+   a min-height:0 track, scroll independently within the fixed-height card. */
+.settings-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+/* ── Left tab rail ─────────────────────────────────────────────────────────── */
+.settings-nav {
+  flex: 0 0 150px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-2);
+  background: var(--color-mantle);
+  border-right: 1px solid var(--color-overlay);
+  overflow-y: auto;
+}
+
 .settings-nav-item {
+  width: 100%;
   padding: var(--space-2) var(--space-3);
+  text-align: left;
   background: transparent;
   color: var(--color-subtext);
   border: none;
-  border-bottom: 2px solid transparent;
+  border-radius: var(--radius-sm);
   font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
 }
 
 .settings-nav-item:hover {
+  background: var(--color-surface-0);
   color: var(--color-text);
 }
 
 .settings-nav-item--active {
-  color: var(--color-text);
-  border-bottom-color: var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-crust);
+  font-weight: 600;
 }
 
-/* Stack every tab in a single grid cell so the settings body is always as tall as
-   the TALLEST tab — the dialog then keeps one fixed height instead of resizing as
-   you switch tabs. Hidden tabs stay in the layout (invisible + inert) so they still
-   count toward that height; the active tab paints over them. */
+/* ── Right panel ───────────────────────────────────────────────────────────── */
+/* Only the active tab is shown; the fixed card height keeps the dialog from
+   resizing as you switch tabs, and the panel scrolls when a tab overflows. */
 .settings-panels {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--space-4);
+  background: var(--color-base);
+  overflow-y: auto;
+}
+
+.settings-panels .field input,
+.settings-panels .field select {
+  background-color: var(--color-surface-1);
 }
 
 .settings-panel {
-  grid-area: 1 / 1;
   min-width: 0;
 }
 
 .settings-panel[hidden] {
-  display: block; /* override the UA [hidden] display:none so it keeps its cell */
-  visibility: hidden;
-  pointer-events: none;
+  display: none;
 }
 
 /* Checkbox rows: an inline [✓] label plus an optional hint beneath. Override the

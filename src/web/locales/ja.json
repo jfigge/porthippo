@@ -362,7 +362,7 @@
   "shell.diagnostics.copied": "診断情報をクリップボードにコピーしました。",
   "cred.needsSecret": "パスワードが必要",
   "cred.needsSecret.hint": "この認証情報はパスワードなしでインポートされました。接続するには入力してください。",
-  "settings.nav.data": "データ",
+  "settings.nav.data": "インポート/エクスポート",
   "io.data.help": "トンネル、認証情報、ジャンプホストをポータブルファイルにバックアップし、別のマシンで復元したり、SSH 設定から Port Hippo に取り込んだりできます。",
   "io.data.export": "バンドルをエクスポート…",
   "io.data.exportDesc": "トンネル、認証情報、ジャンプホストを .porthippo ファイルに保存します。",

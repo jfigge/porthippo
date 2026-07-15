@@ -362,7 +362,7 @@
   "shell.diagnostics.copied": "Diagnósticos copiados al portapapeles.",
   "cred.needsSecret": "necesita contraseña",
   "cred.needsSecret.hint": "Esta credencial se importó sin su contraseña. Introdúcela para conectar.",
-  "settings.nav.data": "Datos",
+  "settings.nav.data": "Importar/Exportar",
   "io.data.help": "Haz una copia de seguridad de tus túneles, credenciales y hosts de salto en un archivo portátil, restáuralos en otra máquina o inicializa Port Hippo desde tu configuración SSH.",
   "io.data.export": "Exportar paquete…",
   "io.data.exportDesc": "Guarda tus túneles, credenciales y hosts de salto en un archivo .porthippo.",

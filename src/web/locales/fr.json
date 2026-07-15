@@ -362,7 +362,7 @@
   "shell.diagnostics.copied": "Diagnostics copiés dans le presse-papiers.",
   "cred.needsSecret": "mot de passe requis",
   "cred.needsSecret.hint": "Cet identifiant a été importé sans son mot de passe. Saisissez-le pour vous connecter.",
-  "settings.nav.data": "Données",
+  "settings.nav.data": "Importer/Exporter",
   "io.data.help": "Sauvegardez vos tunnels, identifiants et hôtes de rebond dans un fichier portable, restaurez-les sur une autre machine, ou initialisez Port Hippo à partir de votre configuration SSH.",
   "io.data.export": "Exporter le lot…",
   "io.data.exportDesc": "Enregistrez vos tunnels, identifiants et hôtes de rebond dans un fichier .porthippo.",

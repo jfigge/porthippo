@@ -362,7 +362,7 @@
   "shell.diagnostics.copied": "Diagnostica copiata negli appunti.",
   "cred.needsSecret": "password mancante",
   "cred.needsSecret.hint": "Questa credenziale è stata importata senza la sua password. Inseriscila per connetterti.",
-  "settings.nav.data": "Dati",
+  "settings.nav.data": "Importa/Esporta",
   "io.data.help": "Esegui il backup di tunnel, credenziali e jump host in un file portabile, ripristinali su un’altra macchina o popola Port Hippo dalla tua configurazione SSH.",
   "io.data.export": "Esporta pacchetto…",
   "io.data.exportDesc": "Salva tunnel, credenziali e jump host in un file .porthippo.",
