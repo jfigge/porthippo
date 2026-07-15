@@ -28,15 +28,21 @@
 // The update check is the ONLY outbound call this module makes — no telemetry.
 "use strict";
 
-const { app } = require("electron");
+// Electron's `app` and electron-updater's `autoUpdater` are resolved LAZILY, and
+// through overridable refs. Accessing either eagerly constructs the platform
+// updater / dereferences Electron natives that are absent under the Node test
+// runner — deferring keeps `require("./updater")` (and thus `require("./main")`)
+// inert in tests, where main.js loads but app.whenReady() never resolves. Tests
+// inject fakes via _setTestHooks (mirroring crypto._setSafeStorage).
+let _autoUpdater = null;
+let _app = null;
 
-// Lazily resolve electron-updater's autoUpdater. Accessing the getter eagerly
-// constructs the platform updater, which dereferences Electron's native
-// autoUpdater — absent under the Node test runner. Deferring it until a check
-// actually runs keeps `require("./updater")` (and thus `require("./main")`) inert
-// in tests, where main.js is loaded but app.whenReady() never resolves.
 function getAutoUpdater() {
-  return require("electron-updater").autoUpdater;
+  return _autoUpdater || require("electron-updater").autoUpdater;
+}
+
+function getApp() {
+  return _app || require("electron").app;
 }
 
 // Window accessor + logger are injected by initUpdater() so this module never
@@ -136,7 +142,7 @@ function initUpdater(getWindow, logger) {
  */
 function checkForUpdates({ manual = false } = {}) {
   _manual = !!manual;
-  if (!app.isPackaged) {
+  if (!getApp().isPackaged) {
     pushUpdaterEvent("updater:not-available", {
       manual: _manual,
       reason: "dev-build",
@@ -163,4 +169,20 @@ function quitAndInstall() {
   }
 }
 
-module.exports = { initUpdater, checkForUpdates, quitAndInstall };
+// Test seam (mirrors crypto._setSafeStorage): inject a fake `app` + `autoUpdater`
+// and reset the one-shot wiring guard so the update lifecycle can be driven without
+// Electron. Call with no args to restore the real (lazy) modules.
+function _setTestHooks({ app = null, autoUpdater = null } = {}) {
+  _app = app;
+  _autoUpdater = autoUpdater;
+  _wired = false;
+  _getWindow = () => null;
+  _manual = false;
+}
+
+module.exports = {
+  initUpdater,
+  checkForUpdates,
+  quitAndInstall,
+  _setTestHooks,
+};
