@@ -118,8 +118,9 @@ async function startEcho({ transform } = {}) {
   return { port, close: () => closeServer(server) };
 }
 
-async function startSsh({ rejectForward = false } = {}) {
+async function startSsh({ rejectForward = false, remoteForward = false } = {}) {
   const clients = new Set();
+  const forwards = new Set(); // net.Servers bound for remote (tcpip-forward) forwards
   let total = 0;
   const server = new Server({ hostKeys: [HOST_KEY] }, (client) => {
     total += 1;
@@ -159,6 +160,51 @@ async function startSsh({ rejectForward = false } = {}) {
         });
         ch.on("error", () => {});
       });
+
+      if (!remoteForward) return;
+      // Remote (ssh -R) support: honour a tcpip-forward request by binding a real
+      // local listener on the requested port; each inbound connection is pushed
+      // back to the client as a forwarded-tcpip channel (fires its `tcp connection`).
+      client.on("request", (accept, reject, name, info) => {
+        if (name === "tcpip-forward") {
+          const bindAddr = info.bindAddr || "127.0.0.1";
+          let boundPort = info.bindPort;
+          const fServer = net.createServer((sock) => {
+            client.forwardOut(
+              bindAddr,
+              boundPort,
+              sock.remoteAddress || "127.0.0.1",
+              sock.remotePort || 0,
+              (err, ch) => {
+                if (err) {
+                  sock.destroy();
+                  return;
+                }
+                sock.pipe(ch);
+                ch.pipe(sock);
+                sock.on("error", () => {});
+                ch.on("error", () => {});
+              },
+            );
+          });
+          fServer.on("error", () => {
+            try {
+              reject && reject();
+            } catch {
+              // already replied
+            }
+          });
+          fServer.listen(info.bindPort, bindAddr, () => {
+            boundPort = fServer.address().port;
+            forwards.add(fServer);
+            accept && accept(boundPort);
+          });
+        } else if (name === "cancel-tcpip-forward") {
+          accept && accept();
+        } else {
+          reject && reject();
+        }
+      });
     });
   });
   const port = await listen(server);
@@ -167,6 +213,13 @@ async function startSsh({ rejectForward = false } = {}) {
     total: () => total,
     active: () => clients.size,
     close: async () => {
+      for (const f of forwards) {
+        try {
+          await closeServer(f);
+        } catch {
+          // already closed
+        }
+      }
       for (const c of clients) {
         try {
           c.end();
@@ -177,6 +230,54 @@ async function startSsh({ rejectForward = false } = {}) {
       await closeServer(server);
     },
   };
+}
+
+// Read exactly `n` bytes from a socket (for driving the SOCKS handshake in tests).
+function readBytes(sock, n) {
+  return new Promise((resolve, reject) => {
+    let buf = Buffer.alloc(0);
+    const onData = (d) => {
+      buf = Buffer.concat([buf, d]);
+      if (buf.length >= n) {
+        sock.off("data", onData);
+        sock.off("error", onErr);
+        resolve(buf.subarray(0, n));
+        // Any surplus is pushed back so a following read/roundtrip still sees it.
+        if (buf.length > n) sock.unshift(buf.subarray(n));
+      }
+    };
+    const onErr = (e) => {
+      sock.off("data", onData);
+      reject(e);
+    };
+    sock.on("data", onData);
+    sock.once("error", onErr);
+  });
+}
+
+// Drive a SOCKS5 no-auth CONNECT to an IPv4 `host:port` over a local proxy socket.
+// Resolves the connected socket (past the success reply) so a caller can roundtrip.
+async function socks5Connect(proxyPort, host, port) {
+  const sock = await connectLocal(proxyPort);
+  sock.write(Buffer.from([0x05, 0x01, 0x00])); // greeting: one method, no-auth
+  const methodReply = await readBytes(sock, 2);
+  if (methodReply[0] !== 0x05 || methodReply[1] !== 0x00) {
+    sock.destroy();
+    throw new Error(`SOCKS method reply ${[...methodReply]}`);
+  }
+  const octets = host.split(".").map((n) => Number(n));
+  const req = Buffer.from([
+    0x05,
+    0x01,
+    0x00,
+    0x01,
+    ...octets,
+    (port >> 8) & 0xff,
+    port & 0xff,
+  ]);
+  sock.write(req);
+  const reply = await readBytes(sock, 10); // IPv4 reply is 10 bytes
+  return { sock, rep: reply[1] };
 }
 
 // ── Definition + tunnel builders ────────────────────────────────────────────────
@@ -210,6 +311,51 @@ function makeDef({
     sshServer: sshHop(sshPort),
     jumps,
     keepAlive,
+    autoReconnect: false,
+  };
+}
+
+/** A dynamic (SOCKS) engine def: a local SOCKS listener over the SSH chain. */
+function makeDynamicDef({
+  localPort,
+  sshPort,
+  jumps = [],
+  keepAlive = false,
+  enabled = true,
+}) {
+  return {
+    id: `t${idSeq++}`,
+    name: "socks tunnel",
+    type: "dynamic",
+    enabled,
+    localPort,
+    bindHost: "127.0.0.1",
+    destination: null,
+    sshServer: sshHop(sshPort),
+    jumps,
+    keepAlive,
+    autoReconnect: false,
+  };
+}
+
+/** A remote (reverse) engine def: bind `remotePort` on the server → local echo. */
+function makeRemoteDef({
+  remotePort,
+  echoPort,
+  sshPort,
+  jumps = [],
+  enabled = true,
+}) {
+  return {
+    id: `t${idSeq++}`,
+    name: "remote tunnel",
+    type: "remote",
+    enabled,
+    remoteBind: { host: "127.0.0.1", port: remotePort },
+    destination: { host: "127.0.0.1", port: echoPort },
+    sshServer: sshHop(sshPort),
+    jumps,
+    keepAlive: false,
     autoReconnect: false,
   };
 }
@@ -278,8 +424,12 @@ module.exports = {
   roundtrip,
   startEcho,
   startSsh,
+  readBytes,
+  socks5Connect,
   sshHop,
   makeDef,
+  makeDynamicDef,
+  makeRemoteDef,
   trustAll,
   makeTunnel,
   gatedVerifier,

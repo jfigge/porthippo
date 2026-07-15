@@ -31,6 +31,8 @@
  * Feature 10 ships schema v1; Feature 45 adds the v1→v2 transform that lifts each
  * tunnel's embedded auth into reusable `credentials[]` and its inline jump hosts
  * into reusable `jumpHosts[]`, rewriting the tunnel to reference them by id.
+ * Feature 110 adds the v2→v3 transform that stamps a forwarding `type: "local"` on
+ * every existing tunnel so reverse / dynamic types can be authored alongside them.
  *
  * Rules for migration functions:
  *   - Pure and synchronous — no I/O, no mutation of the input (return a new object).
@@ -181,13 +183,34 @@ function extractCredentialsAndJumpHosts(doc) {
 }
 
 /**
+ * v2 → v3: stamp a forwarding `type` on every tunnel (Feature 110). Pre-Feature-110
+ * tunnels are all local forwards, so a tunnel lacking a `type` becomes `"local"`.
+ * Type-guarded to the tunnels document and idempotent (a tunnel that already has a
+ * `type` — a freshly authored v3 remote/dynamic tunnel — is passed through).
+ */
+function stampTunnelType(doc) {
+  if (!doc || typeof doc !== "object" || !Array.isArray(doc.tunnels)) {
+    return doc; // not the tunnels document — nothing to do
+  }
+  const needs = doc.tunnels.some(
+    (t) => t && typeof t === "object" && t.type === undefined,
+  );
+  if (!needs) return doc;
+  const tunnels = doc.tunnels.map((t) => {
+    if (!t || typeof t !== "object" || t.type !== undefined) return t;
+    return { ...t, type: "local" };
+  });
+  return { ...doc, tunnels };
+}
+
+/**
  * Ordered migration functions. `MIGRATIONS[i]` upgrades a document from
  * version `i + BASE_SCHEMA_VERSION` to version `i + BASE_SCHEMA_VERSION + 1`.
  * Each is a pure `(doc) => doc` transform — no I/O, no input mutation.
  *
  * @type {Array<(doc: object) => object>}
  */
-const MIGRATIONS = [extractCredentialsAndJumpHosts];
+const MIGRATIONS = [extractCredentialsAndJumpHosts, stampTunnelType];
 
 /** The version every freshly written / migrated document is stamped with. */
 const CURRENT_SCHEMA_VERSION = BASE_SCHEMA_VERSION + MIGRATIONS.length;

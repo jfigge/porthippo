@@ -236,9 +236,14 @@ class TunnelEngine {
     timer.unref?.();
 
     try {
+      // Only local forwarding has a far-end destination to probe. A remote tunnel's
+      // destination is a LOCAL target (unreachable from the far end) and a dynamic
+      // tunnel has none, so for those we validate the chain only.
+      const probeDest =
+        (d.type || "local") === "local" ? d.destination || {} : {};
       return await probeChain({
         hops: [...(Array.isArray(d.jumps) ? d.jumps : []), d.sshServer],
-        destination: d.destination || {},
+        destination: probeDest,
         tunnelId: d.id || "probe",
         hostVerifierFactory: (ctx) => this.#buildHostVerifier(ctx),
         signal: controller.signal,

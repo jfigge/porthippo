@@ -27,10 +27,10 @@ const {
   migrate,
 } = require("../migrations");
 
-test("Feature 45 ships schema v2 (one migration in the chain)", () => {
+test("Feature 110 ships schema v3 (two migrations in the chain)", () => {
   assert.equal(BASE_SCHEMA_VERSION, 1);
-  assert.equal(MIGRATIONS.length, 1);
-  assert.equal(CURRENT_SCHEMA_VERSION, 2);
+  assert.equal(MIGRATIONS.length, 2);
+  assert.equal(CURRENT_SCHEMA_VERSION, 3);
 });
 
 test("migrate stamps the current version + sibling arrays on a tunnels doc", () => {
@@ -38,12 +38,12 @@ test("migrate stamps the current version + sibling arrays on a tunnels doc", () 
     tunnels: [],
     credentials: [],
     jumpHosts: [],
-    schemaVersion: 2,
+    schemaVersion: 3,
   });
 });
 
 test("migrate leaves an already-current document untouched (same ref)", () => {
-  const doc = { schemaVersion: 2, a: 1 };
+  const doc = { schemaVersion: 3, a: 1 };
   assert.equal(migrate(doc), doc);
 });
 
@@ -56,10 +56,10 @@ test("migrate passes non-object inputs through unchanged", () => {
 });
 
 test("a non-tunnels document is stamped but otherwise untouched", () => {
-  // The v1→v2 transform is type-guarded to the tunnels doc.
+  // Both transforms are type-guarded to the tunnels doc.
   assert.deepEqual(migrate({ theme: "dark" }), {
     theme: "dark",
-    schemaVersion: 2,
+    schemaVersion: 3,
   });
 });
 
@@ -100,10 +100,11 @@ function v1Doc() {
 
 test("v1→v2 lifts embedded auth into a referenced credential", () => {
   const out = migrate(v1Doc());
-  assert.equal(out.schemaVersion, 2);
+  assert.equal(out.schemaVersion, 3);
 
   const t = out.tunnels[0];
   assert.equal(t.sshServer, undefined, "the embedded hop is gone");
+  assert.equal(t.type, "local", "v2→v3 stamps a local forwarding type");
   assert.equal(
     t.sshHost,
     "bastion",
@@ -173,6 +174,36 @@ test("v1→v2 dedupes identical credentials across tunnels", () => {
   const out = migrate(doc);
   assert.equal(out.credentials.length, 1, "one shared agent credential");
   assert.equal(out.tunnels[0].credentialId, out.tunnels[1].credentialId);
+});
+
+// ── v2 → v3: stamp a forwarding type ─────────────────────────────────────────
+
+test("v2→v3 stamps type:local on tunnels that lack one, leaving others", () => {
+  const doc = {
+    schemaVersion: 2,
+    tunnels: [
+      { id: "a", name: "a", localPort: 1, sshHost: "h", credentialId: "c" },
+      { id: "b", name: "b", type: "dynamic", localPort: 2, sshHost: "h2" },
+    ],
+    credentials: [],
+    jumpHosts: [],
+  };
+  const out = migrate(doc);
+  assert.equal(out.schemaVersion, 3);
+  assert.equal(out.tunnels[0].type, "local", "untyped tunnel becomes local");
+  assert.equal(out.tunnels[1].type, "dynamic", "an explicit type is preserved");
+});
+
+test("v2→v3 is idempotent and doesn't rewrite an all-typed doc", () => {
+  const doc = {
+    schemaVersion: 3,
+    tunnels: [
+      { id: "a", name: "a", type: "local", localPort: 1, sshHost: "h" },
+    ],
+    credentials: [],
+    jumpHosts: [],
+  };
+  assert.equal(migrate(doc), doc, "already current + all typed → same ref");
 });
 
 test("v1→v2 is idempotent: a re-run adds nothing", () => {

@@ -452,6 +452,39 @@
   margin-bottom: var(--space-1);
 }
 
+/* Forwarding-type segmented control (Feature 110). */
+.editor-type-row {
+  display: flex;
+  gap: var(--space-1);
+  margin: var(--space-1) 0 var(--space-2);
+}
+
+.editor-type-btn {
+  flex: 1;
+  padding: var(--space-2);
+  border: 1px solid var(--color-overlay);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-0);
+  color: var(--color-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.editor-type-btn:hover {
+  color: var(--color-text);
+}
+
+.editor-type-btn--active {
+  border-color: var(--color-accent);
+  background: var(--color-surface-1);
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.editor-type-hint {
+  margin: 0 0 var(--space-2);
+}
+
 .editor-check {
   display: flex;
   align-items: center;
@@ -1382,6 +1415,21 @@
   white-space: nowrap;
   font-size: 13px;
   color: var(--color-text);
+}
+
+/* Compact forwarding-type badge (Feature 110): remote / dynamic rows + breadcrumb. */
+.tunnel-type-badge {
+  flex: 0 0 auto;
+  padding: 0 var(--space-1);
+  border: 1px solid var(--color-overlay);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  letter-spacing: 0.04em;
+  color: var(--color-subtext);
+  text-transform: uppercase;
 }
 
 .tunnel-row-tools {

@@ -40,7 +40,7 @@ import { el, clear } from "../dom.js";
 import { field, applyFieldErrors } from "../field.js";
 import { t } from "../i18n.js";
 import { Dialog } from "../dialog.js";
-import { validateDefinition } from "../validate.js";
+import { validateDefinition, normaliseTunnelType } from "../validate.js";
 import {
   parseEntry,
   parseTarget,
@@ -54,6 +54,61 @@ import { JumpHostPickerField } from "./jump-host-picker-field.js";
 /** Hosts that always mean "this machine's loopback" — no bind/resolve warning. */
 const LOOPBACKS = new Set(["", "127.0.0.1", "localhost", "::1"]);
 const RESOLVE_DEBOUNCE_MS = 300;
+
+/** The forwarding types offered by the segmented control, in display order. */
+const TYPE_ORDER = ["local", "remote", "dynamic"];
+
+/**
+ * The label / hint / placeholder / tooltip for the two repurposed address fields
+ * per forwarding type (Feature 110). The Target-server field is identical across
+ * types, so it's not listed here. `showExit` hides the second field for dynamic,
+ * which has no fixed destination.
+ */
+function addressFieldConfig(type) {
+  if (type === "remote") {
+    return {
+      entry: {
+        label: t("editor.remoteBind"),
+        placeholder: t("editor.remoteBind.placeholder"),
+        hint: t("editor.remoteBind.hint"),
+        description: t("editor.remoteBind.desc"),
+      },
+      exit: {
+        label: t("editor.localTarget"),
+        placeholder: t("editor.localTarget.placeholder"),
+        hint: t("editor.localTarget.hint"),
+        description: t("editor.localTarget.desc"),
+      },
+      showExit: true,
+    };
+  }
+  if (type === "dynamic") {
+    return {
+      entry: {
+        label: t("editor.socksPort"),
+        placeholder: t("editor.socksPort.placeholder"),
+        hint: t("editor.socksPort.hint"),
+        description: t("editor.socksPort.desc"),
+      },
+      showExit: false,
+    };
+  }
+  return {
+    entry: {
+      label: t("editor.entryPort"),
+      placeholder: t("editor.entryPort.placeholder"),
+      hint: t("editor.entryPort.hint"),
+      description: t("editor.entryPort.desc"),
+    },
+    exit: {
+      label: t("editor.exitPort"),
+      placeholder: t("editor.exitPort.placeholder"),
+      hint: t("editor.exitPort.hint"),
+      description: t("editor.exitPort.desc"),
+    },
+    showExit: true,
+  };
+}
 
 /** A cheap "already an IP literal" guard so the editor skips a pointless lookup. */
 function looksLikeIp(host) {
@@ -89,6 +144,10 @@ export class TunnelEditorDialog {
   #credPicker;
   #jumpPicker;
   #detailsEl;
+  #typeButtons = {}; // Feature 110 forwarding-type segmented control
+  #entryField; // the Entry/Remote-bind/SOCKS field wrapper (relabelled per type)
+  #exitField; // the Exit/Local-target field wrapper (relabelled per type)
+  #exitSection; // hidden for the dynamic (SOCKS) type
   #entryWarningEl; // privileged-port / port-conflict (instant, soft)
   #entryResolveWarnEl; // Entry host not a bindable local address (debounced)
   #targetResolveWarnEl; // Target server doesn't resolve locally (debounced)
@@ -181,13 +240,16 @@ export class TunnelEditorDialog {
     this.#editingId = d.id || null;
     this.#showErrors = false;
 
+    const type = normaliseTunnelType(d.type);
     this.#form = {
       name: str(d.name),
+      type,
       // Prefer the verbatim strings; reconstruct from the concrete fields for
-      // legacy records (or a hand-edited file) that predate them.
-      entryAddress: str(d.entryAddress) || reconstructEntry(d),
+      // legacy records (or a hand-edited file) that predate them. The Entry / Exit
+      // slots are repurposed per type (Feature 110).
+      entryAddress: reconstructEntryField(d, type),
       targetServer: reconstructTarget(d),
-      exitAddress: str(d.exitAddress) || reconstructExit(d),
+      exitAddress: reconstructExitField(d, type),
       credentialId: str(d.credentialId),
       jumpHostIds: Array.isArray(d.jumpHostIds) ? d.jumpHostIds : [],
       lingerMs:
@@ -202,6 +264,7 @@ export class TunnelEditorDialog {
       if (input.type === "checkbox") input.checked = this.#form[key];
       else input.value = this.#form[key];
     }
+    this.#applyType(); // press the active type + relabel/hide fields for it
 
     // Load the reference pickers, then apply the stored selection.
     await Promise.all([this.#credPicker.load(), this.#jumpPicker.load()]);
@@ -238,19 +301,12 @@ export class TunnelEditorDialog {
    * silently dropped.
    */
   buildPayload() {
-    const entry = parseEntry(this.#form.entryAddress);
+    const type = this.#form.type;
     const target = parseTarget(this.#form.targetServer);
-    const exit = parseExit(this.#form.exitAddress);
-
-    const entryHost = entry.error ? undefined : entry.host;
-    const entryPort = entry.error ? undefined : entry.port;
 
     const payload = {
       name: this.#form.name.trim(),
-      localPort: entryPort,
-      destination: exit.error
-        ? { host: undefined, port: undefined }
-        : { host: exit.host ?? LOOPBACK, port: exit.port ?? entryPort },
+      type,
       // Read the live picker (like jumpHostIds) — it drops a since-deleted id to
       // "", whereas #form.credentialId can retain a stale id the picker rejected.
       credentialId: this.#credPicker.value,
@@ -258,27 +314,65 @@ export class TunnelEditorDialog {
       keepAlive: this.#form.keepAlive,
       enabled: this.#form.enabled,
       autoReconnect: this.#form.autoReconnect,
-      entryAddress: this.#form.entryAddress.trim(),
     };
 
-    // bindHost is only stored when it's a non-default (non-loopback) address; a
-    // bare-port Entry leaves it implicit (the resolver defaults it to 127.0.0.1).
-    if (entryHost && !LOOPBACKS.has(entryHost)) payload.bindHost = entryHost;
-
-    // Target server → the mandatory SSH endpoint. A parse failure leaves sshHost
-    // undefined (the validator flags it); the port is stored only when explicit.
+    // Target server → the mandatory SSH endpoint for every type. A parse failure
+    // leaves sshHost undefined (the validator flags it); port stored only when explicit.
     if (!target.error) {
       payload.sshHost = target.host;
       if (target.port !== undefined) payload.sshPort = target.port;
     }
 
-    // Exit raw echo — stored only when the user actually typed something (a blank
-    // Exit reconstructs from the loopback default on reload).
-    const exitRaw = this.#form.exitAddress.trim();
-    if (exitRaw) payload.exitAddress = exitRaw;
-
     const linger = toInt(this.#form.lingerMs);
     if (linger !== undefined) payload.lingerMs = linger;
+
+    if (type === "dynamic") {
+      // Entry slot = the local SOCKS listener. No destination.
+      const entry = parseEntry(this.#form.entryAddress);
+      payload.localPort = entry.error ? undefined : entry.port;
+      const host = entry.error ? undefined : entry.host;
+      if (host && !LOOPBACKS.has(host)) payload.bindHost = host;
+      payload.entryAddress = this.#form.entryAddress.trim();
+      return payload;
+    }
+
+    if (type === "remote") {
+      // Entry slot = the port bound on the SSH server (parsed like an Entry). Exit
+      // slot = the local target the remote port forwards back to.
+      const bind = parseEntry(this.#form.entryAddress);
+      if (bind.error) {
+        payload.remoteBind = { host: undefined, port: undefined };
+      } else {
+        payload.remoteBind = { port: bind.port };
+        if (bind.host && !LOOPBACKS.has(bind.host)) {
+          payload.remoteBind.host = bind.host;
+        }
+      }
+      const localTarget = parseExit(this.#form.exitAddress);
+      payload.destination = localTarget.error
+        ? { host: undefined, port: undefined }
+        : { host: localTarget.host ?? LOOPBACK, port: localTarget.port };
+      payload.entryAddress = this.#form.entryAddress.trim();
+      const exitRaw = this.#form.exitAddress.trim();
+      if (exitRaw) payload.exitAddress = exitRaw;
+      return payload;
+    }
+
+    // local — Entry slot binds the local port; Exit slot is the far destination.
+    const entry = parseEntry(this.#form.entryAddress);
+    const exit = parseExit(this.#form.exitAddress);
+    const entryHost = entry.error ? undefined : entry.host;
+    const entryPort = entry.error ? undefined : entry.port;
+    payload.localPort = entryPort;
+    payload.destination = exit.error
+      ? { host: undefined, port: undefined }
+      : { host: exit.host ?? LOOPBACK, port: exit.port ?? entryPort };
+    // bindHost is only stored when it's a non-default (non-loopback) address; a
+    // bare-port Entry leaves it implicit (the resolver defaults it to 127.0.0.1).
+    if (entryHost && !LOOPBACKS.has(entryHost)) payload.bindHost = entryHost;
+    payload.entryAddress = this.#form.entryAddress.trim();
+    const exitRaw = this.#form.exitAddress.trim();
+    if (exitRaw) payload.exitAddress = exitRaw;
     return payload;
   }
 
@@ -312,24 +406,39 @@ export class TunnelEditorDialog {
       this.#buildResolveBlock(),
     ]);
 
+    this.#entryField = field({
+      label: t("editor.entryPort"),
+      control: this.#input(
+        "entryAddress",
+        t("editor.entryPort.placeholder"),
+        "text",
+      ),
+      errorKey: "entryAddress",
+      hint: t("editor.entryPort.hint"),
+      description: t("editor.entryPort.desc"),
+    });
+    this.#exitField = field({
+      label: t("editor.exitPort"),
+      control: this.#input(
+        "exitAddress",
+        t("editor.exitPort.placeholder"),
+        "text",
+      ),
+      errorKey: "exitAddress",
+      hint: t("editor.exitPort.hint"),
+      description: t("editor.exitPort.desc"),
+    });
+    this.#exitSection = this.#section([this.#exitField]);
+
     this.#dialog.body.append(
       field({
         label: t("editor.name"),
         control: this.#input("name", "e.g. Prod database", "text"),
         errorKey: "name",
       }),
+      this.#buildTypeSelector(),
       this.#section([
-        field({
-          label: t("editor.entryPort"),
-          control: this.#input(
-            "entryAddress",
-            t("editor.entryPort.placeholder"),
-            "text",
-          ),
-          errorKey: "entryAddress",
-          hint: t("editor.entryPort.hint"),
-          description: t("editor.entryPort.desc"),
-        }),
+        this.#entryField,
         this.#entryWarningEl,
         this.#entryResolveWarnEl,
       ]),
@@ -347,22 +456,82 @@ export class TunnelEditorDialog {
         }),
         this.#targetResolveWarnEl,
       ]),
-      this.#section([
-        field({
-          label: t("editor.exitPort"),
-          control: this.#input(
-            "exitAddress",
-            t("editor.exitPort.placeholder"),
-            "text",
-          ),
-          errorKey: "exitAddress",
-          hint: t("editor.exitPort.hint"),
-          description: t("editor.exitPort.desc"),
-        }),
-      ]),
+      this.#exitSection,
       this.#credPicker.element,
       this.#detailsEl,
     );
+  }
+
+  /** The forwarding-type segmented control (local / remote / dynamic). */
+  #buildTypeSelector() {
+    const buttons = TYPE_ORDER.map((type) => {
+      const btn = el("button", {
+        type: "button",
+        class: "editor-type-btn",
+        text: t(`editor.type.${type}`),
+        title: t(`editor.type.${type}.desc`),
+        "aria-pressed": "false",
+        onClick: () => this.#onTypeChange(type),
+      });
+      this.#typeButtons[type] = btn;
+      return btn;
+    });
+    return el("div", { class: "editor-block editor-type" }, [
+      el("span", { class: "field-label", text: t("editor.type") }),
+      el("div", { class: "editor-type-row" }, buttons),
+      el("p", { class: "field-hint editor-type-hint" }),
+    ]);
+  }
+
+  /** Switch the forwarding type: relabel/hide fields, then revalidate. */
+  #onTypeChange(type) {
+    if (this.#form.type === type) return;
+    this.#form.type = type;
+    this.#applyType();
+    this.#updateEntryWarning();
+    this.#changed();
+  }
+
+  /**
+   * Reflect the current forwarding type into the UI: press the active button,
+   * relabel the two repurposed address fields, hide the Exit field for dynamic,
+   * and update the type hint.
+   */
+  #applyType() {
+    const type = this.#form.type;
+    const cfg = addressFieldConfig(type);
+    for (const [name, btn] of Object.entries(this.#typeButtons)) {
+      const active = name === type;
+      btn.classList.toggle("editor-type-btn--active", active);
+      btn.setAttribute("aria-pressed", active ? "true" : "false");
+    }
+    this.#relabelField(
+      this.#entryField,
+      cfg.entry,
+      this.#controls.entryAddress,
+    );
+    if (cfg.exit) {
+      this.#relabelField(this.#exitField, cfg.exit, this.#controls.exitAddress);
+    }
+    this.#exitSection.hidden = !cfg.showExit;
+    const hint = this.#dialog.body.querySelector(".editor-type-hint");
+    if (hint) hint.textContent = t(`editor.type.${type}.desc`);
+  }
+
+  /** Update a field wrapper's label / hint / tooltip + its input placeholder. */
+  #relabelField(fieldEl, cfg, input) {
+    if (!fieldEl || !cfg) return;
+    const labelEl = fieldEl.querySelector(".field-label");
+    if (labelEl) {
+      labelEl.textContent = cfg.label;
+      if (cfg.description) labelEl.title = cfg.description;
+    }
+    const hintEl = fieldEl.querySelector(".field-hint");
+    if (hintEl) hintEl.textContent = cfg.hint || "";
+    if (input) {
+      if (cfg.placeholder !== undefined) input.placeholder = cfg.placeholder;
+      if (cfg.description) input.title = cfg.description;
+    }
   }
 
   #section(children) {
@@ -456,6 +625,12 @@ export class TunnelEditorDialog {
   }
 
   async #checkEntryHost(seq) {
+    // For remote, the Entry slot is a bind on the SSH server, not a local address,
+    // so there is nothing this machine can meaningfully resolve.
+    if (this.#form.type === "remote") {
+      this.#setResolveWarning(this.#entryResolveWarnEl, "");
+      return;
+    }
     const entry = parseEntry(this.#form.entryAddress);
     const host = entry.error ? "" : entry.host;
     if (!host || LOOPBACKS.has(host)) {
@@ -561,7 +736,9 @@ export class TunnelEditorDialog {
         this.#probeRow(this.#hopFriendly(hop.hopLabel), hop),
       );
     }
-    if (result.destination) {
+    // Only local forwarding probes a far-end destination; remote's destination is
+    // a LOCAL target (unreachable from the far end) and dynamic has none.
+    if (result.destination && this.#form.type === "local") {
       this.#resolveResultsEl.append(
         this.#probeRow(t("editor.resolve.exitRow"), result.destination),
       );
@@ -643,11 +820,19 @@ export class TunnelEditorDialog {
       : t("common.root");
   }
 
-  /** Instant soft warning under Entry: a port conflict, or a privileged port. */
+  /**
+   * Instant soft warning under the Entry slot. For local/dynamic (a local listen
+   * port) that's a port conflict or a privileged port; for remote (a bind on the
+   * SSH server) it's the GatewayPorts note when the bind isn't loopback.
+   */
   #updateEntryWarning() {
     const entry = parseEntry(this.#form.entryAddress);
     let message = "";
-    if (!entry.error) {
+    if (this.#form.type === "remote") {
+      if (!entry.error && entry.host && !LOOPBACKS.has(entry.host)) {
+        message = t("editor.remoteBind.gateway");
+      }
+    } else if (!entry.error) {
       const port = entry.port;
       const clash = this.#existing.find(
         (d) => d && d.id !== this.#editingId && d.localPort === port,
@@ -678,7 +863,15 @@ export class TunnelEditorDialog {
     for (const [key, message] of Object.entries(errors)) {
       let target = key;
       if (key === "localPort" || key === "bindHost") target = "entryAddress";
-      else if (key === "sshHost" || key === "sshPort") target = "targetServer";
+      // The remote-bind port lives in the Entry slot for a `remote` tunnel.
+      else if (
+        key === "remoteBind" ||
+        key === "remoteBind.host" ||
+        key === "remoteBind.port"
+      ) {
+        target = "entryAddress";
+      } else if (key === "sshHost" || key === "sshPort")
+        target = "targetServer";
       else if (
         key === "destination" ||
         key === "destination.host" ||
@@ -702,9 +895,13 @@ export class TunnelEditorDialog {
     if (target.error) {
       parseErrors.targetServer = addressErrorMessage("target", target.error);
     }
-    const exit = parseExit(this.#form.exitAddress);
-    if (exit.error) {
-      parseErrors.exitAddress = addressErrorMessage("exit", exit.error);
+    // The Exit field is hidden for dynamic (no fixed destination), so never derive
+    // an error from a stale value there.
+    if (this.#form.type !== "dynamic") {
+      const exit = parseExit(this.#form.exitAddress);
+      if (exit.error) {
+        parseErrors.exitAddress = addressErrorMessage("exit", exit.error);
+      }
     }
 
     const { errors } = validateDefinition(this.buildPayload());
@@ -770,6 +967,35 @@ function str(v) {
   return typeof v === "string" ? v : "";
 }
 
+/** Rebuild the Entry-slot text for the given type from a stored def. */
+function reconstructEntryField(d, type) {
+  if (type === "remote") return str(d.entryAddress) || reconstructRemoteBind(d);
+  return str(d.entryAddress) || reconstructEntry(d);
+}
+
+/** Rebuild the Exit-slot text for the given type (dynamic has no Exit field). */
+function reconstructExitField(d, type) {
+  if (type === "dynamic") return "";
+  if (type === "remote") return str(d.exitAddress) || reconstructLocalTarget(d);
+  return str(d.exitAddress) || reconstructExit(d);
+}
+
+/** Rebuild the Remote-bind field: "port" or "host:port" (loopback host elided). */
+function reconstructRemoteBind(d) {
+  const port = d.remoteBind?.port;
+  if (port === undefined || port === null) return "";
+  const host = str(d.remoteBind?.host).trim();
+  return host === "" || LOOPBACKS.has(host) ? String(port) : `${host}:${port}`;
+}
+
+/** Rebuild the Local-target field (remote's destination): "port" or "host:port". */
+function reconstructLocalTarget(d) {
+  const port = d.destination?.port;
+  if (port === undefined || port === null) return "";
+  const host = str(d.destination?.host).trim();
+  return host === "" || LOOPBACKS.has(host) ? String(port) : `${host}:${port}`;
+}
+
 /** Rebuild the Entry field from a stored def: "port" or "host:port". */
 function reconstructEntry(d) {
   const port = d.localPort;
@@ -808,6 +1034,7 @@ function reconstructExit(d) {
 function blankForm() {
   return {
     name: "",
+    type: "local",
     entryAddress: "",
     targetServer: "",
     exitAddress: "",

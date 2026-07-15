@@ -3,7 +3,43 @@
 A tunnel definition describes *where* traffic goes and *how* the SSH connection
 behaves. Open the editor with **+** (Add) or by editing an existing tunnel.
 
+## Forwarding types
+
+The **Forwarding type** selector at the top of the editor chooses which way the
+tunnel forwards. Every type connects to the same **Target server** over SSH,
+optionally through jump hosts, and verifies host keys the same way — only the ends
+differ.
+
+| Type | Equivalent | What it does |
+| --- | --- | --- |
+| **Local** *(default)* | `ssh -L` | Binds a local port and forwards it through the SSH server to a destination. The everyday tunnel. |
+| **Remote** | `ssh -R` | Binds a port **on the SSH server** and forwards connections back to a target on **this** machine. Use it to expose a local service to the remote side (a webhook to your laptop, say). |
+| **Dynamic (SOCKS)** | `ssh -D` | Runs a local **SOCKS5 proxy**; point a browser or app at it and every connection is forwarded through the SSH server. Reaches any host the server can, with no per-host tunnel. |
+
+The address fields relabel themselves to match the type — a **Local** tunnel shows
+Entry / Exit ports, **Remote** shows a Remote bind and a Local target, and
+**Dynamic** shows just the SOCKS port. Existing tunnels are all **Local** and are
+unchanged.
+
+### Remote forwarding notes
+
+The **Remote bind** is a bare port (bound on the server's loopback) or an
+`address:port`. Binding a **non-loopback** address on the server — so other hosts
+can reach it — only works if the server's `sshd` has **`GatewayPorts`** enabled;
+Port Hippo warns you, but only the server can allow it. A remote tunnel connects
+**eagerly** on arm (the server-side listener only exists while the SSH connection
+is up) and re-establishes on a drop.
+
+### Dynamic (SOCKS) notes
+
+The SOCKS proxy is **CONNECT + no-auth** — the profile browsers and CLI tools use.
+It connects lazily on the first request and idle-tears-down like a local tunnel.
+Point your client at `127.0.0.1:<port>` (e.g. `curl --socks5 127.0.0.1:1080 …`).
+
 ## The three addresses
+
+*(For a **Local** tunnel — see [Forwarding types](#forwarding-types) for how the
+fields change for Remote and Dynamic.)*
 
 Port Hippo routes traffic through three points:
 

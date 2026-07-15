@@ -33,6 +33,7 @@ import {
   cardToneClasses,
 } from "./card-catalog.js";
 import { CardMenu } from "./card-menu.js";
+import { typeBadge } from "./tunnel-list.js";
 
 /** Armed = the engine holds this tunnel (anything but disarmed / error). */
 function isArmed(state) {
@@ -187,20 +188,48 @@ export class TunnelDetail {
 
   #routeSegments() {
     const d = this.#def || {};
-    const segs = [`${d.bindHost || "127.0.0.1"}:${d.localPort ?? "?"}`];
-    for (const id of d.jumpHostIds || []) {
+    const type = d.type || "local";
+    const jumpSegs = (d.jumpHostIds || []).map((id) => {
       const jh = this.#jumpsById.get(id);
-      segs.push(jh ? jh.label || `${jh.host}:${jh.port}` : id);
+      return jh ? jh.label || `${jh.host}:${jh.port}` : id;
+    });
+    const server =
+      typeof d.sshHost === "string" && d.sshHost.trim() !== ""
+        ? `${d.sshHost}:${d.sshPort ?? 22}`
+        : null;
+
+    if (type === "dynamic") {
+      // Local SOCKS listener → chain → the SSH server (the exit vantage).
+      const segs = [
+        `${d.bindHost || "127.0.0.1"}:${d.localPort ?? "?"}`,
+        ...jumpSegs,
+      ];
+      if (server) segs.push(server);
+      return segs;
     }
-    if (typeof d.sshHost === "string" && d.sshHost.trim() !== "") {
-      segs.push(`${d.sshHost}:${d.sshPort ?? 22}`);
+    if (type === "remote") {
+      // The port bound on the server → chain → the local target it forwards to.
+      const bind = d.remoteBind || {};
+      return [
+        `${d.sshHost ?? "?"}:${bind.port ?? "?"}`,
+        ...jumpSegs,
+        `${d.destination?.host ?? "127.0.0.1"}:${d.destination?.port ?? "?"}`,
+      ];
     }
+    // local: local listener → chain → [bastion] → destination.
+    const segs = [
+      `${d.bindHost || "127.0.0.1"}:${d.localPort ?? "?"}`,
+      ...jumpSegs,
+    ];
+    if (server) segs.push(server);
     segs.push(`${d.destination?.host ?? "?"}:${d.destination?.port ?? "?"}`);
     return segs;
   }
 
   #renderBreadcrumb() {
     clear(this.#breadcrumbEl);
+    const badge = typeBadge(this.#def);
+    if (badge) this.#breadcrumbEl.appendChild(badge);
     const segs = this.#routeSegments();
     segs.forEach((seg, i) => {
       if (i > 0) {

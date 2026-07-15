@@ -69,6 +69,43 @@ export const EN = {
   "editor.editTitle": "Edit tunnel",
   "editor.name": "Name",
 
+  // Forwarding type (Feature 110): local (ssh -L), remote (ssh -R), dynamic (ssh -D).
+  "editor.type": "Forwarding type",
+  "editor.type.local": "Local",
+  "editor.type.local.desc":
+    "Forward a local port through the SSH server to a destination (ssh -L). The most common tunnel.",
+  "editor.type.remote": "Remote",
+  "editor.type.remote.desc":
+    "Bind a port on the SSH server and forward it back to a target on this machine (ssh -R).",
+  "editor.type.dynamic": "Dynamic (SOCKS)",
+  "editor.type.dynamic.desc":
+    "Run a local SOCKS5 proxy that forwards each request through the SSH server (ssh -D).",
+
+  // Compact row/breadcrumb badges for the non-default forwarding types.
+  "type.badge.remote": "R",
+  "type.badge.dynamic": "SOCKS",
+
+  // Remote-forward fields (type = remote).
+  "editor.remoteBind": "Remote bind",
+  "editor.remoteBind.hint": "port on the server (or address:port)",
+  "editor.remoteBind.placeholder": "8080  or  0.0.0.0:8080",
+  "editor.remoteBind.desc":
+    "The port bound on the SSH server that forwards back to your local target. A bare port binds the server’s loopback; an address:port can request a wider bind. A non-loopback bind needs the server’s GatewayPorts to be enabled.",
+  "editor.remoteBind.gateway":
+    "A non-loopback bind only works if the SSH server has GatewayPorts enabled.",
+  "editor.localTarget": "Local target",
+  "editor.localTarget.hint": "address:port on this machine",
+  "editor.localTarget.placeholder": "127.0.0.1:3000",
+  "editor.localTarget.desc":
+    "The address and port on this machine that inbound connections on the remote port are forwarded to. Enter a port (bound to 127.0.0.1) or an address:port.",
+
+  // Dynamic (SOCKS) field (type = dynamic).
+  "editor.socksPort": "SOCKS port",
+  "editor.socksPort.hint": "local SOCKS5 port or address:port",
+  "editor.socksPort.placeholder": "1080  or  127.0.0.1:1080",
+  "editor.socksPort.desc":
+    "The local address the SOCKS5 proxy listens on. Point a browser or app at it and every connection is forwarded through the SSH server. Enter a port (bound to 127.0.0.1) or an address:port.",
+
   // Entry / Target / Exit address fields. See features/tunnel-address-fields.md.
   "editor.entryPort": "Entry port",
   "editor.entryPort.hint": "local port or address:port",

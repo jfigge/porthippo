@@ -39,6 +39,23 @@ export function dotState(state) {
   return "disarmed";
 }
 
+/**
+ * A compact forwarding-type badge for a row (Feature 110), or null for the default
+ * `local` type (which stays unbadged to keep the common case clean). The full type
+ * name is the tooltip.
+ * @param {object} def
+ * @returns {HTMLElement|null}
+ */
+export function typeBadge(def) {
+  const type = (def && def.type) || "local";
+  if (type !== "remote" && type !== "dynamic") return null;
+  return el("span", {
+    class: `tunnel-type-badge tunnel-type-badge--${type}`,
+    text: t(`type.badge.${type}`),
+    title: t(`editor.type.${type}`),
+  });
+}
+
 export class TunnelList {
   #el;
   #listEl;
@@ -189,6 +206,7 @@ export class TunnelList {
           class: "tunnel-row-port",
           text: String(def.localPort ?? "—"),
         }),
+        typeBadge(def),
         el("span", {
           class: "tunnel-row-name",
           text: def.name || t("def.unnamed"),

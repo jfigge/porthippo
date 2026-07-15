@@ -36,7 +36,7 @@ import {
   cardToneClasses,
 } from "./card-catalog.js";
 import { CardMenu } from "./card-menu.js";
-import { dotState } from "./tunnel-list.js";
+import { dotState, typeBadge } from "./tunnel-list.js";
 
 /** The synthetic key of the fixed identity column (sorts by tunnel name). */
 export const TABLE_TUNNEL_COLUMN = "__tunnel";
@@ -351,6 +351,7 @@ export class TunnelTable {
           class: "tunnel-row-port",
           text: String(def.localPort ?? "—"),
         }),
+        typeBadge(def),
         el("span", {
           class: "tunnel-row-name",
           text: def.name || t("def.unnamed"),

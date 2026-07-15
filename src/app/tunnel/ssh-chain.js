@@ -107,6 +107,23 @@ function forwardOut(client, srcHost, srcPort, dstHost, dstPort) {
   });
 }
 
+/**
+ * Ask a ready client's SSH server to listen on `bindHost:bindPort` and forward
+ * inbound connections back over the channel (`tcpip-forward` — the `ssh -R`
+ * primitive, Feature 110). Resolves to the actually-bound port (the server picks
+ * one when `bindPort` is 0). Each accepted connection then fires the client's
+ * `"tcp connection"` event, which the caller wires. A non-loopback `bindHost`
+ * needs the server's `GatewayPorts` — the server, not us, decides whether to allow it.
+ */
+function forwardIn(client, bindHost, bindPort) {
+  return new Promise((resolve, reject) => {
+    client.forwardIn(bindHost, bindPort, (err, port) => {
+      if (err) reject(err);
+      else resolve(port);
+    });
+  });
+}
+
 /** Connect a single hop, optionally over a forwarded `sock` from the prior hop. */
 function connectHop({ hop, hopLabel, sock, hostVerifier, readFileSync }) {
   return new Promise((resolve, reject) => {
@@ -369,6 +386,17 @@ async function probeChain({
       };
       return result;
     }
+    // A dynamic (SOCKS) tunnel has no fixed destination to probe: the chain itself
+    // is the whole path, so a clean walk is a pass.
+    if (!dest.host) {
+      result.destination = {
+        host: dest.host,
+        port: dest.port,
+        status: "skipped",
+      };
+      result.ok = true;
+      return result;
+    }
     const finalClient = clients[clients.length - 1];
     try {
       const stream = await forwardOut(
@@ -406,6 +434,7 @@ module.exports = {
   connectChain,
   probeChain,
   forwardOut,
+  forwardIn,
   buildAuthHandler,
   resolveAgent,
 };

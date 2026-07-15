@@ -40,7 +40,7 @@
 
 const io = require("./io");
 const { readDoc, writeDoc } = require("./definitions-doc");
-const { validateDefinition } = require("./validate");
+const { validateDefinition, normaliseTunnelType } = require("./validate");
 const { decryptCredential } = require("./credential-secrets");
 const { resolveDefinition, summariseRoute } = require("./resolve");
 
@@ -56,6 +56,7 @@ function invalidDefinitionError(errors) {
 function applyDefaults(def) {
   return {
     ...def,
+    type: normaliseTunnelType(def.type),
     enabled: def.enabled ?? true,
     keepAlive: def.keepAlive ?? false,
     autoReconnect: def.autoReconnect ?? false,
@@ -68,8 +69,17 @@ function applyDefaults(def) {
 // user cleared it, so a shallow merge must not resurrect the stored value —
 // mirrors credential-store's SECRET_FIELDS handling. `sshHost` (the mandatory
 // target server) is NOT here: it can never be cleared, and omitting it should
-// keep the stored value rather than blank a required field.
-const OPTIONAL_FIELDS = ["bindHost", "sshPort", "lingerMs", "exitAddress"];
+// keep the stored value rather than blank a required field. `remoteBind` (Feature
+// 110) IS here so switching a tunnel's type away from `remote` drops the stale
+// server-bind rather than carrying it onto a local/dynamic tunnel.
+const OPTIONAL_FIELDS = [
+  "bindHost",
+  "sshPort",
+  "lingerMs",
+  "exitAddress",
+  "entryAddress",
+  "remoteBind",
+];
 
 /** Index an array of `{ id }` records into a Map for O(1) reference lookup. */
 function indexById(records) {

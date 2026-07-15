@@ -74,6 +74,7 @@ test("buildPayload extracts bare ports into concrete fields + verbatim strings",
 
   assert.deepEqual(dlg.buildPayload(), {
     name: "Prod DB",
+    type: "local",
     localPort: 5432,
     destination: { host: "127.0.0.1", port: 5432 },
     sshHost: "db.internal",
@@ -97,6 +98,7 @@ test("buildPayload extracts address:port fields (bind / bastion port / exit host
 
   assert.deepEqual(dlg.buildPayload(), {
     name: "LAN forward",
+    type: "local",
     localPort: 80,
     bindHost: "0.0.0.0",
     destination: { host: "db.local", port: 5432 },
@@ -110,6 +112,63 @@ test("buildPayload extracts address:port fields (bind / bastion port / exit host
     entryAddress: "0.0.0.0:80",
     exitAddress: "db.local:5432",
   });
+});
+
+// ── Forwarding type (Feature 110) ─────────────────────────────────────────────
+
+test("switching to dynamic hides the Exit field and drops the destination", async () => {
+  const dlg = mount();
+  await dlg.openCreate();
+  setInput(dlg, "name", "SOCKS");
+  q(dlg, ".editor-type-btn:nth-child(3)").click(); // dynamic
+  setInput(dlg, "entryAddress", "1080");
+  setInput(dlg, "targetServer", "bastion");
+  change(q(dlg, ".cred-picker-select"), "c1");
+
+  assert.equal(dlg.buildPayload().type, "dynamic");
+  assert.equal(dlg.buildPayload().localPort, 1080);
+  assert.equal("destination" in dlg.buildPayload(), false, "no destination");
+  assert.ok(dlg.buildPayload().entryAddress === "1080");
+  // The Exit field's section is hidden for dynamic.
+  assert.equal(
+    q(dlg, ".editor-input-exitAddress").closest(".editor-block").hidden,
+    true,
+  );
+});
+
+test("switching to remote maps the fields to remoteBind + local target", async () => {
+  const dlg = mount();
+  await dlg.openCreate();
+  setInput(dlg, "name", "Webhook");
+  q(dlg, ".editor-type-btn:nth-child(2)").click(); // remote
+  setInput(dlg, "entryAddress", "8080"); // remote bind
+  setInput(dlg, "targetServer", "bastion");
+  setInput(dlg, "exitAddress", "127.0.0.1:3000"); // local target
+  change(q(dlg, ".cred-picker-select"), "c1");
+
+  const payload = dlg.buildPayload();
+  assert.equal(payload.type, "remote");
+  assert.deepEqual(payload.remoteBind, { port: 8080 });
+  assert.deepEqual(payload.destination, { host: "127.0.0.1", port: 3000 });
+  assert.equal("localPort" in payload, false, "remote binds no local port");
+});
+
+test("openEdit reconstructs a remote tunnel's bind + local target fields", async () => {
+  const dlg = mount();
+  await dlg.openEdit({
+    id: "t1",
+    name: "Reverse",
+    type: "remote",
+    remoteBind: { host: "0.0.0.0", port: 8080 },
+    destination: { host: "127.0.0.1", port: 3000 },
+    sshHost: "bastion",
+    credentialId: "c1",
+    jumpHostIds: [],
+  });
+  const active = q(dlg, ".editor-type-btn--active");
+  assert.match(active.textContent, /Remote/);
+  assert.equal(q(dlg, ".editor-input-entryAddress").value, "0.0.0.0:8080");
+  assert.equal(q(dlg, ".editor-input-exitAddress").value, "3000");
 });
 
 test("a bare-host Exit defers its port to the entry port", async () => {

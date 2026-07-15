@@ -37,6 +37,24 @@
 const AUTH_TYPES = ["agent", "key", "password"];
 
 /**
+ * The forwarding directions a tunnel may take (Feature 110):
+ *   - `local`   — the default: bind a local port and forward it through the SSH
+ *                 chain to a destination (`ssh -L`).
+ *   - `remote`  — bind a port on the SSH server and forward it back to a local
+ *                 target (`ssh -R`).
+ *   - `dynamic` — bind a local SOCKS5 proxy that forwards each request through the
+ *                 SSH chain (`ssh -D`).
+ * A record with no `type` is treated as `local` so pre-Feature-110 tunnels are
+ * unchanged.
+ */
+const TUNNEL_TYPES = ["local", "remote", "dynamic"];
+
+/** Normalise a possibly-absent `type` to one of TUNNEL_TYPES (default local). */
+function normaliseTunnelType(type) {
+  return TUNNEL_TYPES.includes(type) ? type : "local";
+}
+
+/**
  * The write-only secret field for an auth `type`, or null when it carries none.
  * `key` auth may protect its private key with a `passphrase`; `password` auth
  * holds a `password`; `agent` auth has no stored secret.
@@ -64,12 +82,17 @@ function isValidPort(v) {
 /**
  * Validate a tunnel definition (reference shape).
  *
- * A tunnel listens on a local Entry (`bindHost` + `localPort`), connects to a
- * mandatory Target server (`sshHost`, port defaulting to 22), and forwards to an
- * Exit on that server (`destination`). So the local port, destination, target
- * server (`sshHost`) and a `credentialId` are all structurally required;
- * `sshPort` / `bindHost` are optional (defaulted in the resolver), and
- * `entryAddress` / `exitAddress` are the verbatim strings the editor round-trips.
+ * The required fields depend on the forwarding `type` (Feature 110; absent ⇒
+ * `local`):
+ *   - local   — Entry (`bindHost` + `localPort`), a Target server (`sshHost`) and
+ *               an Exit (`destination`); forwards the local port to the Exit.
+ *   - remote  — a Target server (`sshHost`), a `remoteBind` port on it, and a
+ *               local target (`destination`); forwards the remote port back here.
+ *   - dynamic — a local SOCKS listener (`bindHost` + `localPort`) and a Target
+ *               server (`sshHost`); it has no fixed destination.
+ * `credentialId` and `sshHost` are required for every type; `sshPort` / `bindHost`
+ * are optional (defaulted in the resolver), and `entryAddress` / `exitAddress` are
+ * the verbatim strings the editor round-trips (local only).
  *
  * @param {*} def
  * @returns {{ valid: boolean, errors: Object<string,string> }}
@@ -81,31 +104,62 @@ function validateDefinition(def) {
     return { valid: false, errors: { _: "definition must be an object" } };
   }
 
+  const type = normaliseTunnelType(def.type);
+  if (def.type !== undefined && !TUNNEL_TYPES.includes(def.type)) {
+    errors.type = `type must be one of ${TUNNEL_TYPES.join(", ")}`;
+  }
+
   if (!isNonEmptyString(def.name)) {
     errors.name = "name is required";
   }
-  if (!isValidPort(def.localPort)) {
+  // The local listener port — for `local` (the forwarded port) and `dynamic` (the
+  // SOCKS port). A `remote` tunnel binds no local port, so it isn't required there.
+  if (type !== "remote" && !isValidPort(def.localPort)) {
     errors.localPort = `localPort must be an integer ${MIN_PORT}–${MAX_PORT}`;
   }
   if (def.bindHost !== undefined && !isNonEmptyString(def.bindHost)) {
     errors.bindHost = "bindHost must be a non-empty string when set";
   }
 
-  // Destination (host + port) — the far end the tunnel exposes locally.
-  if (!def.destination || typeof def.destination !== "object") {
-    errors.destination = "destination is required";
-  } else {
-    if (!isNonEmptyString(def.destination.host)) {
-      errors["destination.host"] = "destination host is required";
-    }
-    if (!isValidPort(def.destination.port)) {
-      errors["destination.port"] =
-        `destination port must be an integer ${MIN_PORT}–${MAX_PORT}`;
+  // Destination — for `local` it's the Exit exposed locally; for `remote` it's the
+  // local target the remote port forwards back to. `dynamic` has no fixed one.
+  if (type !== "dynamic") {
+    if (!def.destination || typeof def.destination !== "object") {
+      errors.destination = "destination is required";
+    } else {
+      if (!isNonEmptyString(def.destination.host)) {
+        errors["destination.host"] = "destination host is required";
+      }
+      if (!isValidPort(def.destination.port)) {
+        errors["destination.port"] =
+          `destination port must be an integer ${MIN_PORT}–${MAX_PORT}`;
+      }
     }
   }
 
-  // Target server — the SSH server the tunnel connects to. Mandatory (it is the
-  // far end of the tunnel); its port defaults to 22 in the resolver when unset.
+  // Remote bind — the port bound on the SSH server (`remote` only). Its host is
+  // optional (the resolver defaults it to loopback; a non-loopback bind is the
+  // warned GatewayPorts opt-in).
+  if (type === "remote") {
+    if (!def.remoteBind || typeof def.remoteBind !== "object") {
+      errors.remoteBind = "remote bind is required";
+    } else {
+      if (
+        def.remoteBind.host !== undefined &&
+        !isNonEmptyString(def.remoteBind.host)
+      ) {
+        errors["remoteBind.host"] =
+          "remote bind host must be a non-empty string when set";
+      }
+      if (!isValidPort(def.remoteBind.port)) {
+        errors["remoteBind.port"] =
+          `remote bind port must be an integer ${MIN_PORT}–${MAX_PORT}`;
+      }
+    }
+  }
+
+  // Target server — the SSH server the tunnel connects to. Mandatory for every
+  // type (it is the far/exit end); its port defaults to 22 in the resolver.
   if (!isNonEmptyString(def.sshHost)) {
     errors.sshHost = "target server is required";
   }
@@ -226,6 +280,8 @@ function validateJumpHost(jump) {
 
 module.exports = {
   AUTH_TYPES,
+  TUNNEL_TYPES,
+  normaliseTunnelType,
   secretFieldForAuthType,
   validateDefinition,
   validateCredential,

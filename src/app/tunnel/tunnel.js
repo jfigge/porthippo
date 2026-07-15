@@ -39,12 +39,20 @@
  * On an unexpected SSH drop the branch is `def.autoReconnect` (default false): false →
  * fail the connections and return to `listening` (re-establish on next access); true
  * (or `keepAlive`) → bounded-backoff reconnect, moving to `error` only on exhaustion.
+ *
+ * Forwarding type (Feature 110): a `local` tunnel binds a local port and forwards it
+ * to a destination on first access (the flow described above). A `dynamic` tunnel
+ * binds the local port as a SOCKS5 proxy and is otherwise identical (lazy connect,
+ * idle linger). A `remote` tunnel binds NO local listener — it connects eagerly on
+ * arm, asks the SSH server to bind a port (`forwardIn`), and relays each inbound
+ * remote connection back to a local target; it holds the connection open like
+ * `keepAlive` (there is no local access to lazily re-trigger it).
  */
 "use strict";
 
 const { Listener } = require("./listener");
-const { connectChain } = require("./ssh-chain");
-const { startRelay } = require("./relay");
+const { connectChain, forwardIn } = require("./ssh-chain");
+const { startRelay, startReverseRelay, startSocksRelay } = require("./relay");
 const { Stats } = require("./stats");
 
 const BASE_BACKOFF_MS = 1000;
@@ -59,12 +67,15 @@ const DEFAULT_BIND_HOST = "127.0.0.1";
  * definition and never need a teardown.
  */
 function connectionAffectingChange(a, b) {
+  if ((a.type || "local") !== (b.type || "local")) return true;
   if (a.localPort !== b.localPort) return true;
   if ((a.bindHost || DEFAULT_BIND_HOST) !== (b.bindHost || DEFAULT_BIND_HOST))
     return true;
   if (Boolean(a.keepAlive) !== Boolean(b.keepAlive)) return true;
   if (Boolean(a.enabled) !== Boolean(b.enabled)) return true;
   if (JSON.stringify(a.destination) !== JSON.stringify(b.destination))
+    return true;
+  if (JSON.stringify(a.remoteBind) !== JSON.stringify(b.remoteBind))
     return true;
   if (JSON.stringify(a.sshServer) !== JSON.stringify(b.sshServer)) return true;
   if (JSON.stringify(a.jumps || []) !== JSON.stringify(b.jumps || []))
@@ -81,6 +92,10 @@ class Tunnel {
   #paused = false; // runtime pause toggle (Feature 30); orthogonal to #state
   #error = null;
 
+  // Armed = between a successful arm() and teardown, INDEPENDENT of #listener: a
+  // `remote` tunnel is armed with no local listener at all, so reconnect / error
+  // decisions key off this rather than the listener's presence.
+  #armed = false;
   #listener = null;
   #sshConnection = null; // { client, dispose } once connected
   #connectPromise = null; // in-flight connectChain (dedupes concurrent first hits)
@@ -115,6 +130,31 @@ class Tunnel {
 
   get id() {
     return this.#def.id;
+  }
+
+  // ── Forwarding type (Feature 110) ─────────────────────────────────────────────
+
+  #type() {
+    return this.#def.type || "local";
+  }
+
+  #isRemote() {
+    return this.#type() === "remote";
+  }
+
+  #isDynamic() {
+    return this.#type() === "dynamic";
+  }
+
+  /**
+   * True when the tunnel holds its SSH connection open independently of local
+   * access: `keepAlive` (by request) or `remote` (structurally — the remote listen
+   * only exists while connected, and nothing local can lazily re-trigger it). Such
+   * tunnels connect eagerly on arm, never idle-tear-down, and never give up
+   * reconnecting while armed.
+   */
+  #holdsOpen() {
+    return Boolean(this.#def.keepAlive) || this.#isRemote();
   }
 
   /**
@@ -158,7 +198,11 @@ class Tunnel {
 
   // ── Arm / disarm ──────────────────────────────────────────────────────────────
 
-  /** Bind the listener; if `keepAlive`, also connect the SSH chain eagerly. */
+  /**
+   * Arm the tunnel. For `local`/`dynamic` this binds the local listener (SOCKS for
+   * dynamic) and, if `keepAlive`, connects eagerly. A `remote` tunnel binds no local
+   * listener — it arms and connects eagerly so the SSH server can bind the forward.
+   */
   async arm() {
     if (this.#disposed) return this.status();
 
@@ -168,6 +212,16 @@ class Tunnel {
     }
     this.#error = null;
     this.#paused = false; // a (re)arm always starts accepting
+
+    if (this.#isRemote()) {
+      // No local listener: the far end binds the port. Arm and connect eagerly so
+      // the reverse forward is established (and re-established on any drop).
+      this.#armed = true;
+      this.#stats.onArmed();
+      this.#setState("listening");
+      this.#ensureConnected().catch((err) => this.#failConnect(err));
+      return this.status();
+    }
 
     const listener = new Listener({
       bindHost: this.#def.bindHost || DEFAULT_BIND_HOST,
@@ -195,10 +249,11 @@ class Tunnel {
     }
 
     this.#listener = listener;
+    this.#armed = true;
     this.#stats.onArmed(); // fresh measurement session (stamps armedAt, zeroes totals)
     this.#setState("listening");
 
-    if (this.#def.keepAlive) {
+    if (this.#holdsOpen()) {
       this.#ensureConnected().catch((err) => this.#failConnect(err));
     }
     return this.status();
@@ -350,10 +405,9 @@ class Tunnel {
           socket.destroy();
           return;
         }
-        conn.relay = startRelay({
+        const relayOpts = {
           client: sshConn.client,
           socket,
-          destination: this.#def.destination,
           stats: this.#stats,
           onOpen: () => {
             // A forward succeeded → clear any stale forward error so a transient
@@ -377,7 +431,12 @@ class Tunnel {
             );
             this.#emitState();
           },
-        });
+        };
+        // dynamic → the client picks the target via a SOCKS handshake; local →
+        // the fixed destination. Both feed the same stats + connection ref-count.
+        conn.relay = this.#isDynamic()
+          ? startSocksRelay(relayOpts)
+          : startRelay({ ...relayOpts, destination: this.#def.destination });
         // A pause that landed while this connection was still connecting applies
         // to its relay the moment it exists.
         if (this.#paused) conn.relay.pause();
@@ -388,6 +447,67 @@ class Tunnel {
         socket.destroy();
         this.#failConnect(err);
       });
+  }
+
+  // ── Reverse (remote-forward) connection handling (Feature 110) ────────────────
+
+  /**
+   * Establish the reverse forward once the SSH session is up: attach the inbound
+   * handler, then ask the server to bind `remoteBind`. A bind failure surfaces as a
+   * connect failure so the reconnect/error policy applies.
+   */
+  async #setupRemoteForward(sshConn) {
+    // Attach the inbound handler BEFORE binding so a connection that arrives the
+    // instant the forward is up isn't missed.
+    sshConn.client.on("tcp connection", (info, accept, reject) =>
+      this.#handleReverseConnection(sshConn, accept, reject),
+    );
+    const bind = this.#def.remoteBind || {};
+    await forwardIn(sshConn.client, bind.host || DEFAULT_BIND_HOST, bind.port);
+  }
+
+  /** An inbound connection arrived on the remote-bound port: relay it to the local target. */
+  #handleReverseConnection(sshConn, accept, reject) {
+    // Reject if this session is stale, we're paused, or torn down.
+    if (this.#sshConnection !== sshConn || this.#paused || this.#disposed) {
+      try {
+        reject();
+      } catch {
+        // channel already gone
+      }
+      return;
+    }
+    let stream;
+    try {
+      stream = accept();
+    } catch {
+      return; // the channel could not be accepted
+    }
+    const conn = { socket: null, relay: null };
+    this.#connections.add(conn);
+    conn.relay = startReverseRelay({
+      stream,
+      destination: this.#def.destination,
+      stats: this.#stats,
+      onOpen: () => {
+        if (this.#error) {
+          this.#error = null;
+          this.#emitState();
+        }
+      },
+      onClose: () => {
+        if (this.#connections.delete(conn)) this.#onIdleCheck();
+      },
+      onError: (err) => {
+        // The local target refused/was unreachable. Record it so a misconfigured
+        // local target is visible rather than silently dropping every callback.
+        this.#recordError(
+          String((err && err.message) || err || "local target failed"),
+        );
+        this.#emitState();
+      },
+    });
+    this.#emitState(); // connection count changed
   }
 
   #onIdleCheck() {
@@ -450,6 +570,13 @@ class Tunnel {
         this.#stats.onConnected(); // stamp openedAt for this SSH session
         this.#wireDrop(sshConn);
         this.#setState("connected");
+        if (this.#isRemote()) {
+          // Bind the remote port + wire inbound; a bind failure drops the session
+          // and re-enters the reconnect policy.
+          this.#setupRemoteForward(sshConn).catch((err) =>
+            this.#handleRemoteForwardError(sshConn, err),
+          );
+        }
         this.#maybeStartLinger(); // eager (keepAlive/reconnect) connect with no clients
         return sshConn;
       })
@@ -489,8 +616,28 @@ class Tunnel {
     }
   }
 
+  /**
+   * The reverse forward couldn't be established (the SSH session is up but the
+   * server refused / failed the port bind). Drop this session and re-enter the
+   * reconnect policy — a `remote` tunnel `#holdsOpen()`, so it keeps retrying.
+   */
+  #handleRemoteForwardError(sshConn, err) {
+    if (this.#sshConnection !== sshConn) return; // a newer session/teardown won
+    this.#recordError(
+      String((err && err.message) || err || "remote bind failed"),
+    );
+    this.#disposeSsh(); // ends the client (nulls #sshConnection, stats.onDisconnected)
+    this.#failAllConnections();
+    this.#cancelLinger();
+    if (this.#shouldStayHot()) {
+      this.#attemptReconnect();
+    } else {
+      this.#setState(this.#armed ? "error" : "disarmed");
+    }
+  }
+
   #shouldStayHot() {
-    return Boolean(this.#def.keepAlive) || Boolean(this.#def.autoReconnect);
+    return this.#holdsOpen() || Boolean(this.#def.autoReconnect);
   }
 
   #attemptReconnect() {
@@ -501,7 +648,9 @@ class Tunnel {
     const delay = Math.min(max, base * 2 ** this.#reconnectAttempts);
     this.#reconnectTimer = setTimeout(() => {
       this.#reconnectTimer = null;
-      if (this.#disposed || !this.#listener) return;
+      // Armed (not listener) is the gate: a `remote` tunnel has no listener but is
+      // still armed and must keep reconnecting.
+      if (this.#disposed || !this.#armed) return;
       this.#ensureConnected().catch(() => this.#onReconnectFailed());
     }, delay);
   }
@@ -515,10 +664,11 @@ class Tunnel {
       this.#attemptReconnect();
       return;
     }
-    if (this.#def.keepAlive) {
-      // keepAlive has no clients to trigger a later retry, so it must never give
-      // up: pin the delay at the max backoff and keep trying until it reconnects
-      // or is disarmed. (autoReconnect, below, can stop and retry on next access.)
+    if (this.#holdsOpen()) {
+      // A held-open tunnel (keepAlive or remote) has no local access to trigger a
+      // later retry, so it must never give up: pin the delay at the max backoff and
+      // keep trying until it reconnects or is disarmed. (autoReconnect, below, can
+      // stop and retry on next access.)
       this.#reconnectAttempts = maxAttempts;
       this.#attemptReconnect();
       return;
@@ -527,7 +677,7 @@ class Tunnel {
     this.#setState("error"); // next local access re-establishes the chain
   }
 
-  /** A connect attempt failed (lazy connect, eager keepAlive, or reconnect). */
+  /** A connect attempt failed (lazy connect, eager keepAlive/remote, or reconnect). */
   #failConnect(err) {
     this.#recordError(
       String((err && err.message) || err || "connection failed"),
@@ -536,7 +686,7 @@ class Tunnel {
       this.#attemptReconnect();
     } else {
       // Keep the listener bound; the next local access retries the chain.
-      this.#setState(this.#listener ? "error" : "disarmed");
+      this.#setState(this.#armed ? "error" : "disarmed");
     }
   }
 
@@ -544,7 +694,7 @@ class Tunnel {
 
   #maybeStartLinger() {
     if (this.#paused) return; // paused holds the SSH connection open regardless
-    if (this.#def.keepAlive) return; // keepAlive never idle-tears-down
+    if (this.#holdsOpen()) return; // keepAlive / remote never idle-tear-down
     if (this.#connections.size > 0) return;
     if (!this.#sshConnection || this.#lingerTimer) return;
 
@@ -613,6 +763,7 @@ class Tunnel {
     // Invalidate any in-flight connect: its .then resolves into a no-op instead
     // of resurrecting an SSH session this teardown is destroying.
     this.#connectGeneration += 1;
+    this.#armed = false;
     this.#cancelReconnect();
     this.#failAllConnections();
     this.#disposeSsh();

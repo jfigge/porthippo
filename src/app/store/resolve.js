@@ -41,6 +41,8 @@
  */
 "use strict";
 
+const { normaliseTunnelType } = require("./validate");
+
 const DEFAULT_BIND_HOST = "127.0.0.1";
 const DEFAULT_SSH_PORT = 22;
 const LOOPBACK = "127.0.0.1";
@@ -96,16 +98,10 @@ function hop(host, port, cred) {
  */
 function resolveDefinition(tunnel, { credentialsById, jumpHostsById } = {}) {
   const t = tunnel || {};
+  const type = normaliseTunnelType(t.type);
   const creds = asGetter(credentialsById);
   const jumps = asGetter(jumpHostsById);
-
-  const destHost = t.destination?.host;
-  const destPort = t.destination?.port;
-  const sshImplied = isBlank(t.sshHost);
-  const sshHost = sshImplied ? destHost : t.sshHost;
   const sshPort = Number.isInteger(t.sshPort) ? t.sshPort : DEFAULT_SSH_PORT;
-
-  const sshServer = hop(sshHost, sshPort, creds(t.credentialId));
 
   const jumpHops = (Array.isArray(t.jumpHostIds) ? t.jumpHostIds : []).map(
     (id) => {
@@ -117,37 +113,76 @@ function resolveDefinition(tunnel, { credentialsById, jumpHostsById } = {}) {
     },
   );
 
-  // With a blank sshHost we've SSH'd onto the destination box, so the forward
-  // target is loopback there; with a bastion it's the destination host as the
-  // bastion resolves it.
-  const destination = {
-    host: sshImplied ? LOOPBACK : destHost,
-    port: destPort,
-  };
-
-  return {
+  // Fields common to every forwarding type.
+  const base = {
     id: t.id,
     name: t.name,
+    type,
     enabled: t.enabled,
     keepAlive: t.keepAlive,
     autoReconnect: t.autoReconnect,
     lingerMs: t.lingerMs,
-    localPort: t.localPort,
     bindHost: t.bindHost || DEFAULT_BIND_HOST,
-    destination,
-    sshServer,
     jumps: jumpHops,
+  };
+
+  if (type === "dynamic") {
+    // A local SOCKS listener; SSH to the (mandatory) target server, which is the
+    // exit vantage. There is no fixed destination — each SOCKS request names it.
+    return {
+      ...base,
+      localPort: t.localPort,
+      destination: null,
+      sshServer: hop(t.sshHost, sshPort, creds(t.credentialId)),
+    };
+  }
+
+  if (type === "remote") {
+    // SSH to the target server and bind `remoteBind` there; each accepted remote
+    // connection is forwarded back to the local `destination` target. The remote
+    // bind host defaults to loopback (a non-loopback bind needs server GatewayPorts).
+    const remoteBind = {
+      host: isBlank(t.remoteBind?.host) ? LOOPBACK : t.remoteBind.host,
+      port: t.remoteBind?.port,
+    };
+    const destination = {
+      host: isBlank(t.destination?.host) ? LOOPBACK : t.destination.host,
+      port: t.destination?.port,
+    };
+    return {
+      ...base,
+      remoteBind,
+      destination,
+      sshServer: hop(t.sshHost, sshPort, creds(t.credentialId)),
+    };
+  }
+
+  // local (default) — bind `bindHost:localPort` and forward it to the Exit.
+  const destHost = t.destination?.host;
+  const destPort = t.destination?.port;
+  // A blank sshHost means "the SSH server is the destination box itself" — a
+  // backward-compatible shape for tunnels migrated before Feature 45 set sshHost
+  // explicitly. New tunnels always carry sshHost.
+  const sshImplied = isBlank(t.sshHost);
+  const sshHost = sshImplied ? destHost : t.sshHost;
+
+  return {
+    ...base,
+    localPort: t.localPort,
+    destination: { host: sshImplied ? LOOPBACK : destHost, port: destPort },
+    sshServer: hop(sshHost, sshPort, creds(t.credentialId)),
   };
 }
 
 /**
  * Build the compact route string for a Definition list row, reusing the same
- * blank-sshHost implication as the resolver.
+ * implications as the resolver so display and behaviour can't drift. The shape
+ * depends on the forwarding type (Feature 110):
  *
- * Examples:
- *   :5432 → db.example.com:5432
- *   :5432 → db.internal:5432  via bastion
- *   :5432 → db.internal:5432  via bastion  (jump: relay1, relay2)
+ *   local    :5432 → db.example.com:5432
+ *            :5432 → db.internal:5432  via bastion  (jump: relay1, relay2)
+ *   remote   R bastion:8080 → 127.0.0.1:3000
+ *   dynamic  SOCKS5 :1080  via bastion
  *
  * @param {object} tunnel
  * @param {object} [refs]
@@ -156,20 +191,36 @@ function resolveDefinition(tunnel, { credentialsById, jumpHostsById } = {}) {
  */
 function summariseRoute(tunnel, { jumpHostsById } = {}) {
   const t = tunnel || {};
+  const type = normaliseTunnelType(t.type);
   const jumps = asGetter(jumpHostsById);
 
+  const jumpSuffix = () => {
+    const ids = Array.isArray(t.jumpHostIds) ? t.jumpHostIds : [];
+    if (ids.length === 0) return "";
+    const labels = ids.map((id) => jumps(id)?.label || id);
+    return `  (jump: ${labels.join(", ")})`;
+  };
+
+  if (type === "dynamic") {
+    let out = `SOCKS5 :${t.localPort ?? "?"}`;
+    if (!isBlank(t.sshHost)) out += `  via ${t.sshHost}`;
+    return out + jumpSuffix();
+  }
+
+  if (type === "remote") {
+    const server = isBlank(t.sshHost) ? "?" : t.sshHost;
+    const rPort = t.remoteBind?.port ?? "?";
+    const dHost = t.destination?.host || LOOPBACK;
+    const dPort = t.destination?.port ?? "?";
+    return `R ${server}:${rPort} → ${dHost}:${dPort}` + jumpSuffix();
+  }
+
+  // local
   const destHost = t.destination?.host || "?";
   const destPort = t.destination?.port ?? "?";
   let out = `:${t.localPort ?? "?"} → ${destHost}:${destPort}`;
-
   if (!isBlank(t.sshHost)) out += `  via ${t.sshHost}`;
-
-  const ids = Array.isArray(t.jumpHostIds) ? t.jumpHostIds : [];
-  if (ids.length > 0) {
-    const labels = ids.map((id) => jumps(id)?.label || id);
-    out += `  (jump: ${labels.join(", ")})`;
-  }
-  return out;
+  return out + jumpSuffix();
 }
 
 /** Accept either a Map or a plain object index and return a `(id) => record`. */
