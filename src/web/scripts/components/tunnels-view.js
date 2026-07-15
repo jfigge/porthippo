@@ -214,7 +214,6 @@ export class TunnelsView {
       this.#states,
       this.#snaps,
       this.#selectedId,
-      this.#jumpsById,
     );
     this.#renderDetail();
   }

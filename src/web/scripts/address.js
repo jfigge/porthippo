@@ -33,8 +33,8 @@
 // is all digits, so a bare IPv6 literal (multiple colons, non-numeric tail) or a
 // hostname with a stray colon is kept whole as the host rather than mis-split.
 
-export const MIN_PORT = 1;
-export const MAX_PORT = 65535;
+const MIN_PORT = 1;
+const MAX_PORT = 65535;
 /** Ports below this generally require elevated privileges to bind. */
 export const PRIVILEGED_PORT = 1024;
 /** The implicit local address when a field names only a port. */

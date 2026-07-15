@@ -67,7 +67,6 @@ export class TunnelTable {
   #defs = [];
   #states = new Map();
   #snaps = new Map();
-  #jumpsById = new Map();
   #selectedId = null;
   #visible = [...DEFAULT_CARD_ORDER]; // ordered VISIBLE columns (= shared cards)
   #sort = { key: TABLE_TUNNEL_COLUMN, dir: "asc" };
@@ -177,11 +176,10 @@ export class TunnelTable {
   // ── Public API ─────────────────────────────────────────────────────────────
 
   /** Feed definitions + live maps and (re)render (sorts + rebuilds). */
-  setData(defs, states, snaps, selectedId, jumpsById) {
+  setData(defs, states, snaps, selectedId) {
     this.#defs = Array.isArray(defs) ? defs : [];
     if (states instanceof Map) this.#states = states;
     if (snaps instanceof Map) this.#snaps = snaps;
-    if (jumpsById instanceof Map) this.#jumpsById = jumpsById;
     if (selectedId !== undefined) this.#selectedId = selectedId;
     this.#render();
   }
@@ -197,10 +195,6 @@ export class TunnelTable {
   setSort(sort) {
     this.#sort = normalizeSort(sort);
     this.#render();
-  }
-
-  getSort() {
-    return { ...this.#sort };
   }
 
   /** Highlight the selected row (no re-render) and refresh its arm/pause controls. */
