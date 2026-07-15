@@ -296,6 +296,8 @@
   "settings.hostkeys.heading": "Trusted SSH host keys",
   "settings.hostkeys.help": "Fingerprints you accepted the first time you connected to each host. Forget one to be prompted to trust it again on the next connection — this is also how you re-trust a host after its key legitimately changes.",
   "settings.hostkeys.empty": "No host keys trusted yet.",
+  "settings.hostkeys.loadError": "Couldn’t load your trusted host keys.",
+  "settings.hostkeys.retry": "Retry",
   "settings.hostkeys.added": "Added {date}",
   "settings.hostkeys.forget": "Forget",
   "settings.hostkeys.forgetAria": "Forget host key for {host}",

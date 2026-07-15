@@ -296,6 +296,8 @@
   "settings.hostkeys.heading": "Clés d’hôte SSH approuvées",
   "settings.hostkeys.help": "Empreintes que vous avez acceptées lors de votre première connexion à chaque hôte. Oubliez-en une pour être invité à l’approuver de nouveau lors de la prochaine connexion — c’est aussi ainsi que vous ré-approuvez un hôte après un changement légitime de sa clé.",
   "settings.hostkeys.empty": "Aucune clé d’hôte approuvée pour l’instant.",
+  "settings.hostkeys.loadError": "Impossible de charger vos clés d’hôte de confiance.",
+  "settings.hostkeys.retry": "Réessayer",
   "settings.hostkeys.added": "Ajoutée le {date}",
   "settings.hostkeys.forget": "Oublier",
   "settings.hostkeys.forgetAria": "Oublier la clé d’hôte de {host}",

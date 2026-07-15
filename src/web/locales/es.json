@@ -296,6 +296,8 @@
   "settings.hostkeys.heading": "Claves de host SSH de confianza",
   "settings.hostkeys.help": "Huellas digitales que aceptaste la primera vez que te conectaste a cada host. Olvida una para que se te pida confiar en ella de nuevo en la siguiente conexión — así es también como vuelves a confiar en un host después de que su clave cambie legítimamente.",
   "settings.hostkeys.empty": "Aún no hay claves de host de confianza.",
+  "settings.hostkeys.loadError": "No se pudieron cargar tus claves de host de confianza.",
+  "settings.hostkeys.retry": "Reintentar",
   "settings.hostkeys.added": "Añadida {date}",
   "settings.hostkeys.forget": "Olvidar",
   "settings.hostkeys.forgetAria": "Olvidar la clave de host de {host}",

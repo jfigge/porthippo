@@ -29,6 +29,7 @@ import { icons } from "../icons.js";
 /**
  * The status-dot bucket for a live state: grey `disarmed`, green `armed`
  * (listening / connecting / connected), yellow `paused`, red `error`.
+ * Still used by the Monitoring table (`tunnel-table.js`).
  * @param {string} state
  * @returns {"disarmed"|"armed"|"paused"|"error"}
  */
@@ -37,6 +38,47 @@ export function dotState(state) {
   if (state === "error") return "error";
   if (state && state !== "disarmed") return "armed";
   return "disarmed";
+}
+
+/**
+ * Which traffic-light lamp is lit for a live state (sidebar signal): `red`
+ * (error), `amber` (armed but not connected — listening / connecting / paused),
+ * `green` (connected), or `off` (disarmed — no lamp lit). Position, not colour
+ * alone, carries the meaning.
+ * @param {string} state
+ * @returns {"red"|"amber"|"green"|"off"}
+ */
+export function signalLamp(state) {
+  if (state === "connected") return "green";
+  if (state === "error") return "red";
+  if (!state || state === "disarmed") return "off";
+  return "amber"; // listening, connecting, paused
+}
+
+/**
+ * Build a row's three-lamp status signal: a `.tunnel-signal` container holding a
+ * red / amber / green lamp, with a `--red|--amber|--green` modifier lighting the
+ * lamp for the active state (or none when disarmed). The localized state is the
+ * tooltip and the accessible label.
+ * @param {string} state
+ * @returns {HTMLElement}
+ */
+function buildSignal(state) {
+  const lamp = signalLamp(state);
+  return el(
+    "span",
+    {
+      class: `tunnel-signal${lamp === "off" ? "" : ` tunnel-signal--${lamp}`}`,
+      role: "img",
+      title: t(`state.${state}`),
+      "aria-label": t(`state.${state}`),
+    },
+    [
+      el("span", { class: "tunnel-signal-lamp tunnel-signal-lamp--red" }),
+      el("span", { class: "tunnel-signal-lamp tunnel-signal-lamp--amber" }),
+      el("span", { class: "tunnel-signal-lamp tunnel-signal-lamp--green" }),
+    ],
+  );
 }
 
 /**
@@ -63,7 +105,7 @@ export class TunnelList {
   #defs = [];
   #states = new Map();
   #selectedId = null;
-  #rows = new Map(); // id → { root, dot }
+  #rows = new Map(); // id → { root, signal }
   #onSelect;
   #onAdd;
   #onEdit;
@@ -135,13 +177,15 @@ export class TunnelList {
     }
   }
 
-  /** Update one row's status dot in place from a live-state change. */
+  /** Update one row's status signal in place from a live-state change. */
   updateState(id, state) {
     this.#states.set(id, state);
     const rec = this.#rows.get(id);
     if (!rec) return;
-    rec.dot.className = `tunnel-dot tunnel-dot--${dotState(state)}`;
-    rec.dot.title = t(`state.${state}`);
+    const lamp = signalLamp(state);
+    rec.signal.className = `tunnel-signal${lamp === "off" ? "" : ` tunnel-signal--${lamp}`}`;
+    rec.signal.title = t(`state.${state}`);
+    rec.signal.setAttribute("aria-label", t(`state.${state}`));
   }
 
   #render() {
@@ -160,10 +204,7 @@ export class TunnelList {
 
   #buildRow(def) {
     const state = this.#states.get(def.id) || "disarmed";
-    const dot = el("span", {
-      class: `tunnel-dot tunnel-dot--${dotState(state)}`,
-      title: t(`state.${state}`),
-    });
+    const signal = buildSignal(state);
     // Delete is offered from the row's right-click context menu (TunnelsView),
     // so the sidebar row keeps only the quick-edit affordance on hover.
     const tools = el("div", { class: "tunnel-row-tools" }, [
@@ -201,7 +242,7 @@ export class TunnelList {
         },
       },
       [
-        dot,
+        signal,
         el("span", {
           class: "tunnel-row-port",
           text: String(def.localPort ?? "—"),
@@ -215,6 +256,6 @@ export class TunnelList {
       ],
     );
 
-    return { root, dot };
+    return { root, signal };
   }
 }

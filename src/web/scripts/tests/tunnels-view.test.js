@@ -164,9 +164,9 @@ test("a stats snapshot updates the selected tunnel's cards and its dot", async (
       .textContent;
   assert.equal(val("connections"), "4");
   assert.equal(val("connectionCount"), "7");
-  // The list dot for 'a' went green (armed/connected).
+  // The list signal for 'a' lit its green lamp (connected).
   const row = view.element.querySelector('.tunnel-row[data-id="a"]');
-  assert.ok(row.querySelector(".tunnel-dot--armed"));
+  assert.ok(row.querySelector(".tunnel-signal--green"));
 });
 
 test("the detail arm control routes to tunnels.arm for the selected tunnel", async () => {

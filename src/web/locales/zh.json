@@ -296,6 +296,8 @@
   "settings.hostkeys.heading": "受信任的 SSH 主机密钥",
   "settings.hostkeys.help": "你首次连接到每台主机时接受的指纹。忘记某个指纹后，下次连接时会提示你重新信任它——在主机密钥合法更改后，也可以通过这种方式重新信任该主机。",
   "settings.hostkeys.empty": "尚未信任任何主机密钥。",
+  "settings.hostkeys.loadError": "无法加载您信任的主机密钥。",
+  "settings.hostkeys.retry": "重试",
   "settings.hostkeys.added": "添加于 {date}",
   "settings.hostkeys.forget": "忘记",
   "settings.hostkeys.forgetAria": "忘记 {host} 的主机密钥",

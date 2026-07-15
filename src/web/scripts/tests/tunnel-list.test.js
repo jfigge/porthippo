@@ -14,15 +14,15 @@
  * limitations under the License.
  */
 
-// tunnel-list.test.js — the sidebar master list: status-dot colour by state, the
-// port + name, selection, the add/edit callbacks (and that edit doesn't also
-// select), that delete is no longer an inline icon, and in-place dot updates.
+// tunnel-list.test.js — the sidebar master list: the three-lamp status signal by
+// state, the port + name, selection, the add/edit callbacks (and that edit doesn't
+// also select), that delete is no longer an inline icon, and in-place signal updates.
 
 import test from "node:test";
 import assert from "node:assert/strict";
 
 import { resetDom } from "./jsdom-setup.js";
-import { TunnelList, dotState } from "../components/tunnel-list.js";
+import { TunnelList, dotState, signalLamp } from "../components/tunnel-list.js";
 
 function mount() {
   resetDom();
@@ -52,7 +52,17 @@ test("dotState maps live states to the four buckets", () => {
   assert.equal(dotState("error"), "error");
 });
 
-test("renders a row per definition with dot, port and name", () => {
+test("signalLamp maps live states to the lit traffic-light lamp", () => {
+  assert.equal(signalLamp("disarmed"), "off");
+  assert.equal(signalLamp(undefined), "off");
+  assert.equal(signalLamp("listening"), "amber");
+  assert.equal(signalLamp("connecting"), "amber");
+  assert.equal(signalLamp("paused"), "amber");
+  assert.equal(signalLamp("connected"), "green");
+  assert.equal(signalLamp("error"), "red");
+});
+
+test("renders a row per definition with signal, port and name", () => {
   const { list } = mount();
   list.setData(
     DEFS,
@@ -65,8 +75,18 @@ test("renders a row per definition with dot, port and name", () => {
   assert.equal(r.length, 2);
   assert.equal(r[0].querySelector(".tunnel-row-port").textContent, "5432");
   assert.equal(r[0].querySelector(".tunnel-row-name").textContent, "Postgres");
-  assert.ok(r[0].querySelector(".tunnel-dot--armed"), "connected → green dot");
-  assert.ok(r[1].querySelector(".tunnel-dot--disarmed"), "disarmed → grey dot");
+  assert.ok(
+    r[0].querySelector(".tunnel-signal--green"),
+    "connected → green lamp",
+  );
+  const bSignal = r[1].querySelector(".tunnel-signal");
+  assert.ok(bSignal, "disarmed row still has a signal");
+  assert.ok(
+    !bSignal.matches(
+      ".tunnel-signal--red, .tunnel-signal--amber, .tunnel-signal--green",
+    ),
+    "disarmed → no lamp lit",
+  );
 });
 
 test("empty state shows when there are no tunnels", () => {
@@ -123,14 +143,19 @@ test("setSelected highlights exactly one row", () => {
   assert.equal(r[1].getAttribute("aria-selected"), "true");
 });
 
-test("updateState recolours a single row's dot in place", () => {
+test("updateState relights a single row's signal in place", () => {
   const { list } = mount();
   list.setData(DEFS, new Map([["a", "disarmed"]]));
-  const dot = rows(list)[0].querySelector(".tunnel-dot");
-  assert.ok(dot.classList.contains("tunnel-dot--disarmed"));
+  const signal = rows(list)[0].querySelector(".tunnel-signal");
+  assert.ok(
+    !signal.matches(
+      ".tunnel-signal--red, .tunnel-signal--amber, .tunnel-signal--green",
+    ),
+    "disarmed → no lamp lit",
+  );
 
   list.updateState("a", "error");
-  const dotAfter = rows(list)[0].querySelector(".tunnel-dot");
-  assert.ok(dotAfter.classList.contains("tunnel-dot--error"));
-  assert.equal(dotAfter, dot, "updated in place, not rebuilt");
+  const signalAfter = rows(list)[0].querySelector(".tunnel-signal");
+  assert.ok(signalAfter.classList.contains("tunnel-signal--red"));
+  assert.equal(signalAfter, signal, "updated in place, not rebuilt");
 });

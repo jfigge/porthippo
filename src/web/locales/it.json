@@ -296,6 +296,8 @@
   "settings.hostkeys.heading": "Chiavi host SSH attendibili",
   "settings.hostkeys.help": "Fingerprint che hai accettato la prima volta che ti sei connesso a ciascun host. Dimenticane uno per ricevere di nuovo la richiesta di considerarlo attendibile alla prossima connessione — è anche così che si torna a considerare attendibile un host dopo che la sua chiave è cambiata legittimamente.",
   "settings.hostkeys.empty": "Ancora nessuna chiave host attendibile.",
+  "settings.hostkeys.loadError": "Impossibile caricare le tue chiavi host attendibili.",
+  "settings.hostkeys.retry": "Riprova",
   "settings.hostkeys.added": "Aggiunta il {date}",
   "settings.hostkeys.forget": "Dimentica",
   "settings.hostkeys.forgetAria": "Dimentica la chiave host per {host}",

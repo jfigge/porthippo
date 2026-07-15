@@ -66,13 +66,24 @@ export class HostKeysPanel {
    * Pull the accepted-key list from main and render it. Safe to call repeatedly
    * (the Settings popup calls it each time the tab is revealed), so it reflects
    * TOFU acceptances made since the popup was opened. Never throws.
+   *
+   * A genuine failure to load (the bridge is missing, or the invoke rejects) is
+   * rendered as a distinct error state with a retry — kept separate from a
+   * successful read of an empty store so "couldn't load" never masquerades as
+   * "no keys trusted".
    */
   async load() {
-    let entries = [];
+    const list = this.#porthippo?.hostkeys?.list;
+    if (typeof list !== "function") {
+      this.#renderError(); // no bridge (e.g. a stale preload) → not "empty"
+      return;
+    }
+    let entries;
     try {
-      entries = (await this.#porthippo?.hostkeys?.list?.()) || [];
+      entries = (await this.#porthippo.hostkeys.list()) || [];
     } catch {
-      entries = []; // a read failure shows the empty state rather than erroring
+      this.#renderError();
+      return;
     }
     // Alphabetical by host:port for a stable inventory.
     this.#render(
@@ -97,6 +108,26 @@ export class HostKeysPanel {
         { class: "hostkeys-list", role: "list" },
         entries.map((entry) => this.#row(entry)),
       ),
+    );
+  }
+
+  // The list couldn't be read (missing bridge / rejected invoke). Show it as an
+  // error — announced via role="alert" — with a Retry that re-runs load(), rather
+  // than the empty state, which would falsely read as "no keys trusted".
+  #renderError() {
+    clear(this.#listRegion).append(
+      el("div", { class: "hostkeys-error", role: "alert" }, [
+        el("p", {
+          class: "hostkeys-error-message",
+          text: t("settings.hostkeys.loadError"),
+        }),
+        el("button", {
+          class: "btn btn--secondary hostkeys-retry",
+          type: "button",
+          text: t("settings.hostkeys.retry"),
+          onClick: () => this.load(),
+        }),
+      ]),
     );
   }
 

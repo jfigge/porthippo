@@ -87,7 +87,7 @@ test("an empty store shows the empty state, no rows", async () => {
   );
 });
 
-test("a read failure falls back to the empty state instead of throwing", async () => {
+test("a rejected list() shows the load-error state, NOT the empty state", async () => {
   resetDom();
   const panel = new HostKeysPanel({
     porthippo: {
@@ -99,7 +99,64 @@ test("a read failure falls back to the empty state instead of throwing", async (
     },
   });
   await panel.load(); // must not reject
+  assert.ok(
+    panel.element.querySelector(".hostkeys-error"),
+    "the error state is shown",
+  );
+  assert.equal(
+    panel.element.querySelector(".hostkeys-empty"),
+    null,
+    "a load failure never masquerades as 'no keys trusted'",
+  );
+});
+
+test("a missing hostkeys bridge (e.g. stale preload) shows the load-error state", async () => {
+  resetDom();
+  // No hostkeys.list function at all — the real-world stale-main-process case.
+  const panel = new HostKeysPanel({ porthippo: { hostkeys: {} } });
+  await panel.load();
+  assert.ok(panel.element.querySelector(".hostkeys-error"));
+  assert.equal(panel.element.querySelector(".hostkeys-empty"), null);
+});
+
+test("Retry re-runs the load and renders the list once it succeeds", async () => {
+  resetDom();
+  // Fail the first call, then succeed with one entry.
+  let attempt = 0;
+  const porthippo = {
+    hostkeys: {
+      list: async () => {
+        attempt++;
+        if (attempt === 1) throw new Error("transient");
+        return [ENTRY("db.example.com:22", "SHA256:abc")];
+      },
+    },
+  };
+  const panel = new HostKeysPanel({ porthippo });
+  await panel.load();
+  assert.ok(
+    panel.element.querySelector(".hostkeys-error"),
+    "first load errors",
+  );
+
+  panel.element.querySelector(".hostkeys-retry").click();
+  await tick(); // the async retry → list() → render settles
+
+  assert.equal(panel.element.querySelector(".hostkeys-error"), null);
+  assert.equal(
+    panel.element.querySelectorAll(".hostkeys-item").length,
+    1,
+    "the recovered list renders",
+  );
+});
+
+test("a successful read of an empty store still shows the empty state (not the error)", async () => {
+  resetDom();
+  const { porthippo } = stubBridge({ pages: [[]] });
+  const panel = new HostKeysPanel({ porthippo });
+  await panel.load();
   assert.ok(panel.element.querySelector(".hostkeys-empty"));
+  assert.equal(panel.element.querySelector(".hostkeys-error"), null);
 });
 
 test("forget is a two-step inline confirm — the first click only reveals the confirm", async () => {

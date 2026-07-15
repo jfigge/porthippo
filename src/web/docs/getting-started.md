@@ -38,7 +38,8 @@ Save. The tunnel appears in the list, **disarmed** — defined but not yet bound
 ## Arm it
 
 **Arming** binds the entry port and starts listening. Select the tunnel and click
-the **power** button (or right-click → **Arm**). Its status dot turns to
+the **power** button (or right-click → **Arm**). In the list its status signal — a
+row of three traffic-light lamps — lights the **middle (amber)** lamp for
 **Listening**.
 
 > Nothing has connected over SSH yet. Arming only binds the local port — the SSH

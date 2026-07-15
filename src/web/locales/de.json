@@ -296,6 +296,8 @@
   "settings.hostkeys.heading": "Vertrauenswürdige SSH-Hostschlüssel",
   "settings.hostkeys.help": "Fingerabdrücke, die Sie beim ersten Verbinden mit jedem Host akzeptiert haben. Vergessen Sie einen, um bei der nächsten Verbindung erneut zur Vertrauensbestätigung aufgefordert zu werden — so vertrauen Sie einem Host auch erneut, nachdem sich sein Schlüssel legitim geändert hat.",
   "settings.hostkeys.empty": "Noch keinen Hostschlüsseln vertraut.",
+  "settings.hostkeys.loadError": "Ihre vertrauenswürdigen Hostschlüssel konnten nicht geladen werden.",
+  "settings.hostkeys.retry": "Erneut versuchen",
   "settings.hostkeys.added": "Hinzugefügt {date}",
   "settings.hostkeys.forget": "Vergessen",
   "settings.hostkeys.forgetAria": "Hostschlüssel für {host} vergessen",

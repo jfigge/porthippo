@@ -1103,6 +1103,20 @@
   color: var(--color-muted);
 }
 
+/* Distinct from the empty state: the list couldn't be read, with a retry. */
+.hostkeys-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.hostkeys-error-message {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-danger);
+}
+
 .hostkeys-item {
   display: flex;
   flex-direction: column;
@@ -1489,6 +1503,46 @@
 .tunnel-dot--error {
   background: var(--color-danger);
   box-shadow: 0 0 6px color-mix(in srgb, var(--color-danger) 60%, transparent);
+}
+
+/* Tunnel status signal (sidebar): three horizontal traffic-light lamps — exactly
+   one is lit (or none, when disarmed) so position, not colour alone, reads state. */
+.tunnel-signal {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.tunnel-signal-lamp {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+/* Unlit: a faint tint of the lamp's own colour so the housing stays visible. */
+.tunnel-signal-lamp--red {
+  background: color-mix(in srgb, var(--color-danger) 20%, transparent);
+}
+.tunnel-signal-lamp--amber {
+  background: color-mix(in srgb, var(--color-warning) 20%, transparent);
+}
+.tunnel-signal-lamp--green {
+  background: color-mix(in srgb, var(--color-success) 20%, transparent);
+}
+
+/* Lit: full colour + glow, only for the lamp matching the active state. */
+.tunnel-signal--red .tunnel-signal-lamp--red {
+  background: var(--color-danger);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--color-danger) 60%, transparent);
+}
+.tunnel-signal--amber .tunnel-signal-lamp--amber {
+  background: var(--color-warning);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--color-warning) 60%, transparent);
+}
+.tunnel-signal--green .tunnel-signal-lamp--green {
+  background: var(--color-success);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--color-success) 60%, transparent);
 }
 
 .tunnel-row-port {

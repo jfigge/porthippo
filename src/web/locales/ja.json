@@ -296,6 +296,8 @@
   "settings.hostkeys.heading": "信頼済みの SSH ホスト鍵",
   "settings.hostkeys.help": "各ホストに初めて接続したときに承認したフィンガープリントです。いずれかを破棄すると、次回接続時に再度信頼するよう求められます。これは、ホストの鍵が正当に変更された後に再度信頼する方法でもあります。",
   "settings.hostkeys.empty": "信頼済みのホスト鍵はまだありません。",
+  "settings.hostkeys.loadError": "信頼済みホスト鍵を読み込めませんでした。",
+  "settings.hostkeys.retry": "再試行",
   "settings.hostkeys.added": "{date} に追加",
   "settings.hostkeys.forget": "破棄",
   "settings.hostkeys.forgetAria": "{host} のホスト鍵を破棄",
