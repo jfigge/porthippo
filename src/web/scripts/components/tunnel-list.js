@@ -59,7 +59,8 @@ export function signalLamp(state) {
  * Build a row's three-lamp status signal: a `.tunnel-signal` container holding a
  * red / amber / green lamp, with a `--red|--amber|--green` modifier lighting the
  * lamp for the active state (or none when disarmed). The localized state is the
- * tooltip and the accessible label.
+ * container tooltip and accessible label; each lamp also carries a static hint
+ * describing what lighting it means.
  * @param {string} state
  * @returns {HTMLElement}
  */
@@ -74,9 +75,18 @@ export function buildSignal(state) {
       "aria-label": t(`state.${state}`),
     },
     [
-      el("span", { class: "tunnel-signal-lamp tunnel-signal-lamp--red" }),
-      el("span", { class: "tunnel-signal-lamp tunnel-signal-lamp--amber" }),
-      el("span", { class: "tunnel-signal-lamp tunnel-signal-lamp--green" }),
+      el("span", {
+        class: "tunnel-signal-lamp tunnel-signal-lamp--red",
+        title: t("state.signal.red"),
+      }),
+      el("span", {
+        class: "tunnel-signal-lamp tunnel-signal-lamp--amber",
+        title: t("state.signal.amber"),
+      }),
+      el("span", {
+        class: "tunnel-signal-lamp tunnel-signal-lamp--green",
+        title: t("state.signal.green"),
+      }),
     ],
   );
 }

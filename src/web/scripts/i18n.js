@@ -241,6 +241,10 @@ export const EN = {
   "state.connected": "Connected",
   "state.paused": "Paused",
   "state.error": "Error",
+  // Static per-lamp hints for the sidebar traffic-light signal.
+  "state.signal.red": "Indicates an error when lit",
+  "state.signal.amber": "Indicates armed, but paused not connected",
+  "state.signal.green": "Connected when lit",
 
   // ── Tunnels sidebar (master list) ───────────────────────────────────────
   "tunnels.title": "Tunnels",

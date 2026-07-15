@@ -1531,17 +1531,21 @@
   background: color-mix(in srgb, var(--color-success) 20%, transparent);
 }
 
-/* Lit: full colour + glow, only for the lamp matching the active state. */
+/* Lit: full colour + glow + 15% larger (scale keeps the row layout stable), only
+   for the lamp matching the active state. */
 .tunnel-signal--red .tunnel-signal-lamp--red {
   background: var(--color-danger);
+  transform: scale(1.15);
   box-shadow: 0 0 6px color-mix(in srgb, var(--color-danger) 60%, transparent);
 }
 .tunnel-signal--amber .tunnel-signal-lamp--amber {
   background: var(--color-warning);
+  transform: scale(1.15);
   box-shadow: 0 0 6px color-mix(in srgb, var(--color-warning) 60%, transparent);
 }
 .tunnel-signal--green .tunnel-signal-lamp--green {
   background: var(--color-success);
+  transform: scale(1.15);
   box-shadow: 0 0 6px color-mix(in srgb, var(--color-success) 60%, transparent);
 }
 
