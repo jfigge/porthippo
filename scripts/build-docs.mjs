@@ -30,6 +30,7 @@ import {
 } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { slugify } from "../src/web/scripts/utils/slugify.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export const SRC = resolve(ROOT, "src/web/docs");
@@ -81,19 +82,12 @@ function decodeEntities(s) {
     .replace(/&amp;/g, "&"); // last, so the others aren't double-decoded
 }
 
-// Match GitHub's heading slugger — and, crucially, the in-app DocsViewer's own
-// slugifyHeading — so an author-written #fragment link resolves identically in both
-// renderers: strip tags, decode entities, lowercase, drop punctuation, then collapse
-// whitespace RUNS to a single hyphen and coalesce any resulting hyphen runs. (The
-// tag-strip/decode is this context's extra step: here we slug raw heading markup,
-// whereas DocsViewer slugs already-parsed text.)
-function slugifyHeading(text) {
-  return decodeEntities(text.replace(/<[^>]+>/g, ""))
-    .toLowerCase()
-    .trim()
-    .replace(/[^\w\s-]/g, "")
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-");
+// Slug raw heading markup: strip tags and decode entities (this context's extra
+// step — we slug the raw HTML marked emits, whereas DocsViewer slugs already-parsed
+// text), then apply the SHARED slugify() so an author-written #fragment link resolves
+// to the same id in both renderers. Exported so a test can assert that parity.
+export function slugifyHeading(text) {
+  return slugify(decodeEntities(text.replace(/<[^>]+>/g, "")));
 }
 
 function esc(s) {
