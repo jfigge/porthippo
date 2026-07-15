@@ -91,6 +91,15 @@ test("menu:popup resolves null when the menu is dismissed with no selection", as
   assert.equal(await result, null);
 });
 
+test("menu:popup resolves null (not the string 'undefined') for an id-less item", async () => {
+  // Regression: click resolved String(item.id), so an item with a missing id
+  // surfaced the literal "undefined" at the IPC boundary instead of a dismissal.
+  const { popup, getBuilt } = harness();
+  const result = popup(null, { items: [{ label: "Orphan" }] });
+  getBuilt().clickLabel("Orphan").close();
+  assert.equal(await result, null);
+});
+
 test("menu:popup resolves null (and shows nothing) for an empty template", async () => {
   const { popup, getBuilt } = harness();
   const result = popup(null, { items: [] });

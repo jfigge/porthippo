@@ -56,7 +56,9 @@ function popupMenu({ Menu, getMainWindow, request }) {
         label: String(item.label == null ? "" : item.label),
         enabled: item.enabled !== false,
         click: () => {
-          chosen = String(item.id);
+          // An id-less item resolves as a dismissal (null), never the phantom
+          // string "undefined"/"null" that String(item.id) would otherwise yield.
+          chosen = item.id == null ? null : String(item.id);
         },
       };
     });
