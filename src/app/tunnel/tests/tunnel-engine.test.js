@@ -447,7 +447,13 @@ test("force-apply applies a pending edit immediately, dropping live connections"
     tunnel.applyDefinition(def2);
     assert.equal(tunnel.status().pendingChanges, true);
 
-    tunnel.forceApply();
+    const applied = tunnel.forceApply();
+    assert.equal(
+      typeof applied?.then,
+      "function",
+      "forceApply returns an awaitable so a caller sees the settled state",
+    );
+    await applied; // the teardown + re-arm has settled once this resolves
     await waitFor(() => c1Closed); // the live connection was force-dropped
     assert.equal(tunnel.status().pendingChanges, false);
 

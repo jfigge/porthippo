@@ -97,10 +97,10 @@ class TunnelEngine {
   }
 
   /** Force-apply a pending edit now, dropping any live connections. */
-  apply(id) {
+  async apply(id) {
     const tunnel = this.#tunnels.get(id);
     if (!tunnel) return { id, state: "disarmed" };
-    tunnel.forceApply();
+    await tunnel.forceApply(); // await the teardown+re-arm so status is current
     return tunnel.status();
   }
 

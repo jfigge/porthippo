@@ -253,12 +253,16 @@ class Tunnel {
     }
   }
 
-  /** Apply a pending change immediately, forcing live connections to disconnect. */
+  /**
+   * Apply a pending change immediately, forcing live connections to disconnect.
+   * Returns the re-apply promise so callers can await the settled state (and so a
+   * failure surfaces to them instead of becoming an unhandled rejection).
+   */
   forceApply() {
-    if (!this.#pendingDef) return;
+    if (!this.#pendingDef) return Promise.resolve();
     const next = this.#pendingDef;
     this.#pendingDef = null;
-    this.#reapply(next);
+    return this.#reapply(next);
   }
 
   /** Disarm + re-arm with `newDef` (or leave disarmed if the edit disabled it). */
