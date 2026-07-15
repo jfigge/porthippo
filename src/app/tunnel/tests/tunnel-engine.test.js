@@ -462,6 +462,59 @@ test("force-apply applies a pending edit immediately, dropping live connections"
   }
 });
 
+test("disarm with a pending edit stays disarmed instead of reentrantly re-arming", async () => {
+  // Regression: disarm() nulled #pendingDef AFTER #teardown(). Tearing down the live
+  // relay fires its onClose synchronously → #onIdleCheck() → #maybeApplyPending(),
+  // which used the still-set pending def to #reapply() (re-arm) the very tunnel being
+  // disarmed, leaving a fresh listener bound. Disarm must win: end disarmed, port
+  // unbound, no pending edit surviving.
+  const echoPlain = await startEcho();
+  const echoUpper = await startEcho({
+    transform: (d) => Buffer.from(d.toString().toUpperCase()),
+  });
+  const ssh = await startSsh();
+  const localPort = await freePort();
+  const def1 = makeDef({
+    localPort,
+    echoPort: echoPlain.port,
+    sshPort: ssh.port,
+  });
+  const def2 = {
+    ...def1,
+    destination: { host: "127.0.0.1", port: echoUpper.port },
+  };
+  const { tunnel } = makeTunnel(def1);
+  try {
+    await tunnel.arm();
+    const c1 = await connectLocal(localPort);
+    assert.equal(await roundtrip(c1, "hi"), "hi");
+
+    tunnel.applyDefinition(def2); // connection-affecting edit → stashed as pending
+    assert.equal(tunnel.status().pendingChanges, true);
+
+    // Disarm while the connection is STILL live, so teardown is what closes the
+    // relay (and thus what fires the reentrant idle check).
+    await tunnel.disarm();
+    await delay(100); // give any (buggy) floating reapply a chance to re-bind
+    assert.equal(tunnel.state, "disarmed", "disarm must stick");
+    assert.equal(
+      tunnel.status().pendingChanges,
+      false,
+      "the pending edit is discarded, not applied",
+    );
+    await assert.rejects(
+      () => connectLocal(localPort),
+      "the local port is no longer bound",
+    );
+    c1.destroy();
+  } finally {
+    await tunnel.dispose();
+    await ssh.close();
+    await echoUpper.close();
+    await echoPlain.close();
+  }
+});
+
 // ── Engine-level tests (arm/status + host-key TOFU) ──────────────────────────────
 
 test("engine armAll arms enabled definitions and skips disabled ones", async () => {

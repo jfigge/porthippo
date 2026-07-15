@@ -206,8 +206,13 @@ class Tunnel {
 
   /** Tear everything down (listener, SSH, relays, timers) → disarmed. */
   async disarm() {
-    await this.#teardown();
+    // Drop any pending edit BEFORE teardown. #teardown() closes the live relays,
+    // and a relay's onClose fires synchronously → #onIdleCheck() → #maybeApplyPending().
+    // If #pendingDef were still set, that would reentrantly #reapply() (re-arm) the
+    // very tunnel we're stopping — leaving a fresh listener bound instead of disarmed.
+    // (dispose() is immune because it sets #disposed first, so the reentrant arm() no-ops.)
     this.#pendingDef = null;
+    await this.#teardown();
     this.#paused = false;
     this.#stats.onDisarmed();
     this.#setState("disarmed");
