@@ -16,11 +16,13 @@
 
 // tunnel-detail.js — the detail panel for the selected tunnel. Its title is a
 // virtual breadcrumb of the route (local → jump hosts → SSH server → target) with
-// arm/disarm + pause/resume icon controls on the right; below it is a grid of
-// drag-and-drop rearrangeable stat cards. It is a pure view: numbers arrive via
-// updateSnap(), state via updateState(), and every action is reported back through
-// constructor callbacks. Card order is fed in / reported out (persisted by the
-// owner in settings) and shared with the list view via card-catalog.js.
+// arm/disarm + pause/resume icon controls on the right; below it is a snap-to-grid
+// infinite canvas of stat cards (card-canvas.js). It is a pure view: numbers
+// arrive via updateSnap(), state via updateState(), and every action is reported
+// back through constructor callbacks. Which cards are visible is fed in / reported
+// out (the `cardOrder` setting, shared with the list view via card-catalog.js);
+// *where* each card sits is a per-tunnel {col,row} layout the canvas owns and
+// reports through onLayoutChange for the owner to persist per tunnel.
 
 import { el, clear } from "../dom.js";
 import { t } from "../i18n.js";
@@ -29,10 +31,10 @@ import {
   getCard,
   DEFAULT_CARD_ORDER,
   visibleCards,
-  reorderCards,
   cardToneClasses,
 } from "./card-catalog.js";
 import { CardMenu } from "./card-menu.js";
+import { CardCanvas } from "./card-canvas.js";
 import { typeIcon } from "./tunnel-list.js";
 
 /** Armed = the engine holds this tunnel (anything but disarmed / error). */
@@ -47,7 +49,8 @@ export class TunnelDetail {
   #breadcrumbEl;
   #armBtn;
   #pauseBtn;
-  #cardsEl;
+  #cardsEmptyEl;
+  #canvas;
   #cardMenu;
 
   #def = null;
@@ -55,13 +58,14 @@ export class TunnelDetail {
   #snap = null;
   #jumpsById = new Map();
   #visible = [...DEFAULT_CARD_ORDER]; // ordered VISIBLE card keys
+  #layout = null; // this tunnel's stored {col,row} map (from show())
   #cardNodes = new Map(); // key → { root, valueEl, card }
-  #dragKey = null;
 
   #now;
   #onToggleArm;
   #onTogglePause;
   #onCardsChange;
+  #onLayoutChange;
   #onShowError;
   #onShowErrors;
 
@@ -70,6 +74,7 @@ export class TunnelDetail {
     onToggleArm,
     onTogglePause,
     onCardsChange,
+    onLayoutChange,
     onShowError,
     onShowErrors,
   } = {}) {
@@ -77,11 +82,16 @@ export class TunnelDetail {
     this.#onToggleArm = onToggleArm || (() => {});
     this.#onTogglePause = onTogglePause || (() => {});
     this.#onCardsChange = onCardsChange || (() => {});
+    this.#onLayoutChange = onLayoutChange || (() => {});
     this.#onShowError = onShowError || (() => {});
     this.#onShowErrors = onShowErrors || (() => {});
     this.#cardMenu = new CardMenu({
       visible: () => this.#visible,
       onToggle: (key, show) => this.#toggleCard(key, show),
+    });
+    this.#canvas = new CardCanvas({
+      onLayoutChange: (positions) =>
+        this.#def && this.#onLayoutChange(this.#def.id, positions),
     });
     this.#el = this.#build();
   }
@@ -113,7 +123,11 @@ export class TunnelDetail {
       onClick: () => this.#def && this.#onTogglePause(this.#def.id),
     });
 
-    this.#cardsEl = el("div", { class: "detail-cards", role: "list" });
+    this.#cardsEmptyEl = el("p", {
+      class: "detail-cards-empty",
+      text: t("detail.cards.empty"),
+      hidden: true,
+    });
 
     this.#contentEl = el("div", { class: "detail-content", hidden: true }, [
       el("div", { class: "detail-title" }, [
@@ -124,7 +138,8 @@ export class TunnelDetail {
           this.#armBtn,
         ]),
       ]),
-      this.#cardsEl,
+      this.#canvas.element,
+      this.#cardsEmptyEl,
     ]);
 
     return el(
@@ -141,12 +156,17 @@ export class TunnelDetail {
     if (this.#def) this.#renderCards();
   }
 
-  /** Show a tunnel's details. `ctx` carries the live state, latest snapshot, and
-   *  a jumpHost-by-id map for the breadcrumb. */
-  show(def, { state = "disarmed", snap = null, jumpsById } = {}) {
+  /** Show a tunnel's details. `ctx` carries the live state, latest snapshot, a
+   *  jumpHost-by-id map for the breadcrumb, and this tunnel's stored card layout
+   *  ({col,row} per card) for the canvas to restore. */
+  show(
+    def,
+    { state = "disarmed", snap = null, jumpsById, layout = null } = {},
+  ) {
     this.#def = def || null;
     this.#state = state;
     this.#snap = snap;
+    this.#layout = layout;
     if (jumpsById instanceof Map) this.#jumpsById = jumpsById;
     this.#renderAll();
   }
@@ -247,52 +267,49 @@ export class TunnelDetail {
   }
 
   #renderCards() {
-    clear(this.#cardsEl);
     this.#cardNodes.clear();
-    if (this.#visible.length === 0) {
-      this.#cardsEl.appendChild(
-        el("p", {
-          class: "detail-cards-empty",
-          text: t("detail.cards.empty"),
-        }),
-      );
-      return;
-    }
-    for (const key of this.#visible) {
+    const empty = this.#visible.length === 0;
+    this.#cardsEmptyEl.hidden = !empty;
+    this.#canvas.element.hidden = empty;
+
+    const entries = [];
+    for (const key of empty ? [] : this.#visible) {
       const card = getCard(key);
       if (!card) continue;
-      const valueEl = el("div", { class: "card-value" });
-      const props = {
-        class: "detail-card",
-        role: "listitem",
-        draggable: "true",
-        dataset: { card: key },
-        onDragstart: (e) => this.#onDragStart(e, key),
-        onDragover: (e) => this.#onDragOver(e, key),
-        onDragleave: () => root.classList.remove("detail-card--drop"),
-        onDrop: (e) => this.#onDrop(e, key),
-        onDragend: () => this.#clearDropMarks(),
-      };
-      // Two cards double as buttons: the State card opens the current error
-      // while errored; the Errors card opens the whole error history when the
-      // count is non-zero (see #updateCardAffordances for the matching cue).
-      if (key === "state" || key === "errors") {
-        props.onClick = () => this.#activateCard(key);
-        props.onKeydown = (e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            this.#activateCard(key);
-          }
-        };
-      }
-      const root = el("div", props, [
-        el("div", { class: "card-label", text: t(card.labelKey) }),
-        valueEl,
-      ]);
-      this.#cardNodes.set(key, { root, valueEl, card });
-      this.#cardsEl.appendChild(root);
+      entries.push({ key, node: this.#buildCard(key, card) });
     }
+    // The canvas owns positioning: it keeps this tunnel's live layout across a
+    // visible-set change and adopts the stored one when the tunnel switches.
+    this.#canvas.setCards(this.#def?.id ?? null, entries, this.#layout);
     this.#updateValues();
+  }
+
+  #buildCard(key, card) {
+    const valueEl = el("div", { class: "card-value" });
+    const props = {
+      class: "detail-card",
+      role: "listitem",
+      dataset: { card: key },
+    };
+    // Two cards double as buttons: the State card opens the current error while
+    // errored; the Errors card opens the whole error history when the count is
+    // non-zero (see #updateCardAffordances for the matching cue). The canvas
+    // distinguishes a click from a drag, so these coexist with dragging.
+    if (key === "state" || key === "errors") {
+      props.onClick = () => this.#activateCard(key);
+      props.onKeydown = (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          this.#activateCard(key);
+        }
+      };
+    }
+    const root = el("div", props, [
+      el("div", { class: "card-label", text: t(card.labelKey) }),
+      valueEl,
+    ]);
+    this.#cardNodes.set(key, { root, valueEl, card });
+    return root;
   }
 
   #updateValues() {
@@ -369,47 +386,6 @@ export class TunnelDetail {
     this.#pauseBtn.title = pauseLabel;
     this.#pauseBtn.setAttribute("aria-label", pauseLabel);
     this.#pauseBtn.disabled = !canPause;
-  }
-
-  // ── Drag-and-drop card ordering ───────────────────────────────────────────
-
-  #onDragStart(e, key) {
-    this.#dragKey = key;
-    if (e.dataTransfer) {
-      e.dataTransfer.effectAllowed = "move";
-      // Firefox requires data to be set for a drag to start.
-      try {
-        e.dataTransfer.setData("text/plain", key);
-      } catch {
-        // ignore — jsdom / restricted environments
-      }
-    }
-    this.#cardNodes.get(key)?.root.classList.add("detail-card--dragging");
-  }
-
-  #onDragOver(e, key) {
-    if (!this.#dragKey || this.#dragKey === key) return;
-    e.preventDefault();
-    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-    const rec = this.#cardNodes.get(key);
-    if (rec) rec.root.classList.add("detail-card--drop");
-  }
-
-  #onDrop(e, key) {
-    e.preventDefault();
-    const from = this.#dragKey;
-    this.#clearDropMarks();
-    if (!from || from === key) return;
-    this.#visible = reorderCards(this.#visible, from, key);
-    this.#renderCards();
-    this.#onCardsChange([...this.#visible]);
-  }
-
-  #clearDropMarks() {
-    this.#dragKey = null;
-    for (const [, rec] of this.#cardNodes) {
-      rec.root.classList.remove("detail-card--drop", "detail-card--dragging");
-    }
   }
 
   // ── Manage cards (the checklist menu — add + remove) ──────────────────────

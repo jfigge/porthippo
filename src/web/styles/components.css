@@ -1462,8 +1462,8 @@
 .tunnel-row {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-2);
   border-radius: var(--radius-md);
   cursor: pointer;
 }
@@ -1612,16 +1612,28 @@
 .tunnel-detail {
   min-width: 0;
   min-height: 0;
-  overflow-y: auto;
+  /* A flex column so the card canvas below the title owns the scroll (both axes)
+     rather than the whole panel — the infinite grid needs a bounded viewport. */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   padding: var(--space-4) var(--space-5) var(--space-5);
 }
 
 .detail-empty {
+  flex: 1 1 auto;
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 100%;
+  min-height: 0;
   color: var(--color-muted);
+}
+
+.detail-content {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 /* A `display` rule overrides the UA `[hidden] { display: none }`, so the hidden
@@ -1697,32 +1709,112 @@
   color: var(--color-success);
 }
 
-/* ── Stat cards ────────────────────────────────────────────────────────────── */
+/* ── Stat cards: snap-to-grid infinite canvas ──────────────────────────────────
+   .detail-cards is the scroll viewport; .detail-cards-surface is the sized
+   content plane the cards are absolutely positioned on (see card-canvas.js). The
+   plane grows past the viewport in both axes, so both scrollbars can appear. */
 .detail-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: var(--space-3);
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
 }
 
+.detail-cards[hidden] {
+  display: none;
+}
+
+.detail-cards-surface {
+  position: relative;
+  /* width/height are set from the cards' bounding box by card-canvas.js */
+}
+
+/* Each card is one uniform cell, positioned via `transform: translate(...)`. The
+   transform transition animates swaps / return-home moves (~180ms). */
 .detail-card {
-  padding: var(--space-4);
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 150px;
+  height: 90px;
+  box-sizing: border-box;
+  padding: var(--space-3) var(--space-4);
   border-radius: var(--radius-md);
   background: var(--color-surface-0);
   border: 1px solid transparent;
   cursor: grab;
   user-select: none;
+  touch-action: none; /* claim pointer drags rather than scroll/pan gestures */
+  overflow: hidden;
+  transition: transform 0.18s ease;
 }
 
 .detail-card:active {
   cursor: grabbing;
 }
 
-.detail-card--dragging {
-  opacity: 0.5;
+/* While a batch of cards is first placed, suppress the move transition so they
+   appear at their cells instead of sliding in from the origin. */
+.detail-cards-surface--no-anim .detail-card {
+  transition: none;
 }
 
-.detail-card--drop {
+/* The lifted card: scaled (in the inline transform), elevated, raised, and free
+   of the move transition so it tracks the cursor exactly. */
+.detail-card--dragging {
+  transition: none;
+  cursor: grabbing;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+  border-color: var(--color-overlay);
+}
+
+/* The occupant of the cell a drag is hovering (the swap partner). */
+.detail-card--swap-target {
   border-color: var(--color-accent);
+  box-shadow: 0 0 0 1px var(--color-accent) inset;
+}
+
+/* ── Drag affordances: the revealed grid + target-cell ghosts ─────────────────
+   The overlay tiles a faint dashed cell across the whole plane while dragging;
+   the ghosts (one cell each, moved via transform) mark the drop target. */
+.card-grid-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-repeat: repeat;
+}
+
+.card-grid-overlay[hidden] {
+  display: none;
+}
+
+.card-grid-ghost {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 150px;
+  height: 90px;
+  box-sizing: border-box;
+  border-radius: var(--radius-md);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.card-grid-ghost[hidden] {
+  display: none;
+}
+
+/* Free target → accent "snap here" ghost. */
+.card-grid-ghost--snap {
+  border: 2px dashed var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+}
+
+/* Occupied target → the origin cell the swapped occupant will vacate into. */
+.card-grid-ghost--vacated {
+  border: 2px dashed color-mix(in srgb, var(--color-accent) 60%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 7%, transparent);
 }
 
 /* The State card while the tunnel is errored: an activatable "click for the full
@@ -1941,10 +2033,17 @@
 }
 
 .detail-cards-empty {
-  grid-column: 1 / -1;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: var(--space-5) 0;
   color: var(--color-muted);
   text-align: center;
+}
+
+.detail-cards-empty[hidden] {
+  display: none;
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -2130,7 +2229,7 @@
 .tt-identity {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--space-1);
   min-width: 0; /* let the name truncate instead of forcing the column wider */
 }
 

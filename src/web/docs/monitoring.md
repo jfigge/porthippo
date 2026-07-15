@@ -34,6 +34,15 @@ Both views share the same set of metrics, so the **Cards** checklist doubles as 
 List view's column chooser. Drag the divider (or a column header in List view) to
 resize the tunnel-name area; the position is shared between the two views.
 
+In the **Cards** view the metric cards sit on a snap-to-grid canvas. Drag a card to
+reposition it: it lifts under the cursor and snaps to the nearest cell on release.
+Drop it on an occupied cell to swap the two — and if you later move the intruder
+away, the card you displaced slides back to its original cell. The canvas scrolls
+in both directions as you spread cards out; double-click an empty area to re-centre
+on your cards. Each tunnel keeps its own arrangement, restored the next time you
+open it. Enabling a metric drops its card into the first free cell; disabling one
+leaves the gap where it was.
+
 ## Live metrics
 
 Choose which metrics to show. Available cards / columns include:

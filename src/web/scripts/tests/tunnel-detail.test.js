@@ -15,8 +15,8 @@
  */
 
 // tunnel-detail.test.js — the detail panel: the route breadcrumb (direct + jump
-// chain), the arm/pause controls, the stat cards' values, and drag-and-drop card
-// reordering (incl. the pure reorder/normalize helpers).
+// chain), the arm/pause controls, the stat cards' values, and the snap-to-grid
+// canvas (reading-order placement, drag snap/swap, and return-home).
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -29,21 +29,54 @@ import {
   hiddenCards,
   DEFAULT_CARD_ORDER,
 } from "../components/card-catalog.js";
+import { cellLeft, cellTop } from "../components/grid-layout.js";
 
 const NOW = 1_000_000;
 
 function mount(opts = {}) {
   resetDom();
-  const calls = { arm: [], pause: [], change: [] };
+  const calls = { arm: [], pause: [], change: [], layout: [] };
   const detail = new TunnelDetail({
     now: () => NOW,
     onToggleArm: (id) => calls.arm.push(id),
     onTogglePause: (id) => calls.pause.push(id),
     onCardsChange: (order) => calls.change.push(order),
+    onLayoutChange: (id, positions) => calls.layout.push({ id, positions }),
     ...opts,
   });
   document.body.appendChild(detail.element);
   return { detail, calls };
+}
+
+/** The {col,row} a card currently sits at, parsed from its inline transform. */
+function cellOf(detail, key) {
+  const node = detail.element.querySelector(`.detail-card[data-card="${key}"]`);
+  const m = /translate\((-?\d+(?:\.\d+)?)px,\s*(-?\d+(?:\.\d+)?)px\)/.exec(
+    node.style.transform || "",
+  );
+  return { x: Number(m?.[1] ?? 0), y: Number(m?.[2] ?? 0) };
+}
+
+/** Pointer-drag a card (grabbed at its top-left) onto the cell (col,row). */
+function dragTo(detail, key, col, row) {
+  const node = detail.element.querySelector(`.detail-card[data-card="${key}"]`);
+  const from = cellOf(detail, key);
+  const to = { x: cellLeft(col), y: cellTop(row) };
+  node.dispatchEvent(
+    new window.MouseEvent("pointerdown", {
+      clientX: from.x,
+      clientY: from.y,
+      button: 0,
+      bubbles: true,
+    }),
+  );
+  // Move/up are captured on the card element (see CardCanvas#pointerDown).
+  node.dispatchEvent(
+    new window.MouseEvent("pointermove", { clientX: to.x, clientY: to.y }),
+  );
+  node.dispatchEvent(
+    new window.MouseEvent("pointerup", { clientX: to.x, clientY: to.y }),
+  );
 }
 
 const DEF = { id: "t1", localPort: 1, destination: { host: "h", port: 2 } };
@@ -301,28 +334,98 @@ test("empty state shows until a tunnel is selected", () => {
   assert.equal(detail.element.querySelector(".detail-content").hidden, true);
 });
 
-// ── Drag-and-drop reorder ─────────────────────────────────────────────────────
+// ── Snap-to-grid canvas: drag, swap, return-home ─────────────────────────────
 
-test("dragging one card onto another reorders and reports the new order", () => {
+test("a fresh tunnel places its cards in reading order across the grid", () => {
+  const { detail } = mount();
+  detail.setCardOrder(["download", "upload", "connections", "transferred"]);
+  detail.show(DEF, { state: "disarmed" });
+  // 4 columns → row 0 fills left→right.
+  assert.deepEqual(cellOf(detail, "download"), {
+    x: cellLeft(0),
+    y: cellTop(0),
+  });
+  assert.deepEqual(cellOf(detail, "upload"), { x: cellLeft(1), y: cellTop(0) });
+  assert.deepEqual(cellOf(detail, "connections"), {
+    x: cellLeft(2),
+    y: cellTop(0),
+  });
+});
+
+test("dragging a card onto a free cell snaps it there and persists the layout", () => {
   const { detail, calls } = mount();
-  detail.show(
-    { id: "t1", localPort: 1, destination: { host: "h", port: 2 } },
-    { state: "disarmed" },
+  detail.setCardOrder(["download", "upload"]); // (0,0) and (1,0); (2,0) is free
+  detail.show(DEF, { state: "disarmed" });
+  calls.layout.length = 0;
+
+  dragTo(detail, "download", 2, 0);
+
+  assert.deepEqual(cellOf(detail, "download"), {
+    x: cellLeft(2),
+    y: cellTop(0),
+  });
+  assert.ok(calls.layout.length >= 1, "layout change reported");
+  const last = calls.layout.at(-1);
+  assert.equal(last.id, "t1");
+  assert.deepEqual(last.positions.download, { col: 2, row: 0 });
+});
+
+test("dropping onto an occupied cell swaps the two cards", () => {
+  const { detail } = mount();
+  detail.setCardOrder(["download", "upload", "connections"]);
+  detail.show(DEF, { state: "disarmed" }); // download(0,0) upload(1,0) connections(2,0)
+
+  dragTo(detail, "download", 2, 0); // onto connections
+
+  assert.deepEqual(cellOf(detail, "download"), {
+    x: cellLeft(2),
+    y: cellTop(0),
+  });
+  assert.deepEqual(
+    cellOf(detail, "connections"),
+    { x: cellLeft(0), y: cellTop(0) },
+    "the occupant took the dragged card's origin cell",
   );
+});
 
-  const order = cards(detail.element);
-  const from = order[0];
-  const to = order[2];
-  const cardEl = (key) =>
-    detail.element.querySelector(`.detail-card[data-card="${key}"]`);
+test("a displaced card returns home once the intruder leaves its cell", () => {
+  const { detail } = mount();
+  detail.setCardOrder(["download", "upload", "connections"]);
+  detail.show(DEF, { state: "disarmed" }); // download(0,0) upload(1,0) connections(2,0)
 
-  cardEl(from).dispatchEvent(new Event("dragstart", { bubbles: true }));
-  cardEl(to).dispatchEvent(new Event("drop", { bubbles: true }));
+  // Swap download onto connections: connections is displaced to (0,0), home (2,0).
+  dragTo(detail, "download", 2, 0);
+  assert.deepEqual(cellOf(detail, "connections"), {
+    x: cellLeft(0),
+    y: cellTop(0),
+  });
 
-  assert.equal(calls.change.length, 1, "onCardsChange fired once");
-  assert.deepEqual(calls.change[0], reorderCards(order, from, to));
-  // The DOM reflects the new order.
-  assert.deepEqual(cards(detail.element), reorderCards(order, from, to));
+  // Move download away to a free cell (3,0) → (2,0) frees → connections returns.
+  dragTo(detail, "download", 3, 0);
+  assert.deepEqual(
+    cellOf(detail, "connections"),
+    { x: cellLeft(2), y: cellTop(0) },
+    "connections animated back to its home cell",
+  );
+  assert.deepEqual(cellOf(detail, "download"), {
+    x: cellLeft(3),
+    y: cellTop(0),
+  });
+});
+
+test("toggling a card off frees its cell without re-packing the rest", () => {
+  const { detail } = mount();
+  detail.setCardOrder(["download", "upload", "connections"]);
+  detail.show(DEF, { state: "disarmed" });
+  const uploadCell = cellOf(detail, "upload");
+
+  detail.setCardOrder(["upload", "connections"]); // drop download from the middle
+  // Survivors keep their exact cells — no reflow into the freed (0,0) gap.
+  assert.deepEqual(cellOf(detail, "upload"), uploadCell);
+  assert.deepEqual(cellOf(detail, "connections"), {
+    x: cellLeft(2),
+    y: cellTop(0),
+  });
 });
 
 // ── Choose which cards show (per-card [X] + the checklist menu) ────────────────

@@ -244,31 +244,60 @@ test("the error dialog surfaces an error reported by status on load", async () =
   PopupManager.close();
 });
 
-test("reordering cards persists the new order to settings", async () => {
+test("dragging a detail card persists a per-tunnel cardLayouts map", async () => {
   const calls = {};
   const { view } = await mount({ calls });
-  const cardEls = [...view.element.querySelectorAll(".detail-card")];
-  cardEls[0].dispatchEvent(new Event("dragstart", { bubbles: true }));
-  cardEls[2].dispatchEvent(new Event("drop", { bubbles: true }));
-  await tick();
-  assert.ok(calls.set && calls.set.length >= 1, "settings.set was called");
-  assert.ok(
-    Array.isArray(calls.set[0].cardOrder),
-    "persisted a cardOrder array",
+  const download = view.element.querySelector(
+    '.detail-card[data-card="download"]',
+  ); // sits at (0,0)
+  // Drag it onto cell (3,1): grabbed at its top-left, moved 3×/1× stride. Whether
+  // that cell is free (snap) or occupied (swap), download lands on it.
+  download.dispatchEvent(
+    new window.MouseEvent("pointerdown", {
+      clientX: 0,
+      clientY: 0,
+      button: 0,
+      bubbles: true,
+    }),
   );
-  // Clean up the singleton popup host between tests.
+  download.dispatchEvent(
+    new window.MouseEvent("pointermove", { clientX: 3 * 166, clientY: 106 }),
+  );
+  download.dispatchEvent(
+    new window.MouseEvent("pointerup", { clientX: 3 * 166, clientY: 106 }),
+  );
+  await tick();
+
+  // The initial placement also persists a layout, so take the drag's write (last).
+  const writes = (calls.set || []).filter((p) => p.cardLayouts);
+  assert.ok(writes.length >= 1, "settings.set persisted a cardLayouts map");
+  assert.deepEqual(
+    writes.at(-1).cardLayouts.a.download,
+    { col: 3, row: 1 },
+    "the auto-selected tunnel 'a' recorded the new cell",
+  );
   PopupManager.close();
 });
 
-test("a persisted cardOrder is applied to the detail grid", async () => {
+test("a persisted per-tunnel layout is restored to the detail canvas", async () => {
+  const { view } = await mount({
+    settings: { cardLayouts: { a: { download: { col: 2, row: 1 } } } },
+  });
+  const download = view.element.querySelector(
+    '.detail-card[data-card="download"]',
+  );
+  // 2×166=332, 1×106=106.
+  assert.match(download.style.transform, /translate\(332px,\s*106px\)/);
+});
+
+test("a persisted cardOrder still governs which detail cards show", async () => {
   const { view } = await mount({
     settings: { cardOrder: ["errors", "download"] },
   });
-  const order = [...view.element.querySelectorAll(".detail-card")].map(
+  const shown = [...view.element.querySelectorAll(".detail-card")].map(
     (c) => c.dataset.card,
   );
-  assert.equal(order[0], "errors", "saved order leads");
-  assert.equal(order[1], "download");
+  assert.deepEqual(shown, ["errors", "download"]);
 });
 
 // ── View mode (cards ↔ list) ─────────────────────────────────────────────────
