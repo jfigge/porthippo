@@ -92,7 +92,14 @@ export class TunnelDetail {
     this.#canvas = new CardCanvas({
       onLayoutChange: (positions) =>
         this.#def && this.#onLayoutChange(this.#def.id, positions),
+      // Dragging a card over the Data Fields selector arms it as a trash target;
+      // dropping there removes the card and deselects the field.
+      onDeleteHover: (active) => this.#cardMenu.setDeleteTarget(active),
+      onDelete: (key) => this.#toggleCard(key, false),
     });
+    // The selector lives in the title row, outside the canvas — hand the canvas
+    // its element so a drag can hit-test the pointer against it.
+    this.#canvas.setDeleteZone(this.#cardMenu.element);
     this.#el = this.#build();
   }
 
@@ -390,13 +397,16 @@ export class TunnelDetail {
 
   // ── Manage cards (the checklist menu — add + remove) ──────────────────────
 
-  /** Show/hide a card from the checklist (appends when re-shown). */
+  /** Show/hide a card. Used by the checklist menu (appends when re-shown) and by
+   *  the canvas's drag-to-Data-Fields removal — so keep the menu's checkboxes in
+   *  step for either path. */
   #toggleCard(key, show) {
     const shown = this.#visible.includes(key);
     if (show === shown) return;
     this.#visible = show
       ? [...this.#visible, key]
       : this.#visible.filter((k) => k !== key);
+    this.#cardMenu.sync(this.#visible);
     this.#renderCards();
     this.#onCardsChange([...this.#visible]);
   }

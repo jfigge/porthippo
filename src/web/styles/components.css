@@ -1774,6 +1774,16 @@
   box-shadow: 0 0 0 1px var(--color-accent) inset;
 }
 
+/* The lifted card while it hovers the Data Fields selector — dropping removes it,
+   so it reads as a delete (danger-tinted, dimmed). */
+.detail-card--will-delete {
+  opacity: 0.6;
+  border-color: var(--color-danger);
+  box-shadow:
+    0 0 0 1px var(--color-danger) inset,
+    0 12px 28px rgba(0, 0, 0, 0.45);
+}
+
 /* ── Drag affordances: the revealed grid + target-cell ghosts ─────────────────
    The overlay tiles a faint dashed cell across the whole plane while dragging;
    the ghosts (one cell each, moved via transform) mark the drop target. */
@@ -1966,6 +1976,14 @@
 .detail-cards-btn:hover {
   background: var(--color-surface-1);
   color: var(--color-text);
+}
+
+/* Armed as a drop-to-remove target while a card is dragged over it (the caret is
+   swapped for a trash can in card-menu.js). */
+.detail-cards-btn--delete,
+.detail-cards-btn--delete:hover {
+  color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 14%, transparent);
 }
 
 .detail-cards-caret {

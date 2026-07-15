@@ -413,6 +413,53 @@ test("a displaced card returns home once the intruder leaves its cell", () => {
   });
 });
 
+test("dragging a card onto the Data Fields selector removes and deselects it", () => {
+  const { detail, calls } = mount();
+  detail.setCardOrder(["download", "upload", "connections"]);
+  detail.show(DEF, { state: "disarmed" });
+  // Give the selector (outside the canvas) a real client rect to hit-test.
+  const zone = detail.element.querySelector(".detail-cards-menu-wrap");
+  zone.getBoundingClientRect = () => ({
+    left: 500,
+    top: 0,
+    right: 620,
+    bottom: 40,
+    width: 120,
+    height: 40,
+  });
+  calls.change.length = 0;
+
+  const node = detail.element.querySelector(
+    '.detail-card[data-card="download"]',
+  );
+  const btn = detail.element.querySelector(".detail-cards-btn");
+  node.dispatchEvent(
+    new window.MouseEvent("pointerdown", {
+      clientX: 0,
+      clientY: 0,
+      button: 0,
+      bubbles: true,
+    }),
+  );
+  node.dispatchEvent(
+    new window.MouseEvent("pointermove", { clientX: 550, clientY: 20 }),
+  );
+  // Over the selector: it arms as a trash target.
+  assert.ok(
+    btn.classList.contains("detail-cards-btn--delete"),
+    "selector armed as a delete target",
+  );
+
+  node.dispatchEvent(
+    new window.MouseEvent("pointerup", { clientX: 550, clientY: 20 }),
+  );
+  // The card is gone from the grid and deselected (persisted via onCardsChange).
+  assert.ok(!cards(detail.element).includes("download"));
+  assert.deepEqual(calls.change.at(-1), ["upload", "connections"]);
+  // The selector is restored (no longer a delete target).
+  assert.ok(!btn.classList.contains("detail-cards-btn--delete"));
+});
+
 test("toggling a card off frees its cell without re-packing the rest", () => {
   const { detail } = mount();
   detail.setCardOrder(["download", "upload", "connections"]);

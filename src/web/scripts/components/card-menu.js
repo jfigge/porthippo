@@ -29,9 +29,11 @@ import { DEFAULT_CARD_ORDER, cardLabel } from "./card-catalog.js";
 export class CardMenu {
   #wrap;
   #btn;
+  #caret;
   #menu;
   #boxes = new Map(); // card key → checkbox input
   #open = false;
+  #deleteTarget = false;
   #visible;
   #onToggle;
   #onDocPointerDown;
@@ -84,10 +86,11 @@ export class CardMenu {
         this.#toggle();
       },
     });
-    this.#btn.append(
-      document.createTextNode(t(buttonLabelKey)),
-      el("span", { class: "detail-cards-caret", html: icons.chevronDown() }),
-    );
+    this.#caret = el("span", {
+      class: "detail-cards-caret",
+      html: icons.chevronDown(),
+    });
+    this.#btn.append(document.createTextNode(t(buttonLabelKey)), this.#caret);
 
     const items = DEFAULT_CARD_ORDER.map((key) => {
       const box = el("input", {
@@ -118,6 +121,19 @@ export class CardMenu {
   sync(visibleKeys) {
     const shown = new Set(visibleKeys);
     for (const [key, box] of this.#boxes) box.checked = shown.has(key);
+  }
+
+  /**
+   * Turn the selector into a drop-to-remove target while a card is dragged over
+   * it: the caret becomes a trash can and the button reads as a delete zone.
+   * Idempotent — restoring the caret when the drag leaves or drops.
+   */
+  setDeleteTarget(active) {
+    const on = Boolean(active);
+    if (on === this.#deleteTarget) return;
+    this.#deleteTarget = on;
+    this.#btn.classList.toggle("detail-cards-btn--delete", on);
+    this.#caret.innerHTML = on ? icons.trash() : icons.chevronDown();
   }
 
   #toggle() {
