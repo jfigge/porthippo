@@ -495,9 +495,17 @@ sandbox-destroy:
 sandbox-seed:
 	@node $(SANDBOX_DIR)/seed-porthippo.js $(DATA_DIR)
 
-# Prove the topology end-to-end (direct to jump, and through the jump to dest).
+# Prove the topology end-to-end: local (direct + via jump), dynamic reachability
+# (jump → sealed dest), and reverse forwarding (jump → a host-side echo).
 sandbox-verify:
 	@bash $(SANDBOX_DIR)/verify.sh
+
+# Run the host-side echo the REMOTE (reverse, Feature 110) tunnel forwards back to.
+# Leave it running in its own terminal, then arm "Sandbox — reverse forward" in the
+# debug app and trigger it from the jump container (see 'make sandbox-access').
+sandbox-host-echo:
+	@set -a; . $(SANDBOX_DIR)/.env; set +a; \
+	  node $(SANDBOX_DIR)/host-echo.js "$${HOST_ECHO_PORT:-9091}"
 
 # Re-print the access details.
 sandbox-access:
@@ -550,7 +558,8 @@ help:
 	@echo "    sandbox-stop    Stop the containers (keep state)"
 	@echo "    sandbox-destroy Remove containers + networks (keeps image + keys)"
 	@echo "    sandbox-seed    Seed Port Hippo with the sandbox tunnels/credentials"
-	@echo "    sandbox-verify  Prove both echo services are reachable over SSH"
+	@echo "    sandbox-verify  Prove local + dynamic + reverse forwarding all work"
+	@echo "    sandbox-host-echo  Run the host-side echo the reverse tunnel targets"
 	@echo "    sandbox-access  Re-print the access details"
 	@echo "    sandbox-status  docker compose ps  ·  sandbox-logs  Follow logs"
 
@@ -560,4 +569,4 @@ help:
         build-setup build-install icons sign-dmg sign-all dist dist-mac dist-linux dist-win \
         staple-dmg release sync-mac sync-win clean help \
         sandbox-keys sandbox-create sandbox-start sandbox-stop sandbox-destroy \
-        sandbox-seed sandbox-verify sandbox-access sandbox-status sandbox-logs
+        sandbox-seed sandbox-verify sandbox-host-echo sandbox-access sandbox-status sandbox-logs

@@ -50,4 +50,29 @@ else
   printf '   \033[33m— skipped (install sshpass or expect to test password auth)\033[0m\n'
 fi
 
-printf '\n   \033[32mSandbox verified: both echo services reachable through SSH.\033[0m\n\n'
+# ── Feature 110: the two new forwarding types ────────────────────────────────
+# D) DYNAMIC (SOCKS) reachability: a dynamic tunnel exits at the jump host, so its
+# reach is "whatever the jump can reach". Prove that includes the SEALED dest, via
+# the dest's NETWORK echo (0.0.0.0:${NET_ECHO_PORT}) — exactly what a SOCKS CONNECT
+# to ${DEST_BACK_IP}:${NET_ECHO_PORT} from the proxy would do.
+echo "D) dynamic reach (jump → sealed dest's network echo ${DEST_BACK_IP}:${NET_ECHO_PORT})..."
+NET_CMD="echo ping | socat -t2 - TCP4:${DEST_BACK_IP}:${NET_ECHO_PORT}"
+out="$(ssh "${SSH_OPTS[@]}" -p "${JUMP_SSH_PORT}" "${SSH_USER}@127.0.0.1" "${NET_CMD}" 2>/dev/null || true)"
+echo "${out}" | grep -q ping && ok "dynamic reach OK (jump → sealed dest)" || fail "dynamic reach FAILED"
+
+# E) REMOTE (reverse) forwarding: bind a port ON the jump and forward it back to a
+# host-side echo, then trigger it from the jump — a self-contained `ssh -R` mirror
+# of Port Hippo's remote tunnel. Uses this repo's node host-echo.js as the target.
+echo "E) reverse forward (jump binds :${REMOTE_BIND_PORT} → host echo :${HOST_ECHO_PORT})..."
+node "${DIR}/host-echo.js" "${HOST_ECHO_PORT}" >/dev/null 2>&1 &
+HOST_ECHO_PID=$!
+cleanup() { kill "${HOST_ECHO_PID}" 2>/dev/null || true; }
+trap cleanup EXIT
+sleep 0.5
+REV_CMD="echo ping | socat -t2 - TCP4:127.0.0.1:${REMOTE_BIND_PORT}"
+out="$(ssh "${SSH_OPTS[@]}" -R "127.0.0.1:${REMOTE_BIND_PORT}:127.0.0.1:${HOST_ECHO_PORT}" \
+        -p "${JUMP_SSH_PORT}" "${SSH_USER}@127.0.0.1" "${REV_CMD}" 2>/dev/null || true)"
+echo "${out}" | grep -q ping && ok "reverse forward OK (jump → host echo)" || fail "reverse forward FAILED"
+cleanup; trap - EXIT
+
+printf '\n   \033[32mSandbox verified: local, dynamic (SOCKS) and reverse forwarding all work.\033[0m\n\n'

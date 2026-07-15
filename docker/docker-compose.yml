@@ -43,6 +43,7 @@ services:
       SSH_PASSWORD: ${SSH_PASSWORD}
       ECHO_NAME: jump
       ECHO_PORT: ${ECHO_PORT}
+      NET_ECHO_PORT: ${NET_ECHO_PORT}
     networks:
       front:
         ipv4_address: ${JUMP_FRONT_IP}
@@ -61,6 +62,7 @@ services:
       SSH_PASSWORD: ${SSH_PASSWORD}
       ECHO_NAME: dest
       ECHO_PORT: ${ECHO_PORT}
+      NET_ECHO_PORT: ${NET_ECHO_PORT}
     networks:
       back:
         ipv4_address: ${DEST_BACK_IP}

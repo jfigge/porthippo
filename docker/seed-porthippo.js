@@ -58,6 +58,11 @@ const SSH_PASSWORD = env.SSH_PASSWORD || "tunnelpass";
 const JUMP_SSH_PORT = Number(env.JUMP_SSH_PORT || 2201);
 const DEST_BACK_IP = env.DEST_BACK_IP || "172.29.0.12";
 const ECHO_PORT = Number(env.ECHO_PORT || 7000);
+const NET_ECHO_PORT = Number(env.NET_ECHO_PORT || 7001);
+// Feature 110 new-type test parameters.
+const SOCKS_LOCAL_PORT = Number(env.SOCKS_LOCAL_PORT || 18080);
+const REMOTE_BIND_PORT = Number(env.REMOTE_BIND_PORT || 9090);
+const HOST_ECHO_PORT = Number(env.HOST_ECHO_PORT || 9091);
 const KEY_PATH = path.join(__dirname, "keys", "id_porthippo");
 
 const dataDir =
@@ -134,28 +139,60 @@ const jumpId = ensureJumpHost({
   credentialId: pwCredId,
 });
 
-// Scenario A — SSH straight to the jump host, forward to ITS loopback echo.
-// Blank sshHost ⇒ the resolver SSHes to the destination host and forwards to
-// 127.0.0.1:<destPort>, so destination host is the jump box and sshPort is 2201.
+// Scenario A (LOCAL) — SSH straight to the jump host, forward to ITS loopback echo.
+// sshHost = the jump (127.0.0.1:2201); destination = the jump's loopback echo.
 ensureTunnel({
   name: "Sandbox — jump echo (direct)",
+  type: "local",
   localPort: 18001,
   destination: { host: "127.0.0.1", port: ECHO_PORT },
-  sshPort: JUMP_SSH_PORT, // SSH server = destination box (127.0.0.1:2201)
+  sshHost: "127.0.0.1",
+  sshPort: JUMP_SSH_PORT, // SSH server = the jump host (127.0.0.1:2201)
   credentialId: keyCredId,
   enabled: true,
 });
 
-// Scenario B — through the jump host to the DEST box, forward to ITS loopback echo.
-// Non-blank sshHost ⇒ bastion: SSH to sshHost (dest) via the jump chain, then
-// forward to destination host:port (dest's 127.0.0.1:7000). Final hop uses KEY auth.
+// Scenario B (LOCAL) — through the jump host to the DEST box, forward to ITS
+// loopback echo. Non-blank sshHost ⇒ bastion: SSH to sshHost (dest) via the jump
+// chain, then forward to destination host:port. Final hop uses KEY auth.
 ensureTunnel({
   name: "Sandbox — dest echo (via jump)",
+  type: "local",
   localPort: 18002,
   destination: { host: "127.0.0.1", port: ECHO_PORT },
   sshHost: DEST_BACK_IP, // final SSH server = dest
   sshPort: 22,
   jumpHostIds: [jumpId],
+  credentialId: keyCredId,
+  enabled: true,
+});
+
+// Scenario C (DYNAMIC / SOCKS, Feature 110) — a local SOCKS5 proxy that exits at
+// the jump host. Point a browser/app at 127.0.0.1:<SOCKS_LOCAL_PORT> and it can
+// reach any host the jump can — including the SEALED dest at its network echo
+// (${DEST_BACK_IP}:${NET_ECHO_PORT}), which nothing on the host can reach directly.
+ensureTunnel({
+  name: "Sandbox — SOCKS proxy (via jump)",
+  type: "dynamic",
+  localPort: SOCKS_LOCAL_PORT,
+  sshHost: "127.0.0.1",
+  sshPort: JUMP_SSH_PORT, // the SOCKS exit vantage = the jump host
+  credentialId: keyCredId,
+  enabled: true,
+});
+
+// Scenario D (REMOTE / reverse, Feature 110) — bind a port ON the jump host and
+// forward every inbound connection back to a local echo on THIS machine. Run
+// `make sandbox-host-echo` first (the local target), arm this tunnel, then from
+// the jump: `docker exec porthippo-jump sh -c \
+//   'echo ping | socat - TCP:127.0.0.1:${REMOTE_BIND_PORT}'` — it reaches the host echo.
+ensureTunnel({
+  name: "Sandbox — reverse forward (jump → host)",
+  type: "remote",
+  remoteBind: { host: "127.0.0.1", port: REMOTE_BIND_PORT }, // bound on the jump
+  destination: { host: "127.0.0.1", port: HOST_ECHO_PORT }, // the host-side echo
+  sshHost: "127.0.0.1",
+  sshPort: JUMP_SSH_PORT,
   credentialId: keyCredId,
   enabled: true,
 });

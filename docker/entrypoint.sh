@@ -7,6 +7,7 @@ SSH_USER="${SSH_USER:-tunnel}"
 SSH_PASSWORD="${SSH_PASSWORD:-tunnelpass}"
 ECHO_NAME="${ECHO_NAME:-echo}"
 ECHO_PORT="${ECHO_PORT:-7000}"
+NET_ECHO_PORT="${NET_ECHO_PORT:-7001}"
 
 # ── Password auth ────────────────────────────────────────────────────────────
 # adduser -D leaves the account locked; setting a password unlocks it.
@@ -31,12 +32,22 @@ ssh-keygen -A
 
 # ── Loopback-only echo service ───────────────────────────────────────────────
 # Bound to 127.0.0.1 inside the container, so it is reachable ONLY via an SSH
-# forward — never directly from the network or the host.
+# forward — never directly from the network or the host. This is the target of the
+# LOCAL forwarding tunnels (Scenarios A/B).
 ECHO_NAME="${ECHO_NAME}" socat \
   "TCP4-LISTEN:${ECHO_PORT},bind=127.0.0.1,reuseaddr,fork" \
   EXEC:/usr/local/bin/echo-service.sh &
 
-echo "[entrypoint] ${ECHO_NAME}: sshd on :22, echo on 127.0.0.1:${ECHO_PORT}, user '${SSH_USER}'"
+# ── Network-facing echo service (Feature 110 DYNAMIC test) ───────────────────
+# Bound to 0.0.0.0 inside the container, so it is reachable across the container
+# network — the SEALED `dest` is thus reachable from `jump` at its back-network IP.
+# A DYNAMIC (SOCKS) tunnel exiting at the jump host connects here to prove it can
+# reach a host sealed behind the bastion. Still never published to the host.
+ECHO_NAME="${ECHO_NAME}-net" socat \
+  "TCP4-LISTEN:${NET_ECHO_PORT},bind=0.0.0.0,reuseaddr,fork" \
+  EXEC:/usr/local/bin/echo-service.sh &
+
+echo "[entrypoint] ${ECHO_NAME}: sshd on :22, echo on 127.0.0.1:${ECHO_PORT} + 0.0.0.0:${NET_ECHO_PORT}, user '${SSH_USER}'"
 
 # sshd in the foreground keeps the container alive; -e logs to stderr (→ docker logs).
 exec /usr/sbin/sshd -D -e

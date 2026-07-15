@@ -46,6 +46,28 @@ cat <<EOF
       Credential:        ${SSH_USER} + password OR key   (dest uses the same login)
   → host → jump (${JUMP_SSH_PORT}) → dest (${DEST_BACK_IP}:22) → dest's loopback echo.
 
+  $(bold "Scenario C — DYNAMIC (SOCKS5) proxy exiting at the JUMP host")
+  Port Hippo tunnel (Forwarding type: Dynamic):
+      SOCKS port:        ${SOCKS_LOCAL_PORT}       (local; point a browser/app here)
+      Target server:     127.0.0.1:${JUMP_SSH_PORT}  (the SOCKS exit vantage = jump)
+      Credential:        ${SSH_USER} + key
+  → reaches ANY host the jump can, including the SEALED dest's network echo:
+        curl --socks5-hostname 127.0.0.1:${SOCKS_LOCAL_PORT} http://${DEST_BACK_IP}:${NET_ECHO_PORT}/
+    (the echo just mirrors bytes, so curl reports a protocol error — but the
+     connection PROVES the proxy reached a host nothing on the host can reach.)
+
+  $(bold "Scenario D — REMOTE (reverse) forward: JUMP port → an echo on THIS machine")
+  Port Hippo tunnel (Forwarding type: Remote):
+      Remote bind:       127.0.0.1:${REMOTE_BIND_PORT}  (bound ON the jump host)
+      Local target:      127.0.0.1:${HOST_ECHO_PORT}    (an echo on this machine)
+      Target server:     127.0.0.1:${JUMP_SSH_PORT}
+      Credential:        ${SSH_USER} + key
+  → 1) run the local target:   make sandbox-host-echo
+     2) arm the tunnel, then trigger it from inside the jump:
+        docker exec porthippo-jump sh -c \\
+          'echo ping | socat - TCP:127.0.0.1:${REMOTE_BIND_PORT}'
+     the jump's :${REMOTE_BIND_PORT} forwards back to your host echo on :${HOST_ECHO_PORT}.
+
 EOF
 rule
 cat <<EOF
