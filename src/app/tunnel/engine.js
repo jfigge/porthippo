@@ -63,6 +63,11 @@ class TunnelEngine {
   #tunnels = new Map();
   #prompts = new Map(); // promptId → { resolve } for pending host-key decisions
   #statsTimer = null; // the throttled porthippo:stats heartbeat (null when idle)
+  // Feature 140 — bulk-action coalescing. While `applyToMany` runs, this is a
+  // `Map<id, snapshot>` (last-wins) that collects each tunnel's state change
+  // instead of broadcasting it, so the whole set produces ONE trailing
+  // `porthippo:tunnel-state` broadcast rather than one message per tunnel.
+  #batch = null;
 
   /**
    * @param {object} deps
@@ -125,6 +130,49 @@ class TunnelEngine {
     const tunnel = this.#tunnels.get(id);
     if (!tunnel) return { id, state: "disarmed" };
     return tunnel.resume();
+  }
+
+  /**
+   * Apply one action to a set of tunnels (Feature 140 bulk actions / group
+   * arm-all). `action` is one of `arm` / `disarm` / `pause` / `resume`; it delegates
+   * to the matching per-tunnel method for each id, best-effort (one failure never
+   * aborts the sweep), then emits a SINGLE coalesced `porthippo:tunnel-state`
+   * broadcast (array payload) plus one stats refresh — never one message per tunnel.
+   * The engine stays group-unaware: "arm this group" is just the group's member ids.
+   *
+   * @param {string[]} ids
+   * @param {"arm"|"disarm"|"pause"|"resume"} action
+   * @returns {Promise<object[]>}  the affected tunnels' final snapshots
+   */
+  async applyToMany(ids, action) {
+    const ACTIONS = new Set(["arm", "disarm", "pause", "resume"]);
+    if (!ACTIONS.has(action)) {
+      const err = new Error(`unknown bulk action: ${action}`);
+      err.code = "INVALID_ARG";
+      throw err;
+    }
+
+    const unique = [...new Set(Array.isArray(ids) ? ids : [])];
+    // Per-id try/catch means the loop below can never throw, so #batch is always
+    // cleared and the trailing broadcast always fires (no try/finally needed).
+    this.#batch = new Map();
+    for (const id of unique) {
+      try {
+        await this[action](id);
+      } catch (err) {
+        console.error(
+          `[engine] applyToMany ${action} ${id} failed:`,
+          err && err.message,
+        );
+      }
+    }
+    const snapshots = [...this.#batch.values()];
+    this.#batch = null;
+
+    // One coalesced state broadcast for the whole set, then one stats refresh.
+    this.#broadcast?.("porthippo:tunnel-state", snapshots);
+    this.#onTunnelStateChange();
+    return snapshots;
   }
 
   /** Snapshot of every tracked tunnel's state. */
@@ -295,6 +343,12 @@ class TunnelEngine {
       getRetryPolicy: (d) => this.#effectiveRetry(d),
       getSshKeepaliveMs: () => this.#sshKeepaliveMs(),
       onStateChange: (snapshot) => {
+        // During a bulk action, collect the snapshot (last state wins per id) so
+        // the whole set coalesces into one broadcast; otherwise emit immediately.
+        if (this.#batch) {
+          this.#batch.set(snapshot.id, snapshot);
+          return;
+        }
         this.#broadcast?.("porthippo:tunnel-state", snapshot);
         this.#onTunnelStateChange();
       },

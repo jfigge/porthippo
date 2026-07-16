@@ -41,6 +41,10 @@ const DEFAULTS = Object.freeze({
   // ── Shell / view state ────────────────────────────────────────────────────
   viewMode: "definition", // "definition" | "monitoring" (Feature 40 shell)
   monitorFilter: "all", // "all" | "active" — Monitoring view list filter (Feature 50)
+  // Feature 140: per-group collapsed state, keyed by group id ({ [groupId]: true }).
+  // A single object-valued key — the renderer read-modify-writes the whole map (the
+  // store shallow-merges, so a partial write would replace, not merge, the map).
+  groupCollapsed: {},
 
   // ── Feature 60 behaviour ──────────────────────────────────────────────────
   launchAtLogin: false, // start Port Hippo at OS login

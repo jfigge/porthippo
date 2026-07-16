@@ -75,6 +75,28 @@ function createTray({ Tray, Menu, image, renderImage, t, getStatus, actions }) {
     };
   }
 
+  // A group submenu (Feature 140): arm-all is offered while any member is still
+  // down, disarm-all while any is up — mirroring the fleet-wide items below.
+  function groupItem(group) {
+    const total = group.total || 0;
+    const armed = group.armed || 0;
+    return {
+      label: group.name || t("def.unnamed"),
+      submenu: [
+        {
+          label: t("tray.group.armAll"),
+          enabled: total > armed,
+          click: () => a.armGroup?.(group.id),
+        },
+        {
+          label: t("tray.group.disarmAll"),
+          enabled: armed > 0,
+          click: () => a.disarmGroup?.(group.id),
+        },
+      ],
+    };
+  }
+
   // The aggregate-health summary line (Feature 130), shown only when the fleet
   // isn't fully healthy so the tray stays quiet when everything is up.
   function healthItems(status) {
@@ -122,12 +144,23 @@ function createTray({ Tray, Menu, image, renderImage, t, getStatus, actions }) {
         ? [{ label: t("def.list.empty"), enabled: false }]
         : tunnels.map(tunnelItem);
 
+    // Per-group arm-all / disarm-all (Feature 140), shown only when groups exist.
+    const groups = Array.isArray(status.groups) ? status.groups : [];
+    const groupSection = groups.length
+      ? [
+          { type: "separator" },
+          { label: t("tray.groups"), enabled: false },
+          ...groups.map(groupItem),
+        ]
+      : [];
+
     const menu = Menu.buildFromTemplate([
       { label: t("tray.show"), click: () => a.showWindow?.() },
       { type: "separator" },
       ...healthItems(status),
       { label: t("tray.tunnels"), enabled: false },
       ...tunnelSection,
+      ...groupSection,
       { type: "separator" },
       {
         label: t("tray.armAll"),

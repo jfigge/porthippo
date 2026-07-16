@@ -27,11 +27,13 @@ import { el } from "../dom.js";
 import { t } from "../i18n.js";
 import { PopupManager } from "../popup-manager.js";
 import { TunnelEditorDialog } from "./tunnel-editor-dialog.js";
+import { GroupEditorDialog } from "./group-editor-dialog.js";
 import { TunnelList } from "./tunnel-list.js";
 import { TunnelDetail } from "./tunnel-detail.js";
 import { TunnelTable } from "./tunnel-table.js";
 import { SplitResizer } from "./split-resizer.js";
 import { buildErrorHistory } from "./error-history-dialog.js";
+import { UNGROUPED_ID } from "./tunnel-grouping.js";
 
 // The master list column's fallback width when no split position is stored yet
 // (matches the CSS default). The list can't be dragged narrower than MIN_LEFT
@@ -69,6 +71,13 @@ export class TunnelsView {
   #cardOrder = null;
   #cardLayout = null; // { [cardKey]: {col,row} } — ONE layout shared by every tunnel
 
+  // Groups (Feature 140).
+  #groups = [];
+  #collapsed = new Set(); // collapsed section ids (persisted in settings)
+  #groupEditor;
+  #pendingAssignIds = null; // ids to move into a group being created via "New group…"
+  #onGroupsChanged;
+
   #onStats;
   #onTunnelState;
   #onSetMode;
@@ -84,11 +93,30 @@ export class TunnelsView {
       onSaved: (record) => this.#afterSaved(record),
     });
 
+    this.#groupEditor = new GroupEditorDialog({
+      porthippo: this.#porthippo,
+      onSaved: (record) => this.#afterGroupSaved(record),
+    });
+
+    const groupCbs = {
+      onToggleCollapse: (sectionId) => this.#toggleCollapse(sectionId),
+      onGroupAction: (sectionId, action) =>
+        this.#groupAction(sectionId, action),
+      onGroupMenu: (sectionId) => this.#showGroupMenu(sectionId),
+      onAssignToGroup: (tunnelId, groupId) =>
+        this.#assignMany([tunnelId], groupId),
+      onReorderGroups: (fromId, toId) => this.#reorderGroups(fromId, toId),
+    };
+
     this.#list = new TunnelList({
       onSelect: (id) => this.#select(id),
       onAdd: () => this.#editor.openCreate(),
       // Edit, delete and the other row actions live on the row's right-click menu.
       onContextMenu: (id) => this.#showContextMenu(id),
+      // Cards/treeview drag: assign to a group AND sequence within it.
+      onMoveTunnel: (id, groupId, beforeId) =>
+        this.#moveTunnel(id, groupId, beforeId),
+      ...groupCbs,
     });
 
     this.#detail = new TunnelDetail({
@@ -111,6 +139,7 @@ export class TunnelsView {
       onToggleArm: (id) => this.#toggleArm(id),
       onTogglePause: (id) => this.#togglePause(id),
       onContextMenu: (id) => this.#showContextMenu(id),
+      ...groupCbs,
     });
 
     this.#split = el("div", { class: "tunnels-split" }, [
@@ -126,6 +155,7 @@ export class TunnelsView {
       this.#split,
       this.#tableEl,
       this.#editor.element,
+      this.#groupEditor.element,
     ]);
 
     // Cards view: a draggable divider between the master list and the detail
@@ -160,24 +190,30 @@ export class TunnelsView {
     // The view-mode toggle lives in the app header; it broadcasts the intent
     // and we echo the resolved mode back so the toggle's glyph/hint stays in sync.
     this.#onSetMode = (e) => this.#setMode(e.detail && e.detail.mode);
+    // A group create/edit/delete anywhere (this view's editor or another window)
+    // re-reads the group list so both presentations refresh (Feature 140).
+    this.#onGroupsChanged = () => this.load();
     window.addEventListener("porthippo:stats-updated", this.#onStats);
     window.addEventListener("porthippo:tunnel-state", this.#onTunnelState);
     window.addEventListener("porthippo:set-detail-mode", this.#onSetMode);
+    window.addEventListener("porthippo:groups-changed", this.#onGroupsChanged);
   }
 
   get element() {
     return this.#el;
   }
 
-  /** Load definitions, jump hosts (breadcrumb), live state, card order + mode. */
+  /** Load definitions, jump hosts (breadcrumb), groups, live state, card order + mode. */
   async load() {
-    const [defs, status, jumps, settings] = await Promise.all([
+    const [defs, status, jumps, groups, settings] = await Promise.all([
       this.#porthippo?.tunnels?.list?.() ?? [],
       this.#porthippo?.tunnels?.status?.() ?? [],
       this.#porthippo?.jumpHosts?.list?.() ?? [],
+      this.#porthippo?.groups?.list?.() ?? [],
       this.#porthippo?.settings?.get?.() ?? {},
     ]);
     this.#defs = Array.isArray(defs) ? defs : [];
+    this.#groups = Array.isArray(groups) ? groups : [];
     if (Array.isArray(status)) {
       for (const s of status) {
         if (!s || !s.id) continue;
@@ -207,6 +243,16 @@ export class TunnelsView {
     // Always (re)apply so the header selector syncs, even for the default.
     this.#setMode(settings?.detailMode, { persist: false });
 
+    // Per-group collapsed state (Feature 140): the persisted map of collapsed
+    // section ids ({ [id]: true }); default all expanded.
+    const collapsedMap =
+      settings && typeof settings.groupCollapsed === "object"
+        ? settings.groupCollapsed
+        : {};
+    this.#collapsed = new Set(
+      Object.keys(collapsedMap).filter((k) => collapsedMap[k]),
+    );
+
     // Keep the current selection if it still exists, else select the first tunnel.
     if (!this.#defs.some((d) => d.id === this.#selectedId)) {
       this.#selectedId = this.#defs[0]?.id ?? null;
@@ -218,6 +264,7 @@ export class TunnelsView {
       this.#snaps,
       this.#selectedId,
     );
+    this.#pushGrouping();
     this.#renderDetail();
   }
 
@@ -235,6 +282,10 @@ export class TunnelsView {
     window.removeEventListener("porthippo:stats-updated", this.#onStats);
     window.removeEventListener("porthippo:tunnel-state", this.#onTunnelState);
     window.removeEventListener("porthippo:set-detail-mode", this.#onSetMode);
+    window.removeEventListener(
+      "porthippo:groups-changed",
+      this.#onGroupsChanged,
+    );
     this.#resizer.destroy();
     this.#listResizer.destroy();
   }
@@ -315,6 +366,11 @@ export class TunnelsView {
         label: armed ? t("tunnels.menu.disarm") : t("tunnels.menu.arm"),
       },
       { type: "separator" },
+      // Feature 140: move this tunnel between groups (or create one).
+      {
+        label: t("tunnels.menu.assign"),
+        submenu: this.#assignMenuItems(def.groupId || null),
+      },
       { id: "clone", label: t("tunnels.menu.clone") },
       { type: "separator" },
       { id: "delete", label: t("tunnels.menu.delete") },
@@ -338,7 +394,12 @@ export class TunnelsView {
         this.#confirmDelete(id);
         break;
       default:
-        break; // dismissed (null) or an unknown id
+        // A submenu choice ("assign:<target>") lands here; anything else is a
+        // dismissal (null) or an unknown id.
+        if (typeof action === "string" && action.startsWith("assign:")) {
+          this.#handleAssignChoice(action, [id]);
+        }
+        break;
     }
   }
 
@@ -385,6 +446,16 @@ export class TunnelsView {
   }
 
   #applyState(detail) {
+    // Feature 140: a group action coalesces into ONE broadcast carrying an ARRAY of
+    // snapshots; a single tunnel change is still a lone object. Normalise to a list.
+    if (Array.isArray(detail)) {
+      for (const one of detail) this.#applyOneState(one);
+      return;
+    }
+    this.#applyOneState(detail);
+  }
+
+  #applyOneState(detail) {
     if (!detail || !detail.id) return;
     if (detail.removed) {
       this.#states.delete(detail.id);
@@ -559,5 +630,253 @@ export class TunnelsView {
     this.#porthippo?.settings
       ?.set?.({ splitLeft: Math.round(px) })
       ?.catch?.(() => {});
+  }
+
+  // ── Groups (Feature 140) ──────────────────────────────────────────────────
+
+  /** Push the current grouping context into both list views. */
+  #pushGrouping() {
+    const ctx = {
+      groups: this.#groups,
+      collapsedIds: this.#collapsed,
+    };
+    this.#list.setGrouping(ctx);
+    this.#table.setGrouping(ctx);
+  }
+
+  // ── Collapse / group actions ──────────────────────────────────────────────
+
+  #toggleCollapse(sectionId) {
+    if (this.#collapsed.has(sectionId)) this.#collapsed.delete(sectionId);
+    else this.#collapsed.add(sectionId);
+    this.#pushGrouping();
+    this.#persistCollapsed();
+  }
+
+  #persistCollapsed() {
+    // Persist the whole map (the settings store shallow-merges, so a partial write
+    // would replace — not merge — the key).
+    const map = {};
+    for (const id of this.#collapsed) map[id] = true;
+    this.#porthippo?.settings
+      ?.set?.({ groupCollapsed: map })
+      ?.catch?.(() => {});
+  }
+
+  /** The ids of the tunnels in a section (UNGROUPED = ungrouped / dangling). */
+  #idsInSection(sectionId) {
+    const known = new Set(this.#groups.map((g) => g.id));
+    if (sectionId === UNGROUPED_ID) {
+      return this.#defs
+        .filter((d) => !d.groupId || !known.has(d.groupId))
+        .map((d) => d.id);
+    }
+    return this.#defs.filter((d) => d.groupId === sectionId).map((d) => d.id);
+  }
+
+  #groupAction(sectionId, action) {
+    const ids = this.#idsInSection(sectionId);
+    if (ids.length === 0) return;
+    this.#porthippo?.tunnels?.applyMany?.(ids, action)?.catch?.(() => {});
+  }
+
+  async #showGroupMenu(sectionId) {
+    const isUngrouped = sectionId === UNGROUPED_ID;
+    const items = [
+      { id: "arm", label: t("group.menu.armAll") },
+      { id: "disarm", label: t("group.menu.disarmAll") },
+      { id: "pause", label: t("group.menu.pauseAll") },
+      { id: "resume", label: t("group.menu.resumeAll") },
+    ];
+    if (!isUngrouped) {
+      items.push(
+        { type: "separator" },
+        { id: "edit", label: t("group.menu.edit") },
+        { id: "delete", label: t("group.menu.delete") },
+      );
+    }
+    const action = await this.#porthippo?.contextMenu?.popup?.({ items });
+    switch (action) {
+      case "arm":
+      case "disarm":
+      case "pause":
+      case "resume":
+        this.#groupAction(sectionId, action);
+        break;
+      case "edit":
+        this.#editGroup(sectionId);
+        break;
+      case "delete":
+        this.#confirmDeleteGroup(sectionId);
+        break;
+      default:
+        break;
+    }
+  }
+
+  // ── Group CRUD + membership ───────────────────────────────────────────────
+
+  #newGroup(assignIds) {
+    this.#pendingAssignIds = Array.isArray(assignIds) ? assignIds : null;
+    this.#groupEditor.openCreate();
+  }
+
+  #editGroup(groupId) {
+    const group = this.#groups.find((g) => g.id === groupId);
+    if (group) this.#groupEditor.openEdit(group);
+  }
+
+  #confirmDeleteGroup(groupId) {
+    const group = this.#groups.find((g) => g.id === groupId);
+    if (!group) return;
+    PopupManager.confirmDelete({
+      message: t("group.delete.message", { name: group.label }),
+      onConfirm: async () => {
+        const result = await this.#porthippo?.groups?.delete?.(groupId);
+        if (result && result.__hippoError) {
+          PopupManager.notify({ message: result.message || "Delete failed" });
+          return;
+        }
+        await this.load();
+      },
+    });
+  }
+
+  async #afterGroupSaved(record) {
+    // If this group was created to receive a pending selection, move those tunnels
+    // into it now; #assignMany reloads. Otherwise the porthippo:groups-changed
+    // listener reloads both views.
+    if (this.#pendingAssignIds && record && record.id) {
+      const ids = this.#pendingAssignIds;
+      this.#pendingAssignIds = null;
+      await this.#assignMany(ids, record.id);
+    } else {
+      this.#pendingAssignIds = null;
+    }
+  }
+
+  /** Move a set of tunnels into a group (or to Ungrouped when groupId is null). */
+  async #assignMany(ids, groupId) {
+    const writes = [];
+    for (const id of ids) {
+      const def = this.#defs.find((d) => d.id === id);
+      if (!def) continue;
+      writes.push(
+        this.#porthippo?.tunnels?.update?.(
+          id,
+          this.#assignPayload(def, groupId),
+        ),
+      );
+    }
+    try {
+      await Promise.all(writes);
+    } catch {
+      // best-effort; a failed assignment just leaves that tunnel where it was
+    }
+    window.dispatchEvent(new CustomEvent("porthippo:tunnels-changed"));
+    await this.load();
+  }
+
+  /**
+   * Move a tunnel into a group AND sequence it there (cards/treeview drag): rebuild
+   * the global display order with the dragged tunnel re-inserted before `beforeId`
+   * (or appended to the target group when `beforeId` is null), flip its group
+   * membership if it changed, and persist. `groupId` null → Ungrouped.
+   */
+  async #moveTunnel(id, groupId, beforeId) {
+    const def = this.#defs.find((d) => d.id === id);
+    if (!def) return;
+    const groupOf = (d) =>
+      d.groupId && this.#groups.some((g) => g.id === d.groupId)
+        ? d.groupId
+        : null;
+    const target =
+      groupId && this.#groups.some((g) => g.id === groupId) ? groupId : null;
+    const currentGroupId = groupOf(def);
+
+    // New global order: current order minus the dragged id, re-inserted at the slot.
+    const order = this.#defs.map((d) => d.id).filter((x) => x !== id);
+    let idx;
+    if (beforeId != null && order.includes(beforeId)) {
+      idx = order.indexOf(beforeId);
+    } else {
+      // Append after the target group's last remaining member (or at the very end
+      // when the group has no other visible members).
+      const members = this.#defs.filter(
+        (d) => d.id !== id && groupOf(d) === target,
+      );
+      idx = members.length
+        ? order.indexOf(members[members.length - 1].id) + 1
+        : order.length;
+    }
+    order.splice(idx, 0, id);
+
+    const sameOrder =
+      order.length === this.#defs.length &&
+      order.every((x, i) => x === this.#defs[i].id);
+    if (currentGroupId === target && sameOrder) return; // nothing changed
+
+    if (currentGroupId !== target) {
+      const res = await this.#porthippo?.tunnels?.update?.(
+        id,
+        this.#assignPayload(def, target),
+      );
+      if (res && res.__hippoError) {
+        PopupManager.notify({ message: res.message || "Engine error" });
+        return;
+      }
+    }
+    await this.#porthippo?.tunnels?.reorder?.(order);
+    window.dispatchEvent(new CustomEvent("porthippo:tunnels-changed"));
+    await this.load();
+  }
+
+  /** A full-definition update payload that only changes group membership. */
+  #assignPayload(def, groupId) {
+    const payload = { ...def };
+    delete payload.order; // derived
+    delete payload.routeSummary; // derived
+    delete payload.group; // derived
+    if (groupId) payload.groupId = groupId;
+    else delete payload.groupId; // omit → the store drops it (ungrouped)
+    return payload;
+  }
+
+  async #reorderGroups(fromId, toId) {
+    const ids = this.#groups.map((g) => g.id);
+    const from = ids.indexOf(fromId);
+    if (from === -1 || fromId === toId) return;
+    ids.splice(from, 1);
+    const at = ids.indexOf(toId);
+    ids.splice(at === -1 ? ids.length : at, 0, fromId);
+    const result = await this.#porthippo?.groups?.reorder?.(ids);
+    if (result && result.__hippoError) return;
+    await this.load();
+  }
+
+  #assignMenuItems(currentGroupId) {
+    const items = this.#groups.map((g) => ({
+      id: `assign:${g.id}`,
+      label: g.label,
+      enabled: g.id !== currentGroupId,
+    }));
+    items.push({
+      id: `assign:${UNGROUPED_ID}`,
+      label: t("group.ungrouped"),
+      enabled: Boolean(currentGroupId),
+    });
+    items.push({ type: "separator" });
+    items.push({ id: "assign:__new", label: t("group.newEllipsis") });
+    return items;
+  }
+
+  #handleAssignChoice(choice, ids) {
+    if (typeof choice !== "string" || !choice.startsWith("assign:")) return;
+    const target = choice.slice("assign:".length);
+    if (target === "__new") {
+      this.#newGroup(ids);
+      return;
+    }
+    this.#assignMany(ids, target === UNGROUPED_ID ? null : target);
   }
 }

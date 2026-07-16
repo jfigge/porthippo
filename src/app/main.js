@@ -157,7 +157,10 @@ function broadcast(channel, payload) {
   broadcastToRenderer(channel, payload);
   if (channel === "porthippo:tunnel-state") {
     _tray?.update(); // count/tooltip + health rollup
-    _notifications?.onTunnelState(payload); // drop / recover / gave-up notices
+    // Feature 140: a bulk action coalesces into ONE broadcast carrying an ARRAY of
+    // snapshots; a single change is still a lone object. Notify per tunnel.
+    const list = Array.isArray(payload) ? payload : [payload];
+    for (const one of list) _notifications?.onTunnelState(one);
   } else if (channel === "porthippo:hostkey-changed") {
     _notifications?.onHostKeyChanged(payload); // security alert (name only)
   }
@@ -322,6 +325,27 @@ function getStatus() {
       : reconnectingCount > 0
         ? "reconnecting"
         : "healthy";
+  // Groups (Feature 140) for the tray + menu submenus: each with its member ids
+  // and an armed/total rollup so the tray can gate arm-all / disarm-all.
+  const groupDefs = safeCall(
+    "tray:groups",
+    () => getStores().groupStore().list(),
+    [],
+  );
+  const groups = groupDefs.map((g) => {
+    const ids = defs.filter((d) => d.groupId === g.id).map((d) => d.id);
+    const armed = ids.filter((id) =>
+      LIVE_STATES.has(states.get(id) || "disarmed"),
+    ).length;
+    return {
+      id: g.id,
+      name: g.label,
+      color: g.color,
+      ids,
+      armed,
+      total: ids.length,
+    };
+  });
   return {
     tunnels,
     total: tunnels.length,
@@ -330,6 +354,7 @@ function getStatus() {
     health,
     reconnecting: reconnectingCount,
     errored: errorCount,
+    groups,
   };
 }
 
@@ -390,6 +415,31 @@ const disarmAll = () =>
       console.error("[main] disarmAll failed:", err && err.message),
     );
 
+// ── Group bulk actions (Feature 140) ─────────────────────────────────────────
+// The engine stays group-unaware: "arm this group" is resolved to its member ids
+// (read live at click time) and applied as one coalesced bulk op.
+function groupMemberIds(groupId) {
+  const defs = safeCall(
+    "group:members",
+    () => getStores().tunnelStore().list(),
+    [],
+  );
+  return defs.filter((d) => d && d.groupId === groupId).map((d) => d.id);
+}
+
+function applyToGroup(groupId, action) {
+  const ids = groupMemberIds(groupId);
+  if (ids.length === 0) return;
+  getEngine()
+    ?.applyToMany(ids, action)
+    .catch((err) =>
+      console.error(`[main] group ${action} failed:`, err && err.message),
+    );
+}
+
+const armGroup = (id) => applyToGroup(id, "arm");
+const disarmGroup = (id) => applyToGroup(id, "disarm");
+
 function createTrayPresence() {
   // Rebuild the tray image from the current status so its badge tracks the
   // connected-tunnel count on every state change. The glyph is monochrome; on
@@ -425,6 +475,8 @@ function createTrayPresence() {
           .catch((err) =>
             console.error("[main] disarm failed:", err && err.message),
           ),
+      armGroup,
+      disarmGroup,
       openSettings,
       copyDiagnostics,
       quit: requestQuit,
@@ -439,6 +491,9 @@ function refreshMenu() {
     Menu,
     label,
     isDev: isDev || isDevTools || isHotReload,
+    // Per-group arm-all/disarm-all submenus (Feature 140). Only the group id +
+    // name are needed here; member ids are resolved live when a submenu is clicked.
+    groups: getStatus().groups.map((g) => ({ id: g.id, name: g.name })),
     actions: {
       newTunnel: () => {
         showWindow();
@@ -446,6 +501,8 @@ function refreshMenu() {
       },
       armAll,
       disarmAll,
+      armGroup,
+      disarmGroup,
       openSettings,
       copyDiagnostics,
       showLogs: () => shell.openPath(logger.dir),
@@ -505,6 +562,13 @@ function registerIpc() {
           console.error("[main] reconcileAll error:", err && err.message),
         );
       _tray?.update();
+    },
+    // A group create/rename/delete/reorder (Feature 140) changes no routing, so it
+    // triggers NO engine reconcile — but the tray + native-menu group submenus
+    // must rebuild to reflect the new set (a group edit emits no state broadcast).
+    afterGroupsWrite: () => {
+      _tray?.update();
+      refreshMenu();
     },
     // After a settings change, apply the platform side-effects the renderer
     // can't (launch-at-login). Theme/language/defaults are live-applied in the

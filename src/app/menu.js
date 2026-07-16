@@ -39,11 +39,46 @@
  * @param {typeof Electron.Menu} deps.Menu
  * @param {(key: string, fallback: string) => string} deps.label
  * @param {object} deps.actions  click handlers (see main.js)
+ * @param {Array<{id: string, name: string}>} [deps.groups]  tunnel groups for the
+ *        per-group arm-all/disarm-all submenus (Feature 140)
  * @param {boolean} [deps.isDev]  include reload / DevTools items
  */
-function installAppMenu({ app, Menu, label, actions, isDev = false }) {
+function installAppMenu({
+  app,
+  Menu,
+  label,
+  actions,
+  groups = [],
+  isDev = false,
+}) {
   const isMac = process.platform === "darwin";
   const a = actions || {};
+
+  // Per-group arm-all / disarm-all submenus (Feature 140). A "Groups" submenu
+  // under File holds one submenu per group; member ids are resolved live in main
+  // when a leaf is clicked, so only id + name are needed here.
+  const groupList = Array.isArray(groups) ? groups : [];
+  const groupItems = groupList.length
+    ? [
+        { type: "separator" },
+        {
+          label: label("menu.groups", "Groups"),
+          submenu: groupList.map((g) => ({
+            label: g.name || label("group.ungrouped", "Ungrouped"),
+            submenu: [
+              {
+                label: label("menu.group.armAll", "Arm All"),
+                click: () => a.armGroup?.(g.id),
+              },
+              {
+                label: label("menu.group.disarmAll", "Disarm All"),
+                click: () => a.disarmGroup?.(g.id),
+              },
+            ],
+          })),
+        },
+      ]
+    : [];
 
   // Standard View menu (the app is now a single master-detail surface, so there
   // are no Definition/Monitoring view-switch items).
@@ -163,6 +198,7 @@ function installAppMenu({ app, Menu, label, actions, isDev = false }) {
           label: label("menu.disarmAll", "Disarm All Tunnels"),
           click: () => a.disarmAll?.(),
         },
+        ...groupItems,
         // On non-mac, Settings + Quit live in the File menu.
         ...(isMac
           ? [{ role: "close" }]

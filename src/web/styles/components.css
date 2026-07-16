@@ -1452,6 +1452,8 @@
   width: 100%;
   height: 100%;
   min-height: 0;
+  /* Anchor the floating bulk-action bar (Feature 140). */
+  position: relative;
 }
 
 .tunnels-split {
@@ -1541,6 +1543,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  border-radius: var(--radius-md);
 }
 
 .tunnel-list {
@@ -2391,11 +2394,21 @@
   background: var(--color-surface-1);
 }
 
+/* Drop target: a tunnel dragged over an expanded group lights every row in it
+   (the tinted identity cell paints over the row bg, so tint it too). */
+.tt-row--drop {
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+.tt-row--drop .tt-td--identity {
+  background: color-mix(in srgb, var(--color-accent) 14%, var(--color-mantle));
+}
+
 /* The tunnel-name column is a fixed width shared with the Cards-view split
    (--split-left, inherited from .tunnels-view), dragged by the overlay splitter
    below. min = max pins it in the auto-layout table regardless of content. */
 .tt-th--identity,
-.tt-td--identity {
+.tt-td--identity,
+.tt-group-cell--identity {
   width: var(--split-left, 240px);
   min-width: var(--split-left, 240px);
   max-width: var(--split-left, 240px);
@@ -2603,4 +2616,188 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ── Tunnel groups & bulk actions (Feature 140) ───────────────────────────── */
+
+/* Colour swatch shared by the group header chip and the editor's colour picker.
+   The hue comes from a dedicated --color-group-* token (never a hardcoded hex). */
+.group-swatch {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--color-overlay);
+}
+.group-swatch--blue {
+  background: var(--color-group-blue);
+}
+.group-swatch--teal {
+  background: var(--color-group-teal);
+}
+.group-swatch--green {
+  background: var(--color-group-green);
+}
+.group-swatch--amber {
+  background: var(--color-group-amber);
+}
+.group-swatch--violet {
+  background: var(--color-group-violet);
+}
+.group-swatch--red {
+  background: var(--color-group-red);
+}
+
+.group-chip {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+.group-chip--ungrouped {
+  background: var(--color-overlay);
+  opacity: 0.5;
+}
+
+/* Group section header (shared shape for the cards sidebar + the list table). */
+.group-header,
+.tt-group-cell .group-header-inner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  color: var(--color-subtext);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+}
+.group-header {
+  border-radius: var(--radius-md);
+}
+.group-header:hover {
+  background: var(--color-surface-0);
+}
+.group-header--drop,
+.tt-group-row--drop .group-header-inner {
+  outline: 2px dashed var(--color-accent);
+  outline-offset: -2px;
+  border-radius: var(--radius-md);
+}
+/* Dropping a tunnel over an expanded group lights the whole section (header +
+   every visible row) as one drop zone, so any row is a valid target. */
+.group-header--drop {
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+.tunnel-row--drop {
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+.tt-group-row--drop .tt-group-cell {
+  background: color-mix(in srgb, var(--color-accent) 14%, var(--color-mantle));
+}
+.group-header--dragging,
+.tt-group-row--dragging {
+  opacity: 0.5;
+}
+/* While a drop gap stands in for it, the dragged tunnel's own slot collapses away
+   (the placeholder is the item's new footprint). */
+.tunnel-row--dragging {
+  display: none;
+}
+
+/* The live "blank entry" gap shown at the exact drop position while a tunnel is
+   dragged within / between groups (see tunnel-list.js #gapAtRow). */
+.tunnel-row-placeholder {
+  height: 28px;
+  margin: 2px var(--space-1);
+  border: 2px dashed var(--color-accent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  box-sizing: border-box;
+}
+
+.group-chevron {
+  flex: 0 0 auto;
+  transition: transform 0.12s ease;
+}
+.group-header--collapsed .group-chevron,
+.tt-group-row--collapsed .group-chevron {
+  transform: rotate(-90deg);
+}
+
+.group-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text);
+}
+.group-count {
+  flex: 0 0 auto;
+  color: var(--color-muted);
+  font-variant-numeric: tabular-nums;
+}
+.group-traffic {
+  flex: 0 0 auto;
+  color: var(--color-muted);
+  font-variant-numeric: tabular-nums;
+}
+.group-arm-switch {
+  flex: 0 0 auto;
+}
+/* Pause-all / resume-all icon (acts on the whole group, ignoring selection). */
+.group-pause-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  color: var(--color-muted);
+}
+.group-pause-btn svg {
+  display: block;
+}
+.group-pause-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* The group section header row: the name + its controls sit in a cell pinned to
+   the name (identity) column — name left, controls right — while an empty filler
+   carries the tinted band on across the metric columns. */
+.tt-group-row {
+  cursor: pointer;
+}
+.tt-group-cell {
+  padding: 0;
+  background: var(--color-mantle);
+}
+.tt-group-cell--identity {
+  overflow: hidden; /* keep the name truncating within the pinned column */
+  /* Seam aligned with the identity/metric column divider on the rows below. */
+  border-right: 1px solid var(--color-crust);
+}
+
+/* Colour picker in the group editor dialog: a row of selectable swatch buttons. */
+.group-swatches {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.group-swatches .group-swatch {
+  width: 24px;
+  height: 24px;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+  padding: 0;
+}
+.group-swatches .group-swatch--selected {
+  border-color: var(--color-text);
+  box-shadow: 0 0 0 2px var(--color-base);
+}
+.group-swatches .group-swatch:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
 }

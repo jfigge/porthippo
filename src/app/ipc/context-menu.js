@@ -19,12 +19,13 @@
  *
  * The sandboxed renderer can build an HTML menu, but only the main process can
  * pop a real OS-native menu at the cursor. So the renderer sends a *template* —
- * a flat list of `{ id, label, enabled }` items and `{ type: "separator" }`
- * dividers — and awaits the id of the clicked item (or `null` when dismissed).
- * All labels are resolved renderer-side (single i18n source), so this handler is
- * a dumb popup: it never runs renderer-supplied code, only records which item id
- * was chosen and resolves with it. Used by the tunnel-row right-click menu
- * (Edit / Pause·Play / Arm·Disarm / Clone / Delete).
+ * a list of `{ id, label, enabled }` items, `{ type: "separator" }` dividers, and
+ * (Feature 140) nested `{ label, submenu: [...] }` items — and awaits the id of the
+ * clicked leaf item (or `null` when dismissed). All labels are resolved
+ * renderer-side (single i18n source), so this handler is a dumb popup: it never
+ * runs renderer-supplied code, only records which item id was chosen and resolves
+ * with it. Used by the tunnel-row right-click menu (Edit / Pause·Play /
+ * Arm·Disarm / Clone / Delete / Assign to group ▶) and the group-header menu.
  *
  * Every channel registered here MUST have a matching `window.porthippo.*`
  * exposure in preload.js AND this file must be listed in the ipc-parity test's
@@ -50,19 +51,32 @@ function popupMenu({ Menu, getMainWindow, request }) {
     // when the menu closes for any reason) is the single resolve point, so the
     // click-vs-close ordering can't drop or double-resolve a selection.
     let chosen = null;
-    const template = items.map((item) => {
-      if (!item || item.type === "separator") return { type: "separator" };
-      return {
-        label: String(item.label == null ? "" : item.label),
-        enabled: item.enabled !== false,
-        click: () => {
-          // An id-less item resolves as a dismissal (null), never the phantom
-          // string "undefined"/"null" that String(item.id) would otherwise yield.
-          chosen = item.id == null ? null : String(item.id);
-        },
-      };
-    });
+    const record = (id) => {
+      // An id-less item resolves as a dismissal (null), never the phantom string
+      // "undefined"/"null" that String(id) would otherwise yield.
+      chosen = id == null ? null : String(id);
+    };
 
+    // Recursively translate items → an Electron template, threading `record` so a
+    // click on a leaf at any nesting depth records its id (submenus have no id).
+    const build = (list) =>
+      list.map((item) => {
+        if (!item || item.type === "separator") return { type: "separator" };
+        if (Array.isArray(item.submenu)) {
+          return {
+            label: String(item.label == null ? "" : item.label),
+            enabled: item.enabled !== false,
+            submenu: build(item.submenu),
+          };
+        }
+        return {
+          label: String(item.label == null ? "" : item.label),
+          enabled: item.enabled !== false,
+          click: () => record(item.id),
+        };
+      });
+
+    const template = build(items);
     if (template.length === 0) {
       resolve(null);
       return;

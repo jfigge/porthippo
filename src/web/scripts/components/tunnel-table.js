@@ -28,6 +28,7 @@
 import { el, clear } from "../dom.js";
 import { t } from "../i18n.js";
 import { icons } from "../icons.js";
+import { formatRate } from "../utils/format.js";
 import {
   getCard,
   DEFAULT_CARD_ORDER,
@@ -38,6 +39,14 @@ import {
 } from "./card-catalog.js";
 import { CardMenu } from "./card-menu.js";
 import { signalLamp, buildSignal, typeIcon } from "./tunnel-list.js";
+import {
+  buildSections,
+  sectionRollup,
+  sectionThroughput,
+  sectionPauseRollup,
+  sectionPauseState,
+  groupColorKey,
+} from "./tunnel-grouping.js";
 
 /** The synthetic key of the fixed identity column (sorts by tunnel name). */
 export const TABLE_TUNNEL_COLUMN = "__tunnel";
@@ -72,7 +81,15 @@ export class TunnelTable {
   #visible = [...DEFAULT_CARD_ORDER]; // ordered VISIBLE columns (= shared cards)
   #sort = { key: TABLE_TUNNEL_COLUMN, dir: "asc" };
   #rowNodes = new Map(); // id → { tr, signal, cells: Map<colKey, td> }
+  #sectionNodes = new Map(); // sectionId → { headerTr, rollupEl, trafficEl, armSwitch, pauseBtn, defs }
   #dragCol = null;
+
+  // Grouping (Feature 140): empty groups → flat table, unchanged.
+  #groups = [];
+  #collapsedIds = new Set();
+  #drag = null; // row/header drag ({ kind, id }); distinct from #dragCol (columns)
+  #dropSectionId = null; // section currently shown as the drop target
+  #dropHeaderOnly = false; // true → only the header row highlights (group reorder)
 
   #now;
   #onSelect;
@@ -82,6 +99,11 @@ export class TunnelTable {
   #onToggleArm;
   #onTogglePause;
   #onContextMenu;
+  #onToggleCollapse;
+  #onGroupAction;
+  #onGroupMenu;
+  #onAssignToGroup;
+  #onReorderGroups;
 
   constructor({
     now,
@@ -92,6 +114,11 @@ export class TunnelTable {
     onToggleArm,
     onTogglePause,
     onContextMenu,
+    onToggleCollapse,
+    onGroupAction,
+    onGroupMenu,
+    onAssignToGroup,
+    onReorderGroups,
   } = {}) {
     this.#now = now || Date.now;
     this.#onSelect = onSelect || (() => {});
@@ -101,6 +128,11 @@ export class TunnelTable {
     this.#onToggleArm = onToggleArm || (() => {});
     this.#onTogglePause = onTogglePause || (() => {});
     this.#onContextMenu = onContextMenu || (() => {});
+    this.#onToggleCollapse = onToggleCollapse || (() => {});
+    this.#onGroupAction = onGroupAction || (() => {});
+    this.#onGroupMenu = onGroupMenu || (() => {});
+    this.#onAssignToGroup = onAssignToGroup || (() => {});
+    this.#onReorderGroups = onReorderGroups || (() => {});
     this.#cardMenu = new CardMenu({
       visible: () => this.#visible,
       onToggle: (key, show) => this.#toggleColumn(key, show),
@@ -184,6 +216,17 @@ export class TunnelTable {
     this.#render();
   }
 
+  /**
+   * Feed the grouping context (Feature 140): the ordered groups and the collapsed
+   * section ids. Empty groups render flat.
+   */
+  setGrouping({ groups, collapsedIds } = {}) {
+    if (groups !== undefined)
+      this.#groups = Array.isArray(groups) ? groups : [];
+    if (collapsedIds !== undefined) this.#collapsedIds = toSet(collapsedIds);
+    this.#render();
+  }
+
   /** Adopt the persisted visible-card set as the column order (rebuilds). */
   setCardOrder(order) {
     this.#visible = visibleCards(order);
@@ -213,6 +256,7 @@ export class TunnelTable {
     if (snaps instanceof Map) this.#snaps = snaps;
     if (states instanceof Map) this.#states = states;
     this.#refreshValues();
+    this.#refreshHeaders();
     this.#updateControls();
   }
 
@@ -220,6 +264,7 @@ export class TunnelTable {
   updateState(id, state) {
     this.#states.set(id, state);
     this.#refreshValues();
+    this.#refreshHeaders();
     this.#updateControls();
   }
 
@@ -236,6 +281,7 @@ export class TunnelTable {
     clear(this.#theadRow);
     clear(this.#tbody);
     this.#rowNodes.clear();
+    this.#sectionNodes.clear();
 
     const cols = [TABLE_TUNNEL_COLUMN, ...this.#visible];
     for (const col of cols) this.#theadRow.appendChild(this.#buildHeader(col));
@@ -245,13 +291,29 @@ export class TunnelTable {
     this.#emptyEl.hidden = !empty;
     this.#tableEl.hidden = empty;
 
-    for (const def of rows) {
-      const rec = this.#buildRow(def);
-      this.#rowNodes.set(def.id, rec);
-      this.#tbody.appendChild(rec.tr);
+    // Group into sections (buildSections keeps the sorted order within each), or
+    // render flat when there are no groups.
+    const sections = buildSections(rows, this.#groups, this.#collapsedIds);
+    if (!sections) {
+      for (const def of rows) this.#appendRow(def, null);
+    } else {
+      const colspan = cols.length;
+      for (const section of sections) {
+        this.#tbody.appendChild(this.#buildGroupHeaderRow(section, colspan));
+        if (!section.collapsed) {
+          for (const def of section.defs) this.#appendRow(def, section);
+        }
+      }
     }
     this.#refreshValues();
+    this.#refreshHeaders();
     this.setSelected(this.#selectedId);
+  }
+
+  #appendRow(def, section) {
+    const rec = this.#buildRow(def, section);
+    this.#rowNodes.set(def.id, rec);
+    this.#tbody.appendChild(rec.tr);
   }
 
   #sortedRows() {
@@ -326,7 +388,7 @@ export class TunnelTable {
     ]);
   }
 
-  #buildRow(def) {
+  #buildRow(def, section) {
     const id = def.id;
     const signal = buildSignal(this.#states.get(id) || "disarmed");
     // Row actions (edit, delete, …) all live on the right-click context menu, so
@@ -353,8 +415,10 @@ export class TunnelTable {
       "tr",
       {
         class: "tt-row",
-        dataset: { id },
+        // The section id lets a row act as a drop target for its whole group.
+        dataset: section ? { id, section: section.id } : { id },
         tabindex: "0",
+        draggable: "true",
         onClick: () => this.#onSelect(id),
         onKeydown: (e) => {
           if (e.key === "Enter" || e.key === " ") {
@@ -367,11 +431,144 @@ export class TunnelTable {
           e.preventDefault();
           this.#onContextMenu(id);
         },
+        onDragstart: (e) => this.#onRowDragStart(e, id),
+        onDragend: () => this.#clearRowDrag(),
+        // Drag a row onto any tunnel in an expanded group to assign it there.
+        ...(section
+          ? {
+              onDragover: (e) => this.#onDataRowDragOver(e, section),
+              onDrop: (e) => this.#onDataRowDrop(e, section),
+            }
+          : {}),
       },
       [identityCell, ...metricCells],
     );
 
-    return { tr, signal, cells };
+    return { tr, signal, cells, sectionId: section ? section.id : null };
+  }
+
+  /** A group section header spanning the whole table (Feature 140). */
+  #buildGroupHeaderRow(section, colspan) {
+    const group = section.group;
+    const rollup = sectionRollup(section.defs, this.#states);
+    const name = group ? group.label : t("group.ungrouped");
+
+    const chevron = el("button", {
+      class: "group-chevron btn--icon",
+      type: "button",
+      "aria-label": section.collapsed ? t("group.expand") : t("group.collapse"),
+      html: icons.chevronDown(),
+      onClick: (e) => {
+        e.stopPropagation();
+        this.#onToggleCollapse(section.id);
+      },
+    });
+    const swatch = group
+      ? el("span", {
+          class: `group-swatch group-swatch--${groupColorKey(group)} group-chip`,
+          "aria-hidden": "true",
+        })
+      : el("span", { class: "group-chip group-chip--ungrouped" });
+    const nameEl = el("span", { class: "group-name", text: name });
+    const rollupEl = el("span", {
+      class: "group-count",
+      text: t("group.count", { armed: rollup.armed, total: rollup.total }),
+    });
+    const trafficEl = el("span", { class: "group-traffic" });
+
+    const armSwitch = el("input", {
+      class: "detail-arm-switch group-arm-switch",
+      type: "checkbox",
+      role: "switch",
+      "aria-label": t("group.armAll"),
+      onClick: (e) => e.stopPropagation(),
+      onChange: () => {
+        // Recompute from live state at click time — the captured `rollup` above
+        // is only a snapshot from header-build and goes stale as tunnels change.
+        const live = sectionRollup(section.defs, this.#states);
+        const all = live.total > 0 && live.armed === live.total;
+        this.#onGroupAction(section.id, all ? "disarm" : "arm");
+      },
+    });
+    this.#applyArmSwitch(armSwitch, rollup);
+
+    // Pause-all / resume-all icon (acts on the whole group, ignoring selection).
+    const pauseBtn = el("button", {
+      class: "group-pause-btn btn--icon",
+      type: "button",
+      onClick: (e) => {
+        e.stopPropagation();
+        // Recompute from live state so a stale header snapshot can't misfire.
+        const { action, enabled } = sectionPauseState(
+          sectionPauseRollup(section.defs, this.#states),
+        );
+        if (enabled) this.#onGroupAction(section.id, action);
+      },
+    });
+    this.#applyPauseBtn(
+      pauseBtn,
+      sectionPauseRollup(section.defs, this.#states),
+    );
+
+    // The group name + its controls live in a single cell pinned to the name
+    // (identity) column — name on the left, count/traffic/pause/switch on the
+    // right — matching the cards-view sidebar header. An empty filler spans the
+    // remaining metric columns so the header band still reaches the right edge.
+    const identityCell = el(
+      "td",
+      { class: "tt-group-cell tt-group-cell--identity" },
+      [
+        el("div", { class: "group-header-inner" }, [
+          chevron,
+          swatch,
+          nameEl,
+          rollupEl,
+          trafficEl,
+          pauseBtn,
+          armSwitch,
+        ]),
+      ],
+    );
+    const filler =
+      colspan > 1
+        ? el("td", {
+            class: "tt-group-cell tt-group-cell--rest",
+            colspan: String(colspan - 1),
+            "aria-hidden": "true",
+          })
+        : null;
+
+    const tr = el(
+      "tr",
+      {
+        class: `tt-group-row${section.collapsed ? " tt-group-row--collapsed" : ""}`,
+        dataset: { section: section.id },
+        "aria-expanded": String(!section.collapsed),
+        draggable: group ? "true" : null,
+        onClick: () => this.#onToggleCollapse(section.id),
+        onContextmenu: (e) => {
+          e.preventDefault();
+          this.#onGroupMenu(section.id);
+        },
+        onDragstart: group
+          ? (e) => this.#onGroupDragStart(e, group.id)
+          : undefined,
+        onDragover: (e) => this.#onGroupDragOver(e, section),
+        onDrop: (e) => this.#onGroupDrop(e, section),
+        onDragend: () => this.#clearRowDrag(),
+      },
+      [identityCell, filler],
+    );
+
+    this.#sectionNodes.set(section.id, {
+      headerTr: tr,
+      rollupEl,
+      trafficEl,
+      armSwitch,
+      pauseBtn,
+      defs: section.defs,
+    });
+    return tr;
   }
 
   /** Recompute every visible cell (+ dot) in place — no re-sort. */
@@ -392,6 +589,174 @@ export class TunnelTable {
         cell.className = "tt-td tt-td--metric";
         for (const cls of cardToneClasses(card, ctx)) cell.classList.add(cls);
       }
+    }
+  }
+
+  /** Recompute each group header's rollup, traffic + arm/pause controls in place. */
+  #refreshHeaders() {
+    for (const [, rec] of this.#sectionNodes) {
+      const rollup = sectionRollup(rec.defs, this.#states);
+      rec.rollupEl.textContent = t("group.count", {
+        armed: rollup.armed,
+        total: rollup.total,
+      });
+      const flow = sectionThroughput(rec.defs, this.#snaps);
+      rec.trafficEl.textContent =
+        flow.up || flow.down
+          ? t("group.traffic", {
+              up: formatRate(flow.up),
+              down: formatRate(flow.down),
+            })
+          : "";
+      this.#applyArmSwitch(rec.armSwitch, rollup);
+      this.#applyPauseBtn(
+        rec.pauseBtn,
+        sectionPauseRollup(rec.defs, this.#states),
+      );
+    }
+  }
+
+  #applyArmSwitch(sw, rollup) {
+    const all = rollup.total > 0 && rollup.armed === rollup.total;
+    sw.checked = all;
+    sw.indeterminate = rollup.armed > 0 && !all;
+  }
+
+  #applyPauseBtn(btn, pause) {
+    const { resume, enabled } = sectionPauseState(pause);
+    btn.innerHTML = resume ? icons.play() : icons.pause();
+    btn.disabled = !enabled;
+    const label = resume ? t("group.resumeAll") : t("group.pauseAll");
+    btn.title = label;
+    btn.setAttribute("aria-label", label);
+  }
+
+  // ── Row / group-header drag (assign + reorder) ────────────────────────────────
+
+  #onRowDragStart(e, id) {
+    this.#drag = { kind: "tunnel", id };
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = "move";
+      try {
+        e.dataTransfer.setData("text/plain", id);
+      } catch {
+        // ignore — jsdom / restricted environments
+      }
+    }
+  }
+
+  #onGroupDragStart(e, groupId) {
+    this.#drag = { kind: "group", id: groupId };
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = "move";
+      try {
+        e.dataTransfer.setData("text/plain", groupId);
+      } catch {
+        // ignore
+      }
+    }
+    e.currentTarget.classList.add("tt-group-row--dragging");
+  }
+
+  #onGroupDragOver(e, section) {
+    const drag = this.#drag;
+    if (!drag) return;
+    // A tunnel targets the whole (expanded) group; a group reorder targets only a
+    // DIFFERENT real group header row.
+    if (drag.kind === "tunnel") {
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+      this.#showDrop(section.id, false);
+    } else if (
+      drag.kind === "group" &&
+      section.group &&
+      section.group.id !== drag.id
+    ) {
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+      this.#showDrop(section.id, true);
+    }
+  }
+
+  #onGroupDrop(e, section) {
+    e.preventDefault();
+    const drag = this.#drag;
+    this.#clearRowDrag();
+    if (!drag) return;
+    if (drag.kind === "tunnel") {
+      this.#assignTunnelToSection(drag.id, section);
+    } else if (
+      drag.kind === "group" &&
+      section.group &&
+      section.group.id !== drag.id
+    ) {
+      this.#onReorderGroups(drag.id, section.group.id);
+    }
+  }
+
+  // A tunnel dragged over any row in an expanded group targets that whole group.
+  #onDataRowDragOver(e, section) {
+    if (this.#drag?.kind !== "tunnel") return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+    this.#showDrop(section.id, false);
+  }
+
+  #onDataRowDrop(e, section) {
+    e.preventDefault();
+    const drag = this.#drag;
+    this.#clearRowDrag();
+    if (drag?.kind === "tunnel") this.#assignTunnelToSection(drag.id, section);
+  }
+
+  /** Assign a dragged tunnel to a section's group, skipping a no-op re-assign. */
+  #assignTunnelToSection(tunnelId, section) {
+    const targetGroupId = section.group ? section.group.id : null;
+    const def = this.#defs.find((d) => d.id === tunnelId);
+    const currentGroupId =
+      def && def.groupId && this.#groups.some((g) => g.id === def.groupId)
+        ? def.groupId
+        : null;
+    if (currentGroupId === targetGroupId) return; // already in this group
+    this.#onAssignToGroup(tunnelId, targetGroupId);
+  }
+
+  /** Mark a section as the live drop target (whole group, or header-only). */
+  #showDrop(sectionId, headerOnly) {
+    if (
+      this.#dropSectionId === sectionId &&
+      this.#dropHeaderOnly === headerOnly
+    )
+      return;
+    this.#clearDropHighlight();
+    this.#dropSectionId = sectionId;
+    this.#dropHeaderOnly = headerOnly;
+    this.#sectionNodes
+      .get(sectionId)
+      ?.headerTr?.classList.add("tt-group-row--drop");
+    if (!headerOnly) {
+      for (const rec of this.#rowNodes.values()) {
+        if (rec.sectionId === sectionId) rec.tr.classList.add("tt-row--drop");
+      }
+    }
+  }
+
+  #clearDropHighlight() {
+    if (this.#dropSectionId == null) return;
+    this.#sectionNodes
+      .get(this.#dropSectionId)
+      ?.headerTr?.classList.remove("tt-group-row--drop");
+    for (const rec of this.#rowNodes.values())
+      rec.tr.classList.remove("tt-row--drop");
+    this.#dropSectionId = null;
+    this.#dropHeaderOnly = false;
+  }
+
+  #clearRowDrag() {
+    this.#drag = null;
+    this.#clearDropHighlight();
+    for (const rec of this.#sectionNodes.values()) {
+      rec.headerTr?.classList.remove("tt-group-row--dragging");
     }
   }
 
@@ -484,4 +849,10 @@ export class TunnelTable {
     this.#render();
     this.#onCardsChange([...this.#visible]);
   }
+}
+
+/** Coerce a Set | array | falsy into a Set. */
+function toSet(v) {
+  if (v instanceof Set) return v;
+  return new Set(Array.isArray(v) ? v : []);
 }

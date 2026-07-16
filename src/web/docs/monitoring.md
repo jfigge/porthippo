@@ -45,6 +45,17 @@ first free cell; disabling one
 leaves the gap where it was. To remove a card quickly, drag it onto the **Data
 Fields** selector — it turns into a trash can, and dropping there hides that field.
 
+## Groups
+
+If you organise tunnels into [groups](defining-tunnels.md#groups), both views render
+them as collapsible sections in group order, with an implicit **Ungrouped** section
+last. Each group header shows a live *armed / total* count — and, in the List view, a
+rolled-up **↑/↓ throughput** for the whole group — plus an **arm-all** switch and a
+**pause / resume** icon that pauses or resumes every tunnel in the group at once. The
+header's right-click menu offers **Arm all / Disarm all / Pause all / Resume all**,
+which toggle every tunnel in the group in a single step. Collapse a group by clicking
+its header; the state is remembered across restarts.
+
 ## Live metrics
 
 Choose which metrics to show. Available cards / columns include:

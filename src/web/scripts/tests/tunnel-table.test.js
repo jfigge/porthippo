@@ -413,3 +413,237 @@ test("no tunnels shows the empty hint and hides the table", () => {
   );
   assert.equal(table.element.querySelector(".tunnel-table").hidden, true);
 });
+
+// ── Grouping (Feature 140) ───────────────────────────────────────────────────
+
+const groupRows = (table) => [
+  ...table.element.querySelectorAll(".tt-group-row"),
+];
+
+test("with no groups the table renders flat (no group header rows)", () => {
+  const { table } = mount();
+  table.setData(DEFS, STATES, SNAPS, "a");
+  table.setGrouping({ groups: [], collapsedIds: [] });
+  assert.equal(groupRows(table).length, 0);
+  assert.equal(rowIds(table).length, 3);
+});
+
+test("renders a group header row (spanning all columns) + an Ungrouped section", () => {
+  const { table } = mount();
+  table.setData(
+    [
+      { id: "a", name: "A", groupId: "g1" },
+      { id: "b", name: "B" },
+    ],
+    new Map([
+      ["a", "connected"],
+      ["b", "disarmed"],
+    ]),
+    new Map(),
+    "a",
+  );
+  table.setGrouping({
+    groups: [{ id: "g1", label: "Work", color: "blue" }],
+    collapsedIds: [],
+  });
+  const gr = groupRows(table);
+  assert.equal(gr.length, 2, "Work + Ungrouped");
+  // The name + controls live in a cell pinned to the identity column; an empty
+  // filler spans the rest, so together they still cover every column.
+  const cells = [...gr[0].querySelectorAll(".tt-group-cell")];
+  const cols = headerCols(table).length;
+  const totalSpan = cells.reduce(
+    (n, c) => n + (Number(c.getAttribute("colspan")) || 1),
+    0,
+  );
+  assert.equal(totalSpan, cols, "spans every column");
+  const identity = gr[0].querySelector(".tt-group-cell--identity");
+  assert.equal(identity.querySelector(".group-name").textContent, "Work");
+  assert.equal(identity.querySelector(".group-count").textContent, "1/1");
+  // Controls sit in the same (name) cell, to its right.
+  assert.ok(
+    identity.querySelector(".group-arm-switch"),
+    "arm switch in name cell",
+  );
+});
+
+test("a collapsed group hides its rows but keeps the header row", () => {
+  const { table } = mount();
+  table.setData([{ id: "a", name: "A", groupId: "g1" }], new Map(), new Map());
+  table.setGrouping({
+    groups: [{ id: "g1", label: "Work", color: "blue" }],
+    collapsedIds: ["g1"],
+  });
+  assert.equal(groupRows(table).length, 1);
+  assert.equal(rowIds(table).length, 0, "the group's row is hidden");
+});
+
+test("the group header arm switch fires an action; header click toggles collapse", () => {
+  const calls = { action: [], collapse: [] };
+  const table = new TunnelTable({
+    now: () => NOW,
+    onGroupAction: (sid, action) => calls.action.push([sid, action]),
+    onToggleCollapse: (sid) => calls.collapse.push(sid),
+  });
+  document.body.appendChild(table.element);
+  table.setData([{ id: "a", name: "A", groupId: "g1" }], new Map(), new Map());
+  table.setGrouping({
+    groups: [{ id: "g1", label: "Work", color: "blue" }],
+    collapsedIds: [],
+  });
+  const header = table.element.querySelector(
+    '.tt-group-row[data-section="g1"]',
+  );
+  header
+    .querySelector(".group-arm-switch")
+    .dispatchEvent(new Event("change", { bubbles: true }));
+  assert.deepEqual(calls.action, [["g1", "arm"]]);
+  header.click();
+  assert.deepEqual(calls.collapse, ["g1"]);
+});
+
+test("the group arm switch reads live state, not a stale header snapshot", () => {
+  const calls = { action: [] };
+  const table = new TunnelTable({
+    now: () => NOW,
+    onGroupAction: (sid, action) => calls.action.push([sid, action]),
+    onToggleCollapse: () => {},
+  });
+  document.body.appendChild(table.element);
+  table.setData([{ id: "a", name: "A", groupId: "g1" }], new Map(), new Map());
+  table.setGrouping({
+    groups: [{ id: "g1", label: "Work", color: "blue" }],
+    collapsedIds: [],
+  });
+  const sw = table.element
+    .querySelector('.tt-group-row[data-section="g1"]')
+    .querySelector(".group-arm-switch");
+  sw.dispatchEvent(new Event("change", { bubbles: true }));
+  assert.deepEqual(calls.action, [["g1", "arm"]], "all disarmed → arm all");
+  // A live broadcast arms the tunnel (in-place refresh, no full re-render).
+  table.updateState("a", "connected");
+  sw.dispatchEvent(new Event("change", { bubbles: true }));
+  assert.deepEqual(
+    calls.action[1],
+    ["g1", "disarm"],
+    "now fully armed → disarm all (not a stale re-arm)",
+  );
+});
+
+test("the group header row has a pause/resume icon acting on the whole group", () => {
+  const calls = { action: [] };
+  const table = new TunnelTable({
+    now: () => NOW,
+    onGroupAction: (sid, action) => calls.action.push([sid, action]),
+    onToggleCollapse: () => {},
+  });
+  document.body.appendChild(table.element);
+  table.setData(
+    [
+      { id: "a", name: "A", groupId: "g1" },
+      { id: "b", name: "B", groupId: "g1" },
+    ],
+    new Map([
+      ["a", "connected"],
+      ["b", "disarmed"],
+    ]),
+    new Map(),
+  );
+  table.setGrouping({
+    groups: [{ id: "g1", label: "Work", color: "blue" }],
+    collapsedIds: [],
+  });
+  const btn = () =>
+    table.element
+      .querySelector('.tt-group-row[data-section="g1"]')
+      .querySelector(".group-pause-btn");
+  assert.ok(btn(), "the pause icon renders");
+  assert.equal(btn().disabled, false, "enabled while a tunnel is connected");
+  btn().click();
+  assert.deepEqual(calls.action, [["g1", "pause"]], "connected → pause all");
+
+  table.updateState("a", "paused");
+  assert.equal(btn().getAttribute("aria-label"), t("group.resumeAll"));
+  btn().click();
+  assert.deepEqual(
+    calls.action[1],
+    ["g1", "resume"],
+    "all paused → resume all",
+  );
+
+  table.updateState("a", "disarmed");
+  assert.equal(btn().disabled, true, "disabled when nothing is pausable");
+  btn().click();
+  assert.equal(calls.action.length, 2, "a disabled click does nothing");
+});
+
+function mountGroupedTable(calls) {
+  const table = new TunnelTable({
+    now: () => NOW,
+    onAssignToGroup: (id, gid) => calls.assign.push([id, gid]),
+    onToggleCollapse: () => {},
+  });
+  document.body.appendChild(table.element);
+  table.setData(
+    [
+      { id: "a", name: "A", groupId: "g1" },
+      { id: "b", name: "B", groupId: "g2" },
+      { id: "c", name: "C", groupId: "g2" },
+    ],
+    new Map(),
+    new Map(),
+  );
+  table.setGrouping({
+    groups: [
+      { id: "g1", label: "One", color: "blue" },
+      { id: "g2", label: "Two", color: "green" },
+    ],
+    collapsedIds: [],
+  });
+  return table;
+}
+const ttRow = (table, id) =>
+  table.element.querySelector(`.tt-row[data-id="${id}"]`);
+
+test("dropping a dragged tunnel on any row of an expanded group assigns it there", () => {
+  const calls = { assign: [] };
+  const table = mountGroupedTable(calls);
+
+  ttRow(table, "a").dispatchEvent(new Event("dragstart", { bubbles: true }));
+  ttRow(table, "c").dispatchEvent(
+    new Event("dragover", { bubbles: true, cancelable: true }),
+  );
+  assert.ok(
+    ttRow(table, "b").classList.contains("tt-row--drop"),
+    "sibling row in the target group is highlighted",
+  );
+  assert.ok(
+    table.element
+      .querySelector('.tt-group-row[data-section="g2"]')
+      .classList.contains("tt-group-row--drop"),
+    "the target group header row is highlighted",
+  );
+
+  ttRow(table, "c").dispatchEvent(
+    new Event("drop", { bubbles: true, cancelable: true }),
+  );
+  assert.deepEqual(calls.assign, [["a", "g2"]], "'a' moved into g2");
+  assert.equal(
+    table.element.querySelectorAll(".tt-row--drop").length,
+    0,
+    "drop highlight cleared",
+  );
+});
+
+test("dropping a tunnel on a row of its OWN group is a no-op", () => {
+  const calls = { assign: [] };
+  const table = mountGroupedTable(calls);
+  ttRow(table, "b").dispatchEvent(new Event("dragstart", { bubbles: true }));
+  ttRow(table, "c").dispatchEvent(
+    new Event("dragover", { bubbles: true, cancelable: true }),
+  );
+  ttRow(table, "c").dispatchEvent(
+    new Event("drop", { bubbles: true, cancelable: true }),
+  );
+  assert.deepEqual(calls.assign, [], "already in g2 → no re-assign");
+});

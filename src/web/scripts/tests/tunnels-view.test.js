@@ -37,6 +37,7 @@ function stub(
     calls = {},
     eventsById = {},
     popupChoose = null,
+    groups = [],
   } = {},
 ) {
   return {
@@ -47,6 +48,11 @@ function stub(
           ? popupChoose(request)
           : popupChoose;
       },
+    },
+    groups: {
+      list: async () => groups,
+      reorder: async (ids) => ((calls.reorder ||= []).push(ids), { ids }),
+      delete: async (id) => ((calls.groupDelete ||= []).push(id), { id }),
     },
     tunnels: {
       list: async () => defs,
@@ -71,6 +77,7 @@ function stub(
         { id, ...p }
       ),
       delete: async (id) => ((calls.delete ||= []).push(id), { id }),
+      reorder: async (ids) => ((calls.tunnelReorder ||= []).push(ids), { ids }),
     },
     jumpHosts: { list: async () => jumps },
     credentials: { list: async () => [] },
@@ -409,14 +416,22 @@ test("right-clicking a row pops a native menu whose items match the spec + state
 
   assert.equal(calls.popup.length, 1, "one popup requested");
   const items = calls.popup[0].items;
-  // Edit · — · Pause/Play · Arm/Disarm · — · Clone · — · Delete.
+  // Edit · — · Pause/Play · Arm/Disarm · — · Assign▶ · Clone · — · Delete.
   assert.deepEqual(
-    items.map((i) => (i.type === "separator" ? "—" : i.id)),
-    ["edit", "—", "pause", "arm", "—", "clone", "—", "delete"],
+    items.map((i) =>
+      i.type === "separator" ? "—" : i.submenu ? "assign" : i.id,
+    ),
+    ["edit", "—", "pause", "arm", "—", "assign", "clone", "—", "delete"],
   );
   assert.equal(itemById(items, "edit").label, "Edit");
   assert.equal(itemById(items, "clone").label, "Clone");
   assert.equal(itemById(items, "delete").label, "Delete");
+  // The Assign submenu always offers Ungrouped + a "New group…" escape hatch.
+  const assign = items.find((i) => i.submenu);
+  assert.ok(
+    assign.submenu.some((s) => s.id === "assign:__new"),
+    "assign submenu offers New group…",
+  );
   // Disarmed → "Arm", and Pause is offered but disabled (nothing to pause).
   assert.equal(itemById(items, "arm").label, "Arm");
   assert.equal(itemById(items, "pause").label, "Pause");
@@ -514,4 +529,124 @@ test("in list mode a right-click on a table row also pops the native menu", asyn
   await settle();
   assert.ok((calls.popup || []).length >= 1, "a popup was requested");
   assert.deepEqual(calls.arm, ["b"]);
+});
+
+test("a real group's menu is arm/disarm/pause/resume + edit/delete — no select/clear all", async () => {
+  const calls = {};
+  const { view } = await mount({
+    calls,
+    defs: DEFS.map((d) => ({ ...d, groupId: "g1" })),
+    groups: [{ id: "g1", label: "Work", color: "blue" }],
+    popupChoose: null,
+  });
+
+  const header = view.element.querySelector('.group-header[data-section="g1"]');
+  assert.ok(header, "the group header renders");
+  header.dispatchEvent(
+    new Event("contextmenu", { bubbles: true, cancelable: true }),
+  );
+  await settle();
+
+  const items = calls.popup.at(-1).items;
+  const ids = items.map((it) => (it.type === "separator" ? "—" : it.id));
+  assert.deepEqual(ids, [
+    "arm",
+    "disarm",
+    "pause",
+    "resume",
+    "—",
+    "edit",
+    "delete",
+  ]);
+  // The multi-select surface is gone: no row checkboxes anywhere.
+  assert.equal(view.element.querySelector(".tunnel-select"), null);
+});
+
+test("the ungrouped section menu is arm/disarm/pause/resume only (no edit/delete/select)", async () => {
+  const calls = {};
+  const { view } = await mount({
+    calls,
+    // 'a' grouped, 'b' left ungrouped.
+    defs: [{ ...DEFS[0], groupId: "g1" }, DEFS[1]],
+    groups: [{ id: "g1", label: "Work", color: "blue" }],
+    popupChoose: null,
+  });
+
+  const header = view.element.querySelector(
+    ".group-header[data-section='__ungrouped']",
+  );
+  assert.ok(header, "the ungrouped header renders");
+  header.dispatchEvent(
+    new Event("contextmenu", { bubbles: true, cancelable: true }),
+  );
+  await settle();
+
+  const items = calls.popup.at(-1).items;
+  const ids = items.map((it) => (it.type === "separator" ? "—" : it.id));
+  assert.deepEqual(ids, ["arm", "disarm", "pause", "resume"]);
+});
+
+// ── In-group sequencing via cards-view drag (Feature 140) ────────────────────
+
+const GROUPED_DEFS = [
+  {
+    id: "a",
+    name: "A",
+    groupId: "g1",
+    localPort: 1,
+    destination: { host: "h", port: 1 },
+  },
+  {
+    id: "b",
+    name: "B",
+    groupId: "g2",
+    localPort: 2,
+    destination: { host: "h", port: 2 },
+  },
+  {
+    id: "c",
+    name: "C",
+    groupId: "g2",
+    localPort: 3,
+    destination: { host: "h", port: 3 },
+  },
+];
+const GROUPS = [
+  { id: "g1", label: "One", color: "blue" },
+  { id: "g2", label: "Two", color: "green" },
+];
+const drag = (type) => new Event(type, { bubbles: true, cancelable: true });
+const cardRow = (view, id) =>
+  view.element.querySelector(`.tunnel-row[data-id="${id}"]`);
+
+test("dragging a tunnel to another group reassigns AND resequences it", async () => {
+  const calls = {};
+  const { view } = await mount({ calls, defs: GROUPED_DEFS, groups: GROUPS });
+
+  cardRow(view, "a").dispatchEvent(drag("dragstart"));
+  cardRow(view, "c").dispatchEvent(drag("dragover")); // gap before 'c' in g2
+  cardRow(view, "c").dispatchEvent(drag("drop"));
+  await settle();
+
+  // 'a' moved into g2 …
+  assert.deepEqual(
+    (calls.update || []).map((u) => ({ id: u.id, group: u.p.groupId })),
+    [{ id: "a", group: "g2" }],
+  );
+  // … and sequenced before 'c': [a,b,c] → move a before c → [b,a,c].
+  assert.deepEqual(calls.tunnelReorder?.at(-1), ["b", "a", "c"]);
+});
+
+test("dropping a tunnel back at its own position is a no-op (no write)", async () => {
+  const calls = {};
+  const { view } = await mount({ calls, defs: GROUPED_DEFS, groups: GROUPS });
+
+  // 'b' is already immediately before 'c' in g2 → dropping it there changes nothing.
+  cardRow(view, "b").dispatchEvent(drag("dragstart"));
+  cardRow(view, "c").dispatchEvent(drag("dragover"));
+  cardRow(view, "c").dispatchEvent(drag("drop"));
+  await settle();
+
+  assert.equal(calls.update, undefined, "no group change written");
+  assert.equal(calls.tunnelReorder, undefined, "no reorder written");
 });

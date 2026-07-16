@@ -112,6 +112,32 @@ A tunnel is **enabled** if it should participate in *Arm All* and auto-arm at
 launch. **Arming** is the live action that binds the entry port. Disabling a
 tunnel keeps its definition but leaves it out of bulk arming.
 
+## Groups
+
+Once you have more than a handful of tunnels, **groups** keep the list readable.
+A group is a reusable label with a colour (for example *Work* or *Home lab*); a
+tunnel belongs to **zero or one** group. Groups are purely organisational — they
+never change how a tunnel connects.
+
+- **Create a group** from any tunnel's right-click menu → **Assign to group ▸ New
+  group…**.
+- **Assign a tunnel** by dragging its row onto a group header — or, when the group
+  is expanded, onto any tunnel already in it — or via **Assign to group** on the
+  row's right-click menu. Choose **Ungrouped** to remove it.
+- **Order tunnels within a group** (Cards view): as you drag a row, a blank slot
+  shows exactly where it will land. Drop it there to both set its group and place it
+  at that position. Dropping away from any group cancels the move.
+- **Reorder groups** by dragging their headers. **Collapse/expand** a group by
+  clicking its header; the collapsed state is remembered across restarts.
+- **Delete a group** from its header menu. Its tunnels are **kept** — they simply
+  fall back to the *Ungrouped* section.
+
+Each group header shows an *armed / total* count, an **arm-all** switch, and a
+**pause / resume** icon that pauses (or resumes) every tunnel in the group at once.
+Its right-click menu offers **Arm all / Disarm all / Pause all / Resume all**.
+Groups also appear in the tray and the **File ▸ Groups** menu with per-group
+arm-all / disarm-all.
+
 ## Editing a live tunnel
 
 You can edit an armed or connected tunnel. Port Hippo **reconciles** the change:

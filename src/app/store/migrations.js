@@ -33,6 +33,8 @@
  * into reusable `jumpHosts[]`, rewriting the tunnel to reference them by id.
  * Feature 110 adds the v2→v3 transform that stamps a forwarding `type: "local"` on
  * every existing tunnel so reverse / dynamic types can be authored alongside them.
+ * Feature 140 adds the v3→v4 transform that adds an empty `groups: []` sibling
+ * array (leaving every tunnel ungrouped) so reusable tunnel groups can be authored.
  *
  * Rules for migration functions:
  *   - Pure and synchronous — no I/O, no mutation of the input (return a new object).
@@ -204,13 +206,31 @@ function stampTunnelType(doc) {
 }
 
 /**
+ * v3 → v4: add the reusable `groups` sibling array (Feature 140). Groups are
+ * purely organisational; existing tunnels stay ungrouped (no `groupId`).
+ * Type-guarded to the tunnels document and idempotent (a doc that already has a
+ * `groups` array is passed through untouched).
+ */
+function addGroupsArray(doc) {
+  if (!doc || typeof doc !== "object" || !Array.isArray(doc.tunnels)) {
+    return doc; // not the tunnels document — nothing to do
+  }
+  if (Array.isArray(doc.groups)) return doc; // already migrated
+  return { ...doc, groups: [] };
+}
+
+/**
  * Ordered migration functions. `MIGRATIONS[i]` upgrades a document from
  * version `i + BASE_SCHEMA_VERSION` to version `i + BASE_SCHEMA_VERSION + 1`.
  * Each is a pure `(doc) => doc` transform — no I/O, no input mutation.
  *
  * @type {Array<(doc: object) => object>}
  */
-const MIGRATIONS = [extractCredentialsAndJumpHosts, stampTunnelType];
+const MIGRATIONS = [
+  extractCredentialsAndJumpHosts,
+  stampTunnelType,
+  addGroupsArray,
+];
 
 /** The version every freshly written / migrated document is stamped with. */
 const CURRENT_SCHEMA_VERSION = BASE_SCHEMA_VERSION + MIGRATIONS.length;

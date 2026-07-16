@@ -79,6 +79,11 @@ const DEF_FIXTURES = [
   def({ retry: { maxMs: -1 } }),
   def({ retry: { maxAttempts: -1 } }),
   def({ retry: { baseMs: 100, maxMs: "x", maxAttempts: 2 } }),
+  // Feature 140 — optional group membership.
+  def({ groupId: "g1" }),
+  def({ groupId: null }),
+  def({ groupId: "" }),
+  def({ groupId: 5 }),
 ];
 
 const CRED_FIXTURES = [
@@ -104,6 +109,19 @@ const JUMP_FIXTURES = [
   {},
   null,
   [],
+];
+
+const GROUP_FIXTURES = [
+  { label: "Work", color: "blue" },
+  { label: "Home", color: "teal" },
+  { label: "", color: "blue" },
+  { label: "Work", color: "#ff0000" },
+  { label: "Work", color: undefined },
+  { label: "Work" },
+  {},
+  null,
+  [],
+  "nope",
 ];
 
 test("renderer and store validateDefinition agree for every fixture", () => {
@@ -136,6 +154,16 @@ test("renderer and store validateJumpHost agree for every fixture", () => {
   });
 });
 
+test("renderer and store validateGroup agree for every fixture", () => {
+  GROUP_FIXTURES.forEach((fixture, i) => {
+    assert.deepEqual(
+      renderer.validateGroup(fixture),
+      main.validateGroup(fixture),
+      `group fixture #${i} diverged: ${JSON.stringify(fixture)}`,
+    );
+  });
+});
+
 test("the auth taxonomy matches", () => {
   assert.deepEqual(renderer.AUTH_TYPES, main.AUTH_TYPES);
   for (const type of [...renderer.AUTH_TYPES, "nope"]) {
@@ -145,4 +173,9 @@ test("the auth taxonomy matches", () => {
       `secret field for "${type}" diverged`,
     );
   }
+});
+
+test("the group-colour palette matches", () => {
+  assert.deepEqual(renderer.GROUP_COLORS, main.GROUP_COLORS);
+  assert.equal(renderer.DEFAULT_GROUP_COLOR, main.DEFAULT_GROUP_COLOR);
 });

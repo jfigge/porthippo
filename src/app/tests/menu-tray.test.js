@@ -83,6 +83,39 @@ test("installAppMenu builds and installs a menu and wires custom items", () => {
   assert.deepEqual(fired, ["newTunnel", "armAll", "copyDiagnostics"]);
 });
 
+test("installAppMenu adds a per-group arm-all/disarm-all submenu (Feature 140)", () => {
+  const Menu = fakeMenu();
+  const fired = [];
+  const menu = installAppMenu({
+    app: { name: "Port Hippo" },
+    Menu,
+    label,
+    groups: [{ id: "g1", name: "Work" }],
+    actions: {
+      armGroup: (id) => fired.push(`armGroup:${id}`),
+      disarmGroup: (id) => fired.push(`disarmGroup:${id}`),
+    },
+  });
+  const groups = findItem(menu.template, "Groups");
+  assert.ok(groups && groups.submenu, "Groups submenu present");
+  const work = findItem(groups.submenu, "Work");
+  assert.ok(work && work.submenu, "per-group submenu present");
+  work.submenu.find((i) => i.label === "Arm All").click();
+  work.submenu.find((i) => i.label === "Disarm All").click();
+  assert.deepEqual(fired, ["armGroup:g1", "disarmGroup:g1"]);
+});
+
+test("installAppMenu omits the Groups submenu when there are no groups", () => {
+  const Menu = fakeMenu();
+  const menu = installAppMenu({
+    app: { name: "Port Hippo" },
+    Menu,
+    label,
+    actions: {},
+  });
+  assert.equal(findItem(menu.template, "Groups"), null);
+});
+
 test("the About item routes to the about action (in-app dialog)", () => {
   const Menu = fakeMenu();
   const fired = [];
@@ -166,6 +199,47 @@ test("createTray sets a status tooltip and per-tunnel arm/disarm items", () => {
   // The tray click shows the window.
   clickHandlers.click();
   assert.ok(fired.includes("show"));
+});
+
+test("createTray adds per-group arm-all/disarm-all submenus (Feature 140)", () => {
+  const Menu = fakeMenu();
+  let contextMenu = null;
+  class FakeTray {
+    on() {}
+    setToolTip() {}
+    setContextMenu(m) {
+      contextMenu = m;
+    }
+  }
+  const fired = [];
+  createTray({
+    Tray: FakeTray,
+    Menu,
+    image: {},
+    t,
+    getStatus: () => ({
+      tunnels: [{ id: "a", name: "A", state: "connected" }],
+      total: 1,
+      active: 1,
+      connected: 1,
+      groups: [{ id: "g1", name: "Work", ids: ["a"], armed: 1, total: 1 }],
+    }),
+    actions: {
+      armGroup: (id) => fired.push(`armGroup:${id}`),
+      disarmGroup: (id) => fired.push(`disarmGroup:${id}`),
+    },
+  });
+  const work = findItem(contextMenu.template, "Work");
+  assert.ok(work && work.submenu, "group submenu present");
+  const armAll = work.submenu.find((i) => i.label === "tray.group.armAll");
+  const disarmAll = work.submenu.find(
+    (i) => i.label === "tray.group.disarmAll",
+  );
+  // Fully armed → arm-all disabled, disarm-all enabled (and calls disarmGroup).
+  assert.equal(armAll.enabled, false);
+  assert.equal(disarmAll.enabled, true);
+  disarmAll.click();
+  assert.deepEqual(fired, ["disarmGroup:g1"]);
 });
 
 test("createTray rebuilds its icon from status so the badge tracks connections", () => {

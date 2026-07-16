@@ -83,6 +83,10 @@ const OPTIONAL_FIELDS = [
   // editor's payload means "inherit the global setting", so a shallow merge must
   // drop the stored value rather than resurrect a cleared override.
   "retry",
+  // Feature 140: group membership. Absent from the payload means the user cleared
+  // it (moved the tunnel to Ungrouped), so a shallow merge must drop the stored
+  // groupId rather than keep the tunnel in its old group.
+  "groupId",
 ];
 
 /** Index an array of `{ id }` records into a Map for O(1) reference lookup. */
@@ -108,22 +112,30 @@ class TunnelStore {
     writeDoc(this._paths, { ...doc, tunnels });
   }
 
-  /** Renderer view of a stored tunnel: reference record + derived order/summary. */
-  _view(def, order, jumpHostsById) {
+  /**
+   * Renderer view of a stored tunnel: reference record + derived order/summary and
+   * the resolved group (label/colour) so the list needn't join. `group` is the
+   * stored group record (`{ id, label, color }`) or null when ungrouped / dangling.
+   */
+  _view(def, order, jumpHostsById, groupsById) {
     return {
       ...def,
       order,
       routeSummary: summariseRoute(def, { jumpHostsById }),
+      group: def.groupId ? (groupsById.get(def.groupId) ?? null) : null,
     };
   }
 
   // ── Renderer-facing reads (reference shape; no secrets on a tunnel) ───────────
 
-  /** Every definition, in order, with a derived route summary. */
+  /** Every definition, in order, with a derived route summary + resolved group. */
   list() {
     const doc = this._read();
     const jumpHostsById = indexById(doc.jumpHosts);
-    return doc.tunnels.map((def, i) => this._view(def, i, jumpHostsById));
+    const groupsById = indexById(doc.groups);
+    return doc.tunnels.map((def, i) =>
+      this._view(def, i, jumpHostsById, groupsById),
+    );
   }
 
   /** One definition by id, or null if absent. */
@@ -131,7 +143,12 @@ class TunnelStore {
     const doc = this._read();
     const i = doc.tunnels.findIndex((d) => d && d.id === id);
     if (i === -1) return null;
-    return this._view(doc.tunnels[i], i, indexById(doc.jumpHosts));
+    return this._view(
+      doc.tunnels[i],
+      i,
+      indexById(doc.jumpHosts),
+      indexById(doc.groups),
+    );
   }
 
   // ── In-process reads (resolved + decrypted — engine only, never over IPC) ─────
@@ -195,9 +212,15 @@ class TunnelStore {
     record.id = io.newUUID();
     delete record.order; // derived from array position, never stored
     delete record.routeSummary; // derived, never stored
+    delete record.group; // derived from groupId, never stored
     doc.tunnels.push(record);
     this._writeTunnels(doc, doc.tunnels);
-    return this._view(record, doc.tunnels.length - 1, indexById(doc.jumpHosts));
+    return this._view(
+      record,
+      doc.tunnels.length - 1,
+      indexById(doc.jumpHosts),
+      indexById(doc.groups),
+    );
   }
 
   /**
@@ -225,9 +248,15 @@ class TunnelStore {
 
     delete merged.order;
     delete merged.routeSummary;
+    delete merged.group; // derived, never stored
     doc.tunnels[i] = merged;
     this._writeTunnels(doc, doc.tunnels);
-    return this._view(merged, i, indexById(doc.jumpHosts));
+    return this._view(
+      merged,
+      i,
+      indexById(doc.jumpHosts),
+      indexById(doc.groups),
+    );
   }
 
   /** Remove a definition. Throws NOT_FOUND for an unknown id. */
@@ -266,7 +295,8 @@ class TunnelStore {
 
     this._writeTunnels(doc, next);
     const jumpHostsById = indexById(doc.jumpHosts);
-    return next.map((def, i) => this._view(def, i, jumpHostsById));
+    const groupsById = indexById(doc.groups);
+    return next.map((def, i) => this._view(def, i, jumpHostsById, groupsById));
   }
 
   /**
@@ -288,6 +318,11 @@ class TunnelStore {
         errors[`jumpHostIds[${i}]`] = "referenced jump host does not exist";
       }
     });
+    // Group membership (Feature 140) is optional: only a NON-empty groupId that
+    // doesn't resolve is an error. Unset / null (ungrouped) is always valid.
+    if (def.groupId && !doc.groups.some((g) => g && g.id === def.groupId)) {
+      errors.groupId = "referenced group does not exist";
+    }
     if (Object.keys(errors).length > 0) throw invalidDefinitionError(errors);
   }
 }

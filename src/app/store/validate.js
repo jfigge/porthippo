@@ -49,6 +49,18 @@ const AUTH_TYPES = ["agent", "key", "password"];
  */
 const TUNNEL_TYPES = ["local", "remote", "dynamic"];
 
+/**
+ * The fixed group-colour palette (Feature 140). A group's `color` is one of these
+ * theme-token KEYS — never a hardcoded hex — so it stays legible in light/dark and
+ * matches the design system. Each maps to a `--color-group-<key>` token in
+ * theme.css. Deliberately distinct from the four status hues so a group tag never
+ * reads as a tunnel status signal.
+ */
+const GROUP_COLORS = ["blue", "teal", "green", "amber", "violet", "red"];
+
+/** The default colour a freshly created group takes when none is chosen. */
+const DEFAULT_GROUP_COLOR = GROUP_COLORS[0];
+
 /** Normalise a possibly-absent `type` to one of TUNNEL_TYPES (default local). */
 function normaliseTunnelType(type) {
   return TUNNEL_TYPES.includes(type) ? type : "local";
@@ -185,6 +197,17 @@ function validateDefinition(def) {
     }
   }
 
+  // Optional group membership (Feature 140): a tunnel belongs to zero or one group.
+  // Absent / null means ungrouped; a present value must be a non-empty id string.
+  // Existence of the referenced group is a store-level concern (see _assertRefs).
+  if (
+    def.groupId !== undefined &&
+    def.groupId !== null &&
+    !isNonEmptyString(def.groupId)
+  ) {
+    errors.groupId = "groupId must be a non-empty string when set";
+  }
+
   if (
     def.lingerMs !== undefined &&
     !(Number.isInteger(def.lingerMs) && def.lingerMs >= 0)
@@ -305,12 +328,41 @@ function validateJumpHost(jump) {
   return { valid: Object.keys(errors).length === 0, errors };
 }
 
+/**
+ * Validate a reusable group record (Feature 140). A group is purely
+ * organisational: a required `label` and a `color` chosen from the fixed
+ * GROUP_COLORS token palette. Order is array position (never a stored field), so
+ * it isn't validated here.
+ *
+ * @param {*} group
+ * @returns {{ valid: boolean, errors: Object<string,string> }}
+ */
+function validateGroup(group) {
+  const errors = {};
+
+  if (!group || typeof group !== "object" || Array.isArray(group)) {
+    return { valid: false, errors: { _: "group must be an object" } };
+  }
+
+  if (!isNonEmptyString(group.label)) {
+    errors.label = "label is required";
+  }
+  if (!GROUP_COLORS.includes(group.color)) {
+    errors.color = `color must be one of ${GROUP_COLORS.join(", ")}`;
+  }
+
+  return { valid: Object.keys(errors).length === 0, errors };
+}
+
 module.exports = {
   AUTH_TYPES,
   TUNNEL_TYPES,
+  GROUP_COLORS,
+  DEFAULT_GROUP_COLOR,
   normaliseTunnelType,
   secretFieldForAuthType,
   validateDefinition,
   validateCredential,
   validateJumpHost,
+  validateGroup,
 };

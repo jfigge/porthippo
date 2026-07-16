@@ -75,6 +75,15 @@ function registerEngineIPC({ ipcMain, getEngine }) {
     wrap("tunnels:resume", (id) => getEngine().resume(id)),
   );
 
+  // Bulk action over a set of ids (Feature 140 — group arm-all / multi-select bulk
+  // bar). One coalesced state broadcast for the whole set, not one per tunnel.
+  ipcMain.handle(
+    "tunnels:apply-many",
+    wrap("tunnels:apply-many", (payload) =>
+      getEngine().applyToMany(payload?.ids, payload?.action),
+    ),
+  );
+
   // ── Host-key trust decisions (resolve a pending TOFU prompt) ──────────────────
 
   ipcMain.handle(

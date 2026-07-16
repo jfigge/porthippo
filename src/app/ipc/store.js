@@ -16,7 +16,7 @@
 
 /**
  * ipc/store.js — storage IPC handlers (tunnels:* / credentials:* / jumphosts:* /
- * settings:*).
+ * groups:* / settings:*).
  *
  * Pure delegation to the store modules behind the injected `getStores()`. Reads
  * use safeCall (quiet: log + look-alike fallback); authoritative writes use
@@ -40,6 +40,9 @@
  * @param {() => void} [deps.afterRefsWrite]  notified after a successful credential
  *        / jump-host write so the engine can reconcile every tunnel that resolves
  *        through the changed record.
+ * @param {() => void} [deps.afterGroupsWrite]  notified after a successful group
+ *        write (Feature 140). Groups don't change routing, so this triggers NO
+ *        engine reconcile — it refreshes the tray + native-menu group submenus.
  * @param {(settings: object) => void} [deps.afterSettingsWrite]  notified with the
  *        merged settings after a successful settings:set so main can apply platform
  *        side-effects (Feature 60 launch-at-login).
@@ -52,6 +55,7 @@ function registerStoreIPC({
   readOsKnownHosts,
   afterWrite,
   afterRefsWrite,
+  afterGroupsWrite,
   afterSettingsWrite,
 }) {
   // Fire the reconcile hook only after a write that actually succeeded.
@@ -64,6 +68,13 @@ function registerStoreIPC({
   // so reconcile broadly (never scoped to one id) after a successful write.
   const notifyRefs = (result) => {
     if (result && !result.__hippoError) afterRefsWrite?.();
+    return result;
+  };
+
+  // A group write (Feature 140) is organisational only — it never changes routing,
+  // so it triggers no engine reconcile. It only refreshes the tray + menu submenus.
+  const notifyGroups = (result) => {
+    if (result && !result.__hippoError) afterGroupsWrite?.();
     return result;
   };
 
@@ -97,6 +108,14 @@ function registerStoreIPC({
     );
     return notify(result, id);
   });
+
+  // Reorder is display-only (Feature 140 in-group sequencing): it never changes a
+  // tunnel's routing, so no engine reconcile — the renderer reloads on its own.
+  ipcMain.handle("tunnels:reorder", (_event, ids) =>
+    safeCallWrite("tunnels:reorder", () =>
+      getStores().tunnelStore().reorder(ids),
+    ),
+  );
 
   // ── Reusable credentials (Feature 45) ───────────────────────────────────────
 
@@ -170,6 +189,46 @@ function registerStoreIPC({
     notifyRefs(
       safeCallWrite("jumphosts:delete", () =>
         getStores().jumpHostStore().delete(id),
+      ),
+    ),
+  );
+
+  // ── Reusable tunnel groups (Feature 140) ────────────────────────────────────
+
+  ipcMain.handle("groups:list", () =>
+    safeCall("groups:list", () => getStores().groupStore().list(), []),
+  );
+
+  ipcMain.handle("groups:get", (_event, id) =>
+    safeCall("groups:get", () => getStores().groupStore().get(id), null),
+  );
+
+  ipcMain.handle("groups:create", (_event, group) =>
+    notifyGroups(
+      safeCallWrite("groups:create", () =>
+        getStores().groupStore().create(group),
+      ),
+    ),
+  );
+
+  ipcMain.handle("groups:update", (_event, id, patch) =>
+    notifyGroups(
+      safeCallWrite("groups:update", () =>
+        getStores().groupStore().update(id, patch),
+      ),
+    ),
+  );
+
+  ipcMain.handle("groups:delete", (_event, id) =>
+    notifyGroups(
+      safeCallWrite("groups:delete", () => getStores().groupStore().delete(id)),
+    ),
+  );
+
+  ipcMain.handle("groups:reorder", (_event, ids) =>
+    notifyGroups(
+      safeCallWrite("groups:reorder", () =>
+        getStores().groupStore().reorder(ids),
       ),
     ),
   );

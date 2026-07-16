@@ -59,6 +59,8 @@ contextBridge.exposeInMainWorld("porthippo", {
     create: (def) => ipcRenderer.invoke("tunnels:create", def),
     update: (id, patch) => ipcRenderer.invoke("tunnels:update", id, patch),
     delete: (id) => ipcRenderer.invoke("tunnels:delete", id),
+    // Rewrite display order by an id list (Feature 140 in-group sequencing).
+    reorder: (ids) => ipcRenderer.invoke("tunnels:reorder", ids),
 
     // ── Engine intents (Feature 20) ─────────────────────────────────────────
     // The renderer only sends intents; live state arrives via the
@@ -76,6 +78,10 @@ contextBridge.exposeInMainWorld("porthippo", {
     // Force-apply a stashed connection-affecting edit now (drops live connections)
     // instead of waiting for the tunnel to go idle.
     apply: (id) => ipcRenderer.invoke("tunnels:apply", id),
+    // Bulk action over a set of ids (Feature 140 — group arm-all / multi-select).
+    // `action` ∈ arm|disarm|pause|resume; one coalesced state update for the set.
+    applyMany: (ids, action) =>
+      ipcRenderer.invoke("tunnels:apply-many", { ids, action }),
   },
 
   // ── Reusable credentials (Feature 45) ─────────────────────────────────────
@@ -101,6 +107,19 @@ contextBridge.exposeInMainWorld("porthippo", {
     create: (jump) => ipcRenderer.invoke("jumphosts:create", jump),
     update: (id, patch) => ipcRenderer.invoke("jumphosts:update", id, patch),
     delete: (id) => ipcRenderer.invoke("jumphosts:delete", id),
+  },
+
+  // ── Reusable tunnel groups (Feature 140) ──────────────────────────────────
+  // Organisational only: a tunnel references at most one group by `groupId`.
+  // Deleting a group is always allowed (its tunnels fall back to ungrouped);
+  // reorder rewrites group order by an id list.
+  groups: {
+    list: () => ipcRenderer.invoke("groups:list"),
+    get: (id) => ipcRenderer.invoke("groups:get", id),
+    create: (group) => ipcRenderer.invoke("groups:create", group),
+    update: (id, patch) => ipcRenderer.invoke("groups:update", id, patch),
+    delete: (id) => ipcRenderer.invoke("groups:delete", id),
+    reorder: (ids) => ipcRenderer.invoke("groups:reorder", ids),
   },
 
   // ── App settings ──────────────────────────────────────────────────────────

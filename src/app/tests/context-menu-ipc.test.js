@@ -84,6 +84,30 @@ test("menu:popup builds the template and resolves the clicked item's id", async 
   assert.equal(await result, "edit");
 });
 
+test("menu:popup supports nested submenus and resolves a clicked leaf's id", async () => {
+  const { popup, getBuilt } = harness();
+  const result = popup(null, {
+    items: [
+      { id: "edit", label: "Edit" },
+      {
+        label: "Assign",
+        submenu: [
+          { id: "assign:g1", label: "Work" },
+          { id: "assign:__ungrouped", label: "Ungrouped" },
+        ],
+      },
+    ],
+  });
+  const menu = getBuilt();
+  const assign = menu.template.find((i) => i.label === "Assign");
+  assert.ok(Array.isArray(assign.submenu), "the submenu is translated too");
+  assert.equal(assign.click, undefined, "a submenu parent has no click");
+  const leaf = assign.submenu.find((i) => i.label === "Work");
+  leaf.click();
+  menu.close();
+  assert.equal(await result, "assign:g1");
+});
+
 test("menu:popup resolves null when the menu is dismissed with no selection", async () => {
   const { popup, getBuilt } = harness();
   const result = popup(null, { items: [{ id: "x", label: "X" }] });

@@ -27,10 +27,10 @@ const {
   migrate,
 } = require("../migrations");
 
-test("Feature 110 ships schema v3 (two migrations in the chain)", () => {
+test("Feature 140 ships schema v4 (three migrations in the chain)", () => {
   assert.equal(BASE_SCHEMA_VERSION, 1);
-  assert.equal(MIGRATIONS.length, 2);
-  assert.equal(CURRENT_SCHEMA_VERSION, 3);
+  assert.equal(MIGRATIONS.length, 3);
+  assert.equal(CURRENT_SCHEMA_VERSION, 4);
 });
 
 test("migrate stamps the current version + sibling arrays on a tunnels doc", () => {
@@ -38,12 +38,13 @@ test("migrate stamps the current version + sibling arrays on a tunnels doc", () 
     tunnels: [],
     credentials: [],
     jumpHosts: [],
-    schemaVersion: 3,
+    groups: [],
+    schemaVersion: 4,
   });
 });
 
 test("migrate leaves an already-current document untouched (same ref)", () => {
-  const doc = { schemaVersion: 3, a: 1 };
+  const doc = { schemaVersion: 4, a: 1 };
   assert.equal(migrate(doc), doc);
 });
 
@@ -56,17 +57,17 @@ test("migrate passes non-object inputs through unchanged", () => {
 });
 
 test("a non-tunnels document is stamped but otherwise untouched", () => {
-  // Both transforms are type-guarded to the tunnels doc.
+  // All transforms are type-guarded to the tunnels doc.
   assert.deepEqual(migrate({ theme: "dark" }), {
     theme: "dark",
-    schemaVersion: 3,
+    schemaVersion: 4,
   });
 });
 
 test("schemaVersionOf defaults to the base version when absent/invalid", () => {
   assert.equal(schemaVersionOf({}), 1);
   assert.equal(schemaVersionOf({ schemaVersion: "x" }), 1);
-  assert.equal(schemaVersionOf({ schemaVersion: 3 }), 3);
+  assert.equal(schemaVersionOf({ schemaVersion: 4 }), 4);
   assert.equal(schemaVersionOf(null), 1);
 });
 
@@ -100,7 +101,8 @@ function v1Doc() {
 
 test("v1→v2 lifts embedded auth into a referenced credential", () => {
   const out = migrate(v1Doc());
-  assert.equal(out.schemaVersion, 3);
+  assert.equal(out.schemaVersion, 4);
+  assert.deepEqual(out.groups, [], "v3→v4 adds an empty groups array");
 
   const t = out.tunnels[0];
   assert.equal(t.sshServer, undefined, "the embedded hop is gone");
@@ -189,12 +191,28 @@ test("v2→v3 stamps type:local on tunnels that lack one, leaving others", () =>
     jumpHosts: [],
   };
   const out = migrate(doc);
-  assert.equal(out.schemaVersion, 3);
+  assert.equal(out.schemaVersion, 4);
   assert.equal(out.tunnels[0].type, "local", "untyped tunnel becomes local");
   assert.equal(out.tunnels[1].type, "dynamic", "an explicit type is preserved");
+  assert.deepEqual(out.groups, [], "and gains an empty groups array");
 });
 
-test("v2→v3 is idempotent and doesn't rewrite an all-typed doc", () => {
+test("an already-current all-typed doc is returned unchanged (same ref)", () => {
+  const doc = {
+    schemaVersion: 4,
+    tunnels: [
+      { id: "a", name: "a", type: "local", localPort: 1, sshHost: "h" },
+    ],
+    credentials: [],
+    jumpHosts: [],
+    groups: [],
+  };
+  assert.equal(migrate(doc), doc, "already current + all typed → same ref");
+});
+
+// ── v3 → v4: add the reusable groups array ───────────────────────────────────
+
+test("v3→v4 adds an empty groups array, leaving tunnels ungrouped", () => {
   const doc = {
     schemaVersion: 3,
     tunnels: [
@@ -203,7 +221,29 @@ test("v2→v3 is idempotent and doesn't rewrite an all-typed doc", () => {
     credentials: [],
     jumpHosts: [],
   };
-  assert.equal(migrate(doc), doc, "already current + all typed → same ref");
+  const out = migrate(doc);
+  assert.equal(out.schemaVersion, 4);
+  assert.deepEqual(out.groups, []);
+  assert.equal(out.tunnels[0].groupId, undefined, "tunnels stay ungrouped");
+});
+
+test("v3→v4 is idempotent: a doc that already has groups is passed through", () => {
+  const doc = {
+    schemaVersion: 3,
+    tunnels: [
+      { id: "a", name: "a", type: "local", localPort: 1, sshHost: "h" },
+    ],
+    credentials: [],
+    jumpHosts: [],
+    groups: [{ id: "g1", label: "Work", color: "blue" }],
+  };
+  const out = migrate(doc);
+  assert.equal(out.schemaVersion, 4);
+  assert.deepEqual(
+    out.groups,
+    [{ id: "g1", label: "Work", color: "blue" }],
+    "existing groups untouched",
+  );
 });
 
 test("v1→v2 is idempotent: a re-run adds nothing", () => {

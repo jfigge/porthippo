@@ -50,6 +50,15 @@
   --color-warning: #d4b060; /* paused / caution */
   --color-danger: #e07070; /* error */
 
+  /* ── Group palette (Feature 140) — dedicated hues, kept distinct from the
+        status colours above so a group tag never reads as a status signal. ─ */
+  --color-group-blue: #5b9bd5;
+  --color-group-teal: #3fb8b0;
+  --color-group-green: #6cc06c;
+  --color-group-amber: #d4a24c;
+  --color-group-violet: #a48bd4;
+  --color-group-red: #d96b6b;
+
   /* ── Typography ──────────────────────────────────────────────────────── */
   /* Inter carries no CJK glyphs, so the tail names system CJK faces the OS
      supplies for Chinese/Japanese; Latin still resolves to Inter first. No CDN
@@ -106,6 +115,12 @@
     --color-info: #3a6ea5;
     --color-warning: #9a6800;
     --color-danger: #b82020;
+    --color-group-blue: #2f6fb0;
+    --color-group-teal: #1f8a82;
+    --color-group-green: #2f8a2f;
+    --color-group-amber: #9a6800;
+    --color-group-violet: #6a4fb0;
+    --color-group-red: #b83a3a;
     --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.12);
   }
 }
@@ -127,6 +142,12 @@
   --color-info: #3a6ea5;
   --color-warning: #9a6800;
   --color-danger: #b82020;
+  --color-group-blue: #2f6fb0;
+  --color-group-teal: #1f8a82;
+  --color-group-green: #2f8a2f;
+  --color-group-amber: #9a6800;
+  --color-group-violet: #6a4fb0;
+  --color-group-red: #b83a3a;
   --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
 

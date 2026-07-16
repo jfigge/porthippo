@@ -36,6 +36,7 @@ const { SecretStorage } = require("./secret-storage");
 const { TunnelStore } = require("./tunnel-store");
 const { CredentialStore } = require("./credential-store");
 const { JumpHostStore } = require("./jump-host-store");
+const { GroupStore } = require("./group-store");
 const { KnownHostsStore } = require("./known-hosts-store");
 const { SettingsStore } = require("./settings-store");
 
@@ -56,6 +57,7 @@ class Stores {
     this._tunnelStore = new TunnelStore(this._paths);
     this._credentialStore = new CredentialStore(this._paths);
     this._jumpHostStore = new JumpHostStore(this._paths);
+    this._groupStore = new GroupStore(this._paths);
     this._knownHostsStore = new KnownHostsStore(this._paths);
     this._settingsStore = new SettingsStore(this._paths);
   }
@@ -73,6 +75,11 @@ class Stores {
   /** Reusable, named SSH jump hosts (each references a credential). */
   jumpHostStore() {
     return this._jumpHostStore;
+  }
+
+  /** Reusable, ordered tunnel groups (organisational; no secrets). */
+  groupStore() {
+    return this._groupStore;
   }
 
   /** Port-Hippo-accepted SSH host-key fingerprints (TOFU). */

@@ -20,10 +20,12 @@
  *
  * Feature 45 promotes credentials and jump hosts to first-class, reusable records.
  * They live as sibling arrays in the SAME `tunnels.json` document
- * (`{ schemaVersion, tunnels, credentials, jumpHosts }`) rather than separate
- * files, for one reason: the schema migration that extracts embedded auth /
- * inline jumps out of the old tunnel shape must be a single pure `(doc) => doc`
+ * (`{ schemaVersion, tunnels, credentials, jumpHosts, groups }`) rather than
+ * separate files, for one reason: the schema migration that extracts embedded auth
+ * / inline jumps out of the old tunnel shape must be a single pure `(doc) => doc`
  * transform (migrations.js runs per-document and can't move data across files).
+ * Feature 140 adds `groups` as a fourth sibling slice (organisational only — a
+ * tunnel references at most one by `groupId`).
  *
  * Each store reads the whole document, mutates only its own slice, and writes the
  * whole document back — safe because io.js writes are synchronous and therefore
@@ -37,7 +39,8 @@ const io = require("./io");
 /**
  * Read the definitions document, normalised so every slice is an array.
  * @param {import('./paths').Paths} paths
- * @returns {{ tunnels: object[], credentials: object[], jumpHosts: object[] }}
+ * @returns {{ tunnels: object[], credentials: object[], jumpHosts: object[],
+ *   groups: object[] }}
  */
 function readDoc(paths) {
   const doc = io.readJSON(paths.tunnelsPath());
@@ -45,21 +48,24 @@ function readDoc(paths) {
     tunnels: Array.isArray(doc?.tunnels) ? doc.tunnels : [],
     credentials: Array.isArray(doc?.credentials) ? doc.credentials : [],
     jumpHosts: Array.isArray(doc?.jumpHosts) ? doc.jumpHosts : [],
+    groups: Array.isArray(doc?.groups) ? doc.groups : [],
   };
 }
 
 /**
- * Persist the definitions document, preserving all three slices. A partial `doc`
+ * Persist the definitions document, preserving all four slices. A partial `doc`
  * (only the slice a store changed) is filled out from `readDoc`-style defaults so
  * a caller can pass `{ ...current, tunnels: next }` without losing siblings.
  * @param {import('./paths').Paths} paths
- * @param {{ tunnels?: object[], credentials?: object[], jumpHosts?: object[] }} doc
+ * @param {{ tunnels?: object[], credentials?: object[], jumpHosts?: object[],
+ *   groups?: object[] }} doc
  */
 function writeDoc(paths, doc) {
   io.writeJSON(paths.tunnelsPath(), {
     tunnels: Array.isArray(doc?.tunnels) ? doc.tunnels : [],
     credentials: Array.isArray(doc?.credentials) ? doc.credentials : [],
     jumpHosts: Array.isArray(doc?.jumpHosts) ? doc.jumpHosts : [],
+    groups: Array.isArray(doc?.groups) ? doc.groups : [],
   });
 }
 
