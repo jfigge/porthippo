@@ -2,10 +2,11 @@
 
 Everything you build in Port Hippo — tunnels, reusable credentials, and jump-host
 chains — normally lives only on the machine you built it on, encrypted for *that*
-device. The **Data** tab in Settings lets you move a setup between machines, keep a
-backup, and seed a fresh install from your existing `~/.ssh/config`.
+device. The **Import/Export** tab in Settings lets you move a setup between
+machines, keep a backup, and seed a fresh install from your existing
+`~/.ssh/config`.
 
-Open it from **Settings → Data**.
+Open it from **Settings → Import/Export**.
 
 ## The `.porthippo` bundle
 
@@ -15,7 +16,7 @@ moving to a new machine.
 
 ### Exporting
 
-**Settings → Data → Export bundle…** lets you choose:
+**Settings → Import/Export → Export bundle…** lets you choose:
 
 - **Include app settings** — carry your preferences (theme, language, defaults)
   into the bundle. Device-specific things (window size, launch-at-login) are never
@@ -36,7 +37,7 @@ Then pick where to save the `.porthippo` file.
 
 ### Importing
 
-**Settings → Data → Import bundle…** — pick a `.porthippo` file and Port Hippo
+**Settings → Import/Export → Import bundle…** — pick a `.porthippo` file and Port Hippo
 shows you a **preview** before anything changes: how many tunnels, credentials, and
 jump hosts are **new**, an **update** to something you already have, or a
 name **conflict**. Choose how to apply it:
@@ -71,8 +72,8 @@ the credential and re-enter the password.
 
 ## Importing from your SSH config
 
-If you already keep hosts in `~/.ssh/config`, **Settings → Data → Import from SSH
-config…** proposes Port Hippo records from it — no retyping.
+If you already keep hosts in `~/.ssh/config`, **Settings → Import/Export → Import
+from SSH config…** proposes Port Hippo records from it — no retyping.
 
 Port Hippo reads the common directives — `Host`, `HostName`, `User`, `Port`,
 `IdentityFile`, `ProxyJump`, and `Include` — and proposes, for each host:

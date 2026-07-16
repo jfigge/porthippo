@@ -302,15 +302,6 @@
       overflow: hidden;
     }
 
-    .sidebar-section {
-      font-size: 0.65rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      color: var(--overlay-0);
-      padding: 10px 6px 6px;
-    }
-
     /* ── App mock: tunnel list + live monitoring ──────────────────────────── */
 
     .tunnel-item {
@@ -330,10 +321,46 @@
       color: var(--text);
     }
 
-    .st-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-    .st-active { background: var(--green); box-shadow: 0 0 6px color-mix(in srgb, var(--green) 70%, transparent); }
-    .st-idle   { background: var(--overlay-0); }
-    .st-paused { background: var(--yellow); }
+    /* Three-lamp traffic-light status signal (matches the app sidebar): red /
+       amber / green with exactly one lit — position, not colour alone, reads the
+       state. green = connected, amber = armed but not connected (listening /
+       connecting / paused), red = error, none lit = disarmed. */
+    .sig { display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0; }
+    .sig-lamp { width: 6px; height: 6px; border-radius: 50%; }
+    .lamp-r { background: color-mix(in srgb, var(--red) 22%, transparent); }
+    .lamp-a { background: color-mix(in srgb, var(--yellow) 22%, transparent); }
+    .lamp-g { background: color-mix(in srgb, var(--green) 22%, transparent); }
+    .sig--red   .lamp-r { background: var(--red);    transform: scale(1.15); box-shadow: 0 0 6px color-mix(in srgb, var(--red) 60%, transparent); }
+    .sig--amber .lamp-a { background: var(--yellow); transform: scale(1.15); box-shadow: 0 0 6px color-mix(in srgb, var(--yellow) 60%, transparent); }
+    .sig--green .lamp-g { background: var(--green);  transform: scale(1.15); box-shadow: 0 0 6px color-mix(in srgb, var(--green) 60%, transparent); }
+
+    /* Collapsible group section header: chevron + colour swatch + name + a live
+       armed/total count + an arm-all switch + a pause/resume-all icon. */
+    .grp-header {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 8px 6px 5px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: var(--subtext);
+      user-select: none;
+    }
+    .grp-chevron { color: var(--overlay-0); display: flex; flex-shrink: 0; }
+    .grp-swatch { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .grp-swatch--work { background: #3fb8b0; }        /* teal group token */
+    .grp-swatch--lab  { background: #a48bd4; }        /* violet group token */
+    .grp-swatch--none { width: 9px; height: 9px; border-radius: 3px; background: var(--overlay-0); opacity: 0.55; }
+    .grp-name { flex: 1; min-width: 0; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .grp-count { color: var(--overlay-0); font-variant-numeric: tabular-nums; font-size: 0.66rem; flex-shrink: 0; }
+    /* Mini arm-all slider switch: green + thumb-right = every tunnel armed. */
+    .grp-arm { position: relative; width: 26px; height: 14px; border-radius: 999px; background: var(--overlay-0); flex-shrink: 0; }
+    .grp-arm::after { content: ""; position: absolute; top: 1.5px; left: 1.5px; width: 11px; height: 11px; border-radius: 50%; background: var(--mantle); }
+    .grp-arm--on { background: var(--green); }
+    .grp-arm--on::after { left: auto; right: 1.5px; }
+    .grp-pause { color: var(--overlay-0); display: flex; flex-shrink: 0; }
+    /* Tunnel rows nest one indent under their group header. */
+    .grp-body .tunnel-item { padding-left: 15px; }
 
     .tunnel-port {
       font-family: "Cascadia Code", "JetBrains Mono", "Fira Code", monospace;
@@ -391,21 +418,6 @@
 
     .route-arrow { color: var(--overlay-0); flex-shrink: 0; display: flex; }
     .route-spacer { flex: 1; min-width: 8px; }
-
-    .live-chip {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 0.64rem;
-      font-weight: 700;
-      letter-spacing: 0.6px;
-      padding: 3px 9px;
-      border-radius: 100px;
-      background: color-mix(in srgb, var(--green) 16%, transparent);
-      color: var(--green);
-      flex-shrink: 0;
-    }
-    .live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
 
     .mon-area {
       flex: 1;
@@ -790,14 +802,45 @@
     </div>
     <div class="app-layout">
       <div class="sidebar">
-        <div class="sidebar-section">Tunnels</div>
-        <div class="tunnel-item"><span class="st-dot st-active"></span><span class="tunnel-type"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span><span class="tunnel-port">5432</span><span class="tunnel-name">Postgres · prod</span></div>
-        <div class="tunnel-item sel"><span class="st-dot st-active"></span><span class="tunnel-type"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span><span class="tunnel-port">6379</span><span class="tunnel-name">Redis · cache</span></div>
-        <div class="tunnel-item"><span class="st-dot st-idle"></span><span class="tunnel-type"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span><span class="tunnel-port">3306</span><span class="tunnel-name">MySQL · staging</span></div>
-        <div class="tunnel-item"><span class="st-dot st-active"></span><span class="tunnel-type"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg></span><span class="tunnel-port">1080</span><span class="tunnel-name">SOCKS · proxy</span></div>
-        <div class="tunnel-item"><span class="st-dot st-paused"></span><span class="tunnel-type"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span><span class="tunnel-port">8080</span><span class="tunnel-name">Grafana</span></div>
-        <div class="sidebar-section" style="margin-top:8px">Remote access</div>
-        <div class="tunnel-item"><span class="st-dot st-active"></span><span class="tunnel-type"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg></span><span class="tunnel-port">5900</span><span class="tunnel-name">VNC · lab</span></div>
+        <!-- Group: Work (all armed) -->
+        <div class="grp-header">
+          <span class="grp-chevron"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
+          <span class="grp-swatch grp-swatch--work"></span>
+          <span class="grp-name">Work</span>
+          <span class="grp-count">3/3</span>
+          <span class="grp-arm grp-arm--on" role="img" aria-label="Arm all"></span>
+          <span class="grp-pause" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg></span>
+        </div>
+        <div class="grp-body">
+          <div class="tunnel-item"><span class="sig sig--green"><span class="sig-lamp lamp-r"></span><span class="sig-lamp lamp-a"></span><span class="sig-lamp lamp-g"></span></span><span class="tunnel-type"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span><span class="tunnel-port">5432</span><span class="tunnel-name">Postgres · prod</span></div>
+          <div class="tunnel-item sel"><span class="sig sig--green"><span class="sig-lamp lamp-r"></span><span class="sig-lamp lamp-a"></span><span class="sig-lamp lamp-g"></span></span><span class="tunnel-type"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span><span class="tunnel-port">6379</span><span class="tunnel-name">Redis · cache</span></div>
+          <div class="tunnel-item"><span class="sig sig--amber"><span class="sig-lamp lamp-r"></span><span class="sig-lamp lamp-a"></span><span class="sig-lamp lamp-g"></span></span><span class="tunnel-type"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span><span class="tunnel-port">3306</span><span class="tunnel-name">MySQL · staging</span></div>
+        </div>
+        <!-- Group: Home lab (partly armed) -->
+        <div class="grp-header">
+          <span class="grp-chevron"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
+          <span class="grp-swatch grp-swatch--lab"></span>
+          <span class="grp-name">Home lab</span>
+          <span class="grp-count">1/2</span>
+          <span class="grp-arm" role="img" aria-label="Arm all"></span>
+          <span class="grp-pause" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg></span>
+        </div>
+        <div class="grp-body">
+          <div class="tunnel-item"><span class="sig sig--green"><span class="sig-lamp lamp-r"></span><span class="sig-lamp lamp-a"></span><span class="sig-lamp lamp-g"></span></span><span class="tunnel-type"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg></span><span class="tunnel-port">1080</span><span class="tunnel-name">SOCKS · proxy</span></div>
+          <div class="tunnel-item"><span class="sig sig--red"><span class="sig-lamp lamp-r"></span><span class="sig-lamp lamp-a"></span><span class="sig-lamp lamp-g"></span></span><span class="tunnel-type"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span><span class="tunnel-port">8080</span><span class="tunnel-name">Grafana</span></div>
+        </div>
+        <!-- Ungrouped -->
+        <div class="grp-header">
+          <span class="grp-chevron"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
+          <span class="grp-swatch grp-swatch--none"></span>
+          <span class="grp-name">Ungrouped</span>
+          <span class="grp-count">0/1</span>
+          <span class="grp-arm" role="img" aria-label="Arm all"></span>
+          <span class="grp-pause" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg></span>
+        </div>
+        <div class="grp-body">
+          <div class="tunnel-item"><span class="sig"><span class="sig-lamp lamp-r"></span><span class="sig-lamp lamp-a"></span><span class="sig-lamp lamp-g"></span></span><span class="tunnel-type"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg></span><span class="tunnel-port">5900</span><span class="tunnel-name">VNC · lab</span></div>
+        </div>
       </div>
       <div class="main-panel">
         <div class="route-bar">
@@ -811,7 +854,6 @@
           </span>
           <span class="route-node">redis.internal:6379</span>
           <span class="route-spacer"></span>
-          <span class="live-chip"><span class="live-dot"></span>LIVE</span>
           <span class="mock-btn" aria-hidden="true">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>
           </span>
@@ -960,11 +1002,11 @@
       <div class="feature-card">
         <div class="feature-icon">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.58 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/>
+            <path d="M4 4h6l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/><line x1="2" y1="11" x2="22" y2="11"/>
           </svg>
         </div>
-        <h3>No Tracking</h3>
-        <p>No accounts, no telemetry, no analytics — nothing about you ever leaves your machine. The only outbound call is a background check to GitHub for updates. Its SSH transport (<code style="font-size:0.8em;background:var(--surface-0);padding:1px 5px;border-radius:3px;color:var(--accent)">ssh2</code>) is owned end-to-end: Port Hippo binds the local socket and relays the bytes itself.</p>
+        <h3>Groups &amp; Bulk Actions</h3>
+        <p>Sort tunnels into colour-coded, collapsible groups — <em style="font-style:normal;color:var(--accent)">Work</em>, <em style="font-style:normal;color:var(--accent)">Home lab</em>, whatever fits. Arm, disarm, or pause an entire group in one click from its header, the tray, or the menu. Ungrouped tunnels stay first-class.</p>
       </div>
 
       <div class="feature-card">

@@ -37,10 +37,10 @@ Save. The tunnel appears in the list, **disarmed** — defined but not yet bound
 
 ## Arm it
 
-**Arming** binds the entry port and starts listening. Select the tunnel and click
-the **power** button (or right-click → **Arm**). In the list its status signal — a
-row of three traffic-light lamps — lights the **middle (amber)** lamp for
-**Listening**.
+**Arming** binds the entry port and starts listening. Select the tunnel and flip
+its **arm switch** in the detail panel (or right-click → **Arm**). In the list its
+status signal — a row of three traffic-light lamps — lights the **middle (amber)**
+lamp for **Listening**.
 
 > Nothing has connected over SSH yet. Arming only binds the local port — the SSH
 > connection is opened lazily, on first access, so an armed tunnel you never use
@@ -68,8 +68,8 @@ Disconnect your app. The SSH connection stays up for the tunnel's **idle linger*
 (10 seconds by default), then closes — back to **Listening**. The entry port is
 still bound, so the next connection opens the tunnel again automatically.
 
-To free the port entirely, **disarm** the tunnel (power button again). To freeze a
-live tunnel without closing it, **[pause](monitoring.md)** it.
+To free the port entirely, **disarm** the tunnel (flip the arm switch off). To
+freeze a live tunnel without closing it, **[pause](monitoring.md)** it.
 
 ## Where to next
 

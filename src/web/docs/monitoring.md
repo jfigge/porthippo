@@ -64,12 +64,15 @@ Choose which metrics to show. Available cards / columns include:
 | --- | --- |
 | **State** | The current state (above). |
 | **Upload** / **Download** | Live byte-rate out / in. |
+| **Peak upload** / **Peak download** | The highest rate reached this connection. |
+| **Combined throughput** / **Average throughput** | Both directions summed live, and the running average. |
 | **Sent** / **Received** | Total bytes sent / received this connection. |
 | **Transferred** | Total bytes both directions. |
 | **Open for** | How long the current SSH connection has been up. |
 | **Idle** | How long since the last client disconnected. |
-| **Connections** / **Total connections** | Active client count / cumulative count. |
+| **Connections** / **Peak connections** / **Total connections** | Active client count / high-water mark / cumulative count. |
 | **First / Last connection**, **Last disconnect** | Timestamps for the session's lifecycle. |
+| **Reconnect** | While a dropped tunnel is retrying, the current attempt number and a live countdown to the next try (see [Troubleshooting](troubleshooting.md)). |
 | **Errors** | Count of connection errors; open it for the error history. |
 
 Rates and counters update on a live heartbeat while a tunnel is connected.

@@ -106,11 +106,13 @@ Hippo returns the tunnel to **Listening** and re-establishes it on the next acce
 re-establishes the connection immediately (with backoff) so a long-lived client
 survives a transient network blip.
 
-## Enabling and arming
+## Arming and "Arm on startup"
 
-A tunnel is **enabled** if it should participate in *Arm All* and auto-arm at
-launch. **Arming** is the live action that binds the entry port. Disabling a
-tunnel keeps its definition but leaves it out of bulk arming.
+**Arming** is the live action that binds the entry port. The editor's collapsible
+**Advanced** section has an **Arm on startup** toggle that controls whether a tunnel
+arms automatically when Port Hippo launches *and* whether it's swept up by **Arm
+All**. Turn it off to keep a tunnel's definition but leave it out of both — you can
+still arm it by hand.
 
 ## Groups
 
@@ -129,8 +131,10 @@ never change how a tunnel connects.
   at that position. Dropping away from any group cancels the move.
 - **Reorder groups** by dragging their headers. **Collapse/expand** a group by
   clicking its header; the collapsed state is remembered across restarts.
-- **Delete a group** from its header menu. Its tunnels are **kept** — they simply
-  fall back to the *Ungrouped* section.
+- **Rename or recolour a group** from its header's right-click menu → **Edit
+  group…**.
+- **Delete a group** from that same header menu (**Delete group…**). Its tunnels are
+  **kept** — they simply fall back to the *Ungrouped* section.
 
 Each group header shows an *armed / total* count, an **arm-all** switch, and a
 **pause / resume** icon that pauses (or resumes) every tunnel in the group at once.

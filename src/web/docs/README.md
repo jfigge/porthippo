@@ -44,8 +44,10 @@ down, and **resume** it later.
   and passphrases.
 - **[Host Keys & Trust](host-keys.md)** — how Port Hippo verifies servers, and
   what a "changed key" warning means.
-- **[Monitoring & Pause](monitoring.md)** — live stats, the all/active filter, and
-  pause/resume.
+- **[Monitoring & Pause](monitoring.md)** — live stats, the Cards and List views,
+  groups, and pause/resume.
+- **[Import & Export](import-export.md)** — move a setup between machines, back it up,
+  or seed a fresh install from your `~/.ssh/config`.
 - **[Tray & Background](tray-and-background.md)** — hide-to-tray, launch-at-login,
   and quit behaviour.
 - **[Security](security.md)** — binding scope, where secrets live, host-key trust,

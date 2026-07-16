@@ -216,6 +216,29 @@ test("renders a section per group plus an implicit Ungrouped section", () => {
   assert.equal(rows(list).length, 2);
 });
 
+test("rows in a section carry a data-section hook (tree indent); flat rows don't", () => {
+  const { list } = mount();
+  // No groups → a flat list, rows are not nested (no hook).
+  list.setData(DEFS, new Map());
+  list.setGrouping({ groups: [], collapsedIds: [] });
+  assert.equal(rows(list)[0].dataset.section, undefined);
+
+  // Grouped → each row is tagged with its section id (grouped + implicit Ungrouped).
+  list.setData(
+    [
+      { id: "a", name: "A", groupId: "g1" },
+      { id: "b", name: "B" }, // ungrouped
+    ],
+    new Map(),
+  );
+  list.setGrouping({
+    groups: [{ id: "g1", label: "Work", color: "blue" }],
+    collapsedIds: [],
+  });
+  assert.equal(listRow(list, "a").dataset.section, "g1");
+  assert.equal(listRow(list, "b").dataset.section, "__ungrouped");
+});
+
 test("a collapsed section hides its rows but keeps its header", () => {
   const { list } = mount();
   list.setData([{ id: "a", name: "A", groupId: "g1" }], new Map());

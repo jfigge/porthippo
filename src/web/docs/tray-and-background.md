@@ -52,7 +52,7 @@ truly background setup.
 
 ## Arm on launch
 
-**Arm enabled tunnels on startup** (on by default) binds every enabled tunnel's
+**Arm enabled tunnels on launch** (on by default) binds every enabled tunnel's
 entry port when Port Hippo starts, so they're listening immediately. Turn it off if
 you'd rather arm tunnels by hand.
 
@@ -64,7 +64,10 @@ you'd rather arm tunnels by hand.
 
 The application menu carries the same actions plus standard fare:
 
-- **File** — New Tunnel, Arm All, Disarm All, Settings, Quit.
+- **File** — New Tunnel, Arm All Tunnels, Disarm All Tunnels, and — once you have
+  groups — a **Groups** submenu with per-group Arm All / Disarm All. On Windows and
+  Linux, Settings and Quit live here too; on macOS they sit in the **Port Hippo**
+  application menu.
 - **View** — zoom the interface (Increase / Decrease / Reset Font Size,
   `Cmd/Ctrl +` `-` `0`), full screen.
 - **Help** — this User Guide, Copy Diagnostics, Show Logs Folder, Check for

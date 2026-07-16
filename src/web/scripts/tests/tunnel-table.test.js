@@ -478,6 +478,33 @@ test("a collapsed group hides its rows but keeps the header row", () => {
   assert.equal(rowIds(table).length, 0, "the group's row is hidden");
 });
 
+test("rows in a group section carry a data-section hook (tree indent); flat rows don't", () => {
+  const { table } = mount();
+  // Flat (no groups) → no nesting hook.
+  table.setData(DEFS, STATES, SNAPS);
+  table.setGrouping({ groups: [], collapsedIds: [] });
+  assert.equal(
+    table.element.querySelector(".tt-row").dataset.section,
+    undefined,
+  );
+
+  // Grouped → each row tagged with its section id (grouped + implicit Ungrouped).
+  table.setData(
+    [
+      { id: "a", name: "A", groupId: "g1" },
+      { id: "b", name: "B" }, // ungrouped
+    ],
+    new Map(),
+    new Map(),
+  );
+  table.setGrouping({
+    groups: [{ id: "g1", label: "Work", color: "blue" }],
+    collapsedIds: [],
+  });
+  assert.equal(ttRow(table, "a").dataset.section, "g1");
+  assert.equal(ttRow(table, "b").dataset.section, "__ungrouped");
+});
+
 test("the group header arm switch fires an action; header click toggles collapse", () => {
   const calls = { action: [], collapse: [] };
   const table = new TunnelTable({
