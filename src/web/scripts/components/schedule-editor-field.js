@@ -41,6 +41,7 @@ const str = (v) => (typeof v === "string" ? v : "");
 export class ScheduleEditorField {
   #porthippo;
   #onChange;
+  #heading;
 
   #el;
   #timeCheck;
@@ -65,12 +66,15 @@ export class ScheduleEditorField {
    * @param {object} [opts]
    * @param {object} [opts.porthippo]  IPC bridge (for the "use current network" helper)
    * @param {() => void} [opts.onChange]  fired on any edit (live revalidation)
+   * @param {boolean} [opts.heading]  show the "Schedule" heading (default true);
+   *        the tunnel editor omits it since a "Schedule" tab already labels it.
    */
-  constructor({ porthippo, onChange } = {}) {
+  constructor({ porthippo, onChange, heading = true } = {}) {
     this.#porthippo =
       porthippo ||
       (typeof window !== "undefined" ? window.porthippo : undefined);
     this.#onChange = onChange || (() => {});
+    this.#heading = heading;
     this.#el = this.#build();
   }
 
@@ -164,7 +168,9 @@ export class ScheduleEditorField {
     this.#netBody = this.#buildNetworkBody();
 
     return el("div", { class: "editor-block schedule-editor" }, [
-      el("span", { class: "field-label", text: t("schedule.section") }),
+      ...(this.#heading
+        ? [el("span", { class: "field-label", text: t("schedule.section") })]
+        : []),
       el("p", { class: "field-hint", text: t("schedule.section.hint") }),
       this.#condition(
         this.#timeCheck,

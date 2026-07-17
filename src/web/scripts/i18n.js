@@ -69,6 +69,11 @@ export const EN = {
   // ── Tunnel editor (modal) ───────────────────────────────────────────────
   "editor.newTitle": "New tunnel",
   "editor.editTitle": "Edit tunnel",
+  // Editor tabs.
+  "editor.tab.general": "General",
+  "editor.tab.jumps": "Jump Hosts",
+  "editor.tab.config": "Config",
+  "editor.tab.schedule": "Schedule",
   "editor.name": "Name",
 
   // Forwarding type (Feature 110): local (ssh -L), remote (ssh -R), dynamic (ssh -D).

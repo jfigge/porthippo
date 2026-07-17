@@ -523,5 +523,9 @@
   "schedule.badge.armsAt": "Arms at {time}",
   "schedule.badge.disarmsAt": "Disarms at {time}",
   "schedule.badge.overridden": "Overridden — you’re in control",
-  "schedule.badge.overriddenUntil": "Overridden until {time}"
+  "schedule.badge.overriddenUntil": "Overridden until {time}",
+  "editor.tab.general": "General",
+  "editor.tab.jumps": "Jump Hosts",
+  "editor.tab.config": "Config",
+  "editor.tab.schedule": "Schedule"
 }

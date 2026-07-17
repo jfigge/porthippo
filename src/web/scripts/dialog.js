@@ -35,15 +35,24 @@ export class Dialog {
   #bodyEl;
   #bannerEl;
   #saveBtn;
+  #footerStartEl;
   #onSubmit;
   #onCancel;
   #submitting = false;
+  // Optional tabs: a pinned nav strip outside the scrolling body, each tab a panel
+  // the caller fills via `tabBody(id)`. Empty → a single body (existing editors).
+  #tabButtons = new Map();
+  #panels = new Map();
+  #defaultTab = null;
 
   /**
    * @param {object} opts
    * @param {string} [opts.className]   extra class on the <dialog>
    * @param {string} [opts.title]
    * @param {string} [opts.saveLabel]   footer submit label (default "Save")
+   * @param {Array<{id:string,label:string}>} [opts.tabs]  when given, the body is
+   *        split into one panel per tab behind a pinned tab strip; fill each with
+   *        `tabBody(id)` and switch with `showTab(id)`.
    * @param {() => void} [opts.onSubmit] the form submitted (Enter / Save)
    * @param {() => void} [opts.onCancel] Cancel / Escape
    */
@@ -51,6 +60,7 @@ export class Dialog {
     className = "",
     title = "",
     saveLabel,
+    tabs,
     onSubmit,
     onCancel,
   } = {}) {
@@ -65,11 +75,48 @@ export class Dialog {
       role: "alert",
     });
 
+    // Build the tab strip + panels when tabs are given. The nav is pinned outside
+    // the body so it stays put while the active panel scrolls.
+    let navEl = null;
+    if (Array.isArray(tabs) && tabs.length) {
+      navEl = el(
+        "div",
+        { class: "dialog-tabs", role: "tablist" },
+        tabs.map((tb) => {
+          const btn = el("button", {
+            class: "dialog-tab",
+            type: "button",
+            role: "tab",
+            text: tb.label,
+            "aria-selected": "false",
+            dataset: { tab: tb.id },
+            onClick: () => this.showTab(tb.id),
+          });
+          this.#tabButtons.set(tb.id, btn);
+          return btn;
+        }),
+      );
+      for (const tb of tabs) {
+        const panel = el("div", {
+          class: "dialog-tab-panel",
+          role: "tabpanel",
+          dataset: { tab: tb.id },
+          hidden: true,
+        });
+        this.#panels.set(tb.id, panel);
+        this.#bodyEl.append(panel);
+      }
+      this.#defaultTab = tabs[0].id;
+    }
+
     this.#saveBtn = el("button", {
       class: "btn btn--primary dialog-save",
       type: "submit",
       text: saveLabel || t("common.save"),
     });
+    // A left-aligned slot for extra footer actions (e.g. the tunnel editor's
+    // "Test resolution"); it pushes Cancel/Save to the right. Empty by default.
+    this.#footerStartEl = el("div", { class: "dialog-footer-start" });
 
     const form = el(
       "form",
@@ -81,9 +128,11 @@ export class Dialog {
         },
       },
       [
+        ...(navEl ? [navEl] : []),
         this.#bodyEl,
         this.#bannerEl,
         el("div", { class: "dialog-footer" }, [
+          this.#footerStartEl,
           el("button", {
             class: "btn btn--secondary dialog-cancel",
             type: "button",
@@ -99,6 +148,8 @@ export class Dialog {
       el("div", { class: "dialog-header" }, [this.#titleEl]),
       form,
     ]);
+
+    if (this.#defaultTab) this.showTab(this.#defaultTab);
 
     // Escape fires the native `cancel` event (which would also close the dialog);
     // we take it over so cleanup + the onCancel callback run exactly once.
@@ -118,6 +169,32 @@ export class Dialog {
     return this.#bodyEl;
   }
 
+  /** The left-aligned footer slot for extra actions (Cancel/Save stay right). */
+  get footerStart() {
+    return this.#footerStartEl;
+  }
+
+  /**
+   * The panel container for a tab (when built with `tabs`); falls back to the whole
+   * body so a non-tabbed caller is unaffected.
+   * @param {string} id
+   * @returns {HTMLElement}
+   */
+  tabBody(id) {
+    return this.#panels.get(id) || this.#bodyEl;
+  }
+
+  /** Reveal a tab's panel and mark its nav button active (no-op if untabbed). */
+  showTab(id) {
+    if (!this.#panels.has(id)) return;
+    for (const [tid, panel] of this.#panels) panel.hidden = tid !== id;
+    for (const [tid, btn] of this.#tabButtons) {
+      const on = tid === id;
+      btn.classList.toggle("dialog-tab--active", on);
+      btn.setAttribute("aria-selected", String(on));
+    }
+  }
+
   /** Update the header title (e.g. New vs Edit). */
   setTitle(title) {
     this.#titleEl.textContent = title;
@@ -127,6 +204,7 @@ export class Dialog {
   open() {
     if (!this.#el.isConnected) document.body.appendChild(this.#el);
     this.clearError();
+    if (this.#defaultTab) this.showTab(this.#defaultTab); // always open on tab 1
     this.#el.showModal();
     const focusTarget =
       this.#bodyEl.querySelector("[data-autofocus]") ||

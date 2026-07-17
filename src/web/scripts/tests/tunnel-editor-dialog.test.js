@@ -53,7 +53,7 @@ function fillValid(dlg) {
   change(q(dlg, ".cred-picker-select"), "c1");
 }
 
-test("openCreate shows the Entry/Target/Exit fields with Advanced collapsed", async () => {
+test("openCreate shows the Entry/Target/Exit fields on the General tab", async () => {
   const dlg = mount();
   await dlg.openCreate();
   assert.ok(dlg.element.open);
@@ -61,7 +61,12 @@ test("openCreate shows the Entry/Target/Exit fields with Advanced collapsed", as
     assert.ok(q(dlg, `.editor-input-${key}`), `${key} present`);
   }
   assert.ok(q(dlg, ".cred-picker-select"), "credential picker present");
-  assert.equal(q(dlg, ".editor-advanced").open, false, "Advanced collapsed");
+  // The editor opens on the General tab.
+  assert.equal(
+    q(dlg, ".dialog-tab--active").dataset.tab,
+    "general",
+    "General tab active on open",
+  );
   // The old SSH-server / bind-address inputs are gone — folded into the fields.
   assert.equal(q(dlg, ".editor-input-sshHost"), null);
   assert.equal(q(dlg, ".editor-input-bindHost"), null);
@@ -120,7 +125,7 @@ test("switching to dynamic hides the Exit field and drops the destination", asyn
   const dlg = mount();
   await dlg.openCreate();
   setInput(dlg, "name", "SOCKS");
-  q(dlg, ".editor-type-btn:nth-child(3)").click(); // dynamic
+  change(q(dlg, ".editor-input-type"), "dynamic");
   setInput(dlg, "entryAddress", "1080");
   setInput(dlg, "targetServer", "bastion");
   change(q(dlg, ".cred-picker-select"), "c1");
@@ -140,7 +145,7 @@ test("switching to remote maps the fields to remoteBind + local target", async (
   const dlg = mount();
   await dlg.openCreate();
   setInput(dlg, "name", "Webhook");
-  q(dlg, ".editor-type-btn:nth-child(2)").click(); // remote
+  change(q(dlg, ".editor-input-type"), "remote");
   setInput(dlg, "entryAddress", "8080"); // remote bind
   setInput(dlg, "targetServer", "bastion");
   setInput(dlg, "exitAddress", "127.0.0.1:3000"); // local target
@@ -165,8 +170,7 @@ test("openEdit reconstructs a remote tunnel's bind + local target fields", async
     credentialId: "c1",
     jumpHostIds: [],
   });
-  const active = q(dlg, ".editor-type-btn--active");
-  assert.match(active.textContent, /Remote/);
+  assert.equal(q(dlg, ".editor-input-type").value, "remote");
   assert.equal(q(dlg, ".editor-input-entryAddress").value, "0.0.0.0:8080");
   assert.equal(q(dlg, ".editor-input-exitAddress").value, "3000");
 });
@@ -201,6 +205,116 @@ test("a valid save submits the payload and fires onSaved, then closes", async ()
   assert.equal(calls[0].ctx.id, null);
   assert.equal(calls[0].payload.sshHost, "db.internal");
   assert.ok(!dlg.element.open, "closed on success");
+});
+
+test("the editor splits fields across four tabs", async () => {
+  const dlg = mount();
+  await dlg.openCreate();
+
+  const order = [...dlg.element.querySelectorAll(".dialog-tab")].map(
+    (b) => b.dataset.tab,
+  );
+  assert.deepEqual(order, ["general", "jumps", "config", "schedule"]);
+
+  const panel = (id) =>
+    dlg.element.querySelector(`.dialog-tab-panel[data-tab="${id}"]`);
+  assert.ok(
+    panel("general").querySelector(".editor-input-name"),
+    "name→General",
+  );
+  assert.ok(
+    panel("general").querySelector(".editor-input-targetServer"),
+    "target→General",
+  );
+  assert.ok(
+    panel("general").querySelector(".cred-picker-select"),
+    "credential→General",
+  );
+  assert.ok(
+    panel("jumps").querySelector(".jump-host-picker"),
+    "jumps→Jump Hosts",
+  );
+  assert.ok(
+    panel("config").querySelector(".editor-input-lingerMs"),
+    "linger→Config",
+  );
+  assert.ok(
+    panel("config").querySelector(".editor-input-enabled"),
+    "toggles→Config",
+  );
+  assert.ok(
+    panel("config").querySelector(".editor-input-retryBaseMs"),
+    "retry→Config",
+  );
+  assert.ok(
+    panel("schedule").querySelector(".schedule-editor"),
+    "schedule→Schedule",
+  );
+
+  // General is active first; the others start hidden.
+  assert.equal(panel("general").hidden, false);
+  assert.equal(panel("config").hidden, true);
+});
+
+test("millisecond fields step by 1000; the attempts count does not", async () => {
+  const dlg = mount();
+  await dlg.openCreate();
+  for (const key of ["lingerMs", "retryBaseMs", "retryMaxMs"]) {
+    assert.equal(
+      q(dlg, `.editor-input-${key}`).getAttribute("step"),
+      "1000",
+      `${key} steps by 1000`,
+    );
+  }
+  assert.notEqual(
+    q(dlg, ".editor-input-retryMaxAttempts").getAttribute("step"),
+    "1000",
+    "the attempts count is not a ms field",
+  );
+});
+
+test("a Config validation error reveals the Config tab on save", async () => {
+  const dlg = mount({ onSubmit: () => ({ id: "t1" }) });
+  await dlg.openCreate();
+  fillValid(dlg);
+  setInput(dlg, "retryBaseMs", "0"); // invalid: the reconnect base must be ≥ 1
+
+  dlg.element
+    .querySelector("form")
+    .dispatchEvent(new Event("submit", { cancelable: true }));
+  await flush();
+
+  const config = dlg.element.querySelector(
+    '.dialog-tab-panel[data-tab="config"]',
+  );
+  assert.ok(dlg.element.open, "stays open on a validation error");
+  assert.equal(config.hidden, false, "switched to the Config tab");
+});
+
+test("a schedule-only validation error reveals the Schedule tab on save", async () => {
+  const dlg = mount({ onSubmit: () => ({ id: "t1" }) });
+  await dlg.openCreate();
+  fillValid(dlg);
+
+  const schedule = dlg.element.querySelector(
+    '.dialog-tab-panel[data-tab="schedule"]',
+  );
+  // Enable the network condition with a reach host but no port → invalid schedule.
+  change(schedule.querySelectorAll(".schedule-cond-check")[1], true);
+  typeInto(schedule.querySelector(".schedule-reach-host"), "server");
+
+  dlg.element
+    .querySelector("form")
+    .dispatchEvent(new Event("submit", { cancelable: true }));
+  await flush();
+
+  assert.equal(schedule.hidden, false, "switched to the Schedule tab");
+  assert.ok(
+    dlg.element
+      .querySelector('.field[data-error-key="schedule.network.reach.port"]')
+      .classList.contains("field--error"),
+    "the offending field carries the inline error",
+  );
 });
 
 test("a double-submit only fires the save once while it is in flight", async () => {
@@ -292,7 +406,7 @@ test("the Entry warning flags a conflict, then a privileged port", async () => {
   assert.equal(warn.hidden, true);
 });
 
-test("editing a tunnel that uses advanced fields opens Advanced", async () => {
+test("editing a tunnel loads its Config-tab values (idle linger)", async () => {
   const dlg = mount();
   await dlg.openEdit({
     id: "t1",
@@ -304,8 +418,15 @@ test("editing a tunnel that uses advanced fields opens Advanced", async () => {
     jumpHostIds: [],
     lingerMs: 30000,
   });
-  assert.equal(q(dlg, ".editor-advanced").open, true);
   assert.equal(q(dlg, ".editor-input-lingerMs").value, "30000");
+  // The linger field lives on the Config tab.
+  const config = dlg.element.querySelector(
+    '.dialog-tab-panel[data-tab="config"]',
+  );
+  assert.ok(
+    config.querySelector(".editor-input-lingerMs"),
+    "linger on Config tab",
+  );
 });
 
 test("openEdit round-trips the verbatim address strings when stored", async () => {
@@ -507,7 +628,7 @@ test("an IP-literal target never triggers a DNS lookup", async () => {
   assert.equal(blockWarn(dlg, "targetServer").hidden, true);
 });
 
-test("Test resolution runs the probe and renders a per-hop result", async () => {
+test("Test resolution runs the probe and renders a per-hop result in a popup", async () => {
   const { dlg, calls } = mountResolve({
     test: () => ({
       ok: false,
@@ -525,19 +646,27 @@ test("Test resolution runs the probe and renders a per-hop result", async () => 
   await dlg.openCreate();
   fillValid(dlg);
 
+  // The button lives in the footer; results render into the stacked popup (a
+  // separate <dialog> mounted on document.body, not inside the editor element).
   q(dlg, ".editor-resolve-btn").click();
-  await waitUntil(() => q(dlg, ".editor-resolve-results").hidden === false);
   await waitUntil(
-    () => dlg.element.querySelectorAll(".editor-resolve-row").length === 2,
+    () => document.querySelectorAll(".editor-resolve-row").length === 2,
   );
 
   assert.equal(calls.test.length, 1, "the probe was invoked once");
-  const rows = [...dlg.element.querySelectorAll(".editor-resolve-row")];
+  const popup = document.querySelector(".resolve-popup");
+  assert.ok(popup && popup.open, "the results popup is open");
+  const rows = [...document.querySelectorAll(".editor-resolve-row")];
   assert.match(rows[0].textContent, /Target server/);
   assert.match(rows[0].textContent, /reachable/);
   assert.match(rows[1].textContent, /Exit/);
   assert.match(rows[1].textContent, /unreachable/);
   assert.match(rows[1].textContent, /refused/);
+
+  // Closing the popup leaves the editor open.
+  popup.querySelector(".dialog-footer .btn").click();
+  assert.equal(popup.open, false, "popup closed");
+  assert.ok(dlg.element.open, "editor stays open");
 });
 
 test("a failing resolution never blocks the save", async () => {

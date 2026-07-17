@@ -14,11 +14,12 @@
  * limitations under the License.
  */
 
-// tunnel-editor-dialog.js — create/edit a tunnel in a native <dialog>. The body
-// reads as the path a connection takes: Name, then three free-text address:port
-// fields — Entry port (the local listener), Target server (the remote SSH box),
-// Exit port (the address forwarded to on that box) — then the Credential, and an
-// Advanced <details> for the jump-host chain, idle linger and option toggles.
+// tunnel-editor-dialog.js — create/edit a tunnel in a native <dialog>, split across
+// four tabs: General (Name, the three free-text address:port fields — Entry port /
+// Target server / Exit port — the Credential, and the route-validation block),
+// Jump Hosts (the jump-host chain), Config (idle linger, option toggles, reconnect
+// override), and Schedule (the optional auto-arm rule). A validation error reveals
+// the tab that owns the failing field.
 //
 // Each address field accepts a bare port, a bare host, or `address:port` and is
 // parsed by address.js into the concrete data-model fields the store keeps:
@@ -68,6 +69,9 @@ import {
 
 const RESOLVE_DEBOUNCE_MS = 300;
 
+/** Spinner attributes for millisecond fields: step +/- 1000 ms, never negative. */
+const MS_STEP = { step: "1000", min: "0" };
+
 /** Render a stored number as an editor field string ("" for absent). */
 const numStr = (v) => (v === undefined || v === null ? "" : String(v));
 
@@ -82,8 +86,7 @@ export class TunnelEditorDialog {
   #credPicker;
   #jumpPicker;
   #scheduleField; // Feature 150 — the optional per-tunnel schedule section
-  #detailsEl;
-  #typeButtons = {}; // Feature 110 forwarding-type segmented control
+  #typeSelect; // Feature 110 forwarding-type <select>
   #entryField; // the Entry/Remote-bind/SOCKS field wrapper (relabelled per type)
   #exitField; // the Exit/Local-target field wrapper (relabelled per type)
   #exitSection; // hidden for the dynamic (SOCKS) type
@@ -94,8 +97,11 @@ export class TunnelEditorDialog {
   #showErrors = false;
   #existing = []; // other tunnels, for the local-port conflict warning
 
-  // Feature 100 — the "Test resolution" probe (walks the real chain).
+  // Feature 100 — the "Test resolution" probe (walks the real chain). The button
+  // lives in the dialog footer; results show in their own stacked <dialog> popup.
   #resolveBtn;
+  #resolvePopup; // the native <dialog> that shows the probe results
+  #resolveActionBtn; // the popup's Cancel-test / Close button
   #resolveResultsEl;
   #resolveTimer = null;
   #resolveSeq = 0; // guards against a stale debounced check applying late
@@ -134,11 +140,19 @@ export class TunnelEditorDialog {
     this.#scheduleField = new ScheduleEditorField({
       porthippo: this.#porthippo,
       onChange: () => this.#changed(),
+      heading: false, // the "Schedule" tab already labels this section
     });
 
     this.#dialog = new Dialog({
       className: "tunnel-dialog",
       title: t("editor.newTitle"),
+      // The editor is split across four tabs so no single panel runs long.
+      tabs: [
+        { id: "general", label: t("editor.tab.general") },
+        { id: "jumps", label: t("editor.tab.jumps") },
+        { id: "config", label: t("editor.tab.config") },
+        { id: "schedule", label: t("editor.tab.schedule") },
+      ],
       onSubmit: () => this.#save(),
       onCancel: () => this.#dialog.close(),
     });
@@ -154,6 +168,7 @@ export class TunnelEditorDialog {
     await this.#load(null);
     this.#dialog.setTitle(t("editor.newTitle"));
     this.#dialog.open();
+    this.#lockBodyHeight();
   }
 
   /** Open the editor prefilled from an existing definition. */
@@ -161,6 +176,7 @@ export class TunnelEditorDialog {
     await this.#load(def);
     this.#dialog.setTitle(t("editor.editTitle"));
     this.#dialog.open();
+    this.#lockBodyHeight();
   }
 
   /**
@@ -173,7 +189,24 @@ export class TunnelEditorDialog {
     await this.#load({ ...(def || {}), id: undefined, name: "" });
     this.#dialog.setTitle(t("editor.newTitle"));
     this.#dialog.open();
+    this.#lockBodyHeight();
     this.#controls.name?.focus();
+  }
+
+  /**
+   * Fix the body's height to the General tab so the dialog no longer grows/shrinks
+   * when switching tabs — it stays the size the General tab needs. Measured (not a
+   * magic constant), so it fits the content at the current UI font/zoom. General is
+   * the active panel whenever this runs (dialog open / a type change), so its
+   * scrollHeight is the size to lock. A browser-only step: jsdom has no layout, so
+   * a zero measurement leaves the dialog content-sized (the prior behaviour).
+   */
+  #lockBodyHeight() {
+    const body = this.#dialog.body;
+    if (!body) return;
+    body.style.height = ""; // release so scrollHeight reads the natural content
+    const needed = body.scrollHeight;
+    if (needed > 0) body.style.height = `${needed}px`;
   }
 
   // ── Form state ──────────────────────────────────────────────────────────────
@@ -223,26 +256,11 @@ export class TunnelEditorDialog {
     // Existing tunnels for the local-port conflict check.
     this.#existing = (await this.#porthippo?.tunnels?.list?.()) || [];
 
-    // Reveal Advanced up front when the tunnel actually uses any advanced field.
-    this.#detailsEl.open = this.#usesAdvanced();
-
     this.#updateEntryWarning();
     this.#resetProbe();
     this.#runResolveCheck(); // prime the local-resolution warnings for this def
     this.#dialog.clearError();
     applyFieldErrors(this.#dialog.body, {});
-  }
-
-  #usesAdvanced() {
-    return Boolean(
-      this.#form.jumpHostIds.length ||
-      this.#form.keepAlive ||
-      this.#form.autoReconnect ||
-      this.#form.lingerMs !== "" ||
-      this.#form.retryBaseMs !== "" ||
-      this.#form.retryMaxMs !== "" ||
-      this.#form.retryMaxAttempts !== "",
-    );
   }
 
   /**
@@ -348,59 +366,6 @@ export class TunnelEditorDialog {
     this.#entryResolveWarnEl = this.#resolveWarning();
     this.#targetResolveWarnEl = this.#resolveWarning();
 
-    this.#detailsEl = el("details", { class: "editor-advanced" }, [
-      el("summary", {
-        class: "editor-advanced-summary",
-        text: t("editor.advanced"),
-      }),
-      this.#jumpPicker.element,
-      this.#section([
-        field({
-          label: t("editor.linger"),
-          control: this.#input("lingerMs", "10000", "number"),
-          errorKey: "lingerMs",
-          hint: t("editor.linger.hint"),
-        }),
-        this.#check("enabled", t("editor.enabled")),
-        this.#check("keepAlive", t("editor.keepAlive")),
-        this.#check("autoReconnect", t("editor.autoReconnect")),
-      ]),
-      // Feature 130 — the optional per-tunnel reconnect override. Blank inherits
-      // the global Settings → Notifications & reliability policy.
-      this.#section([
-        el("span", { class: "field-label", text: t("editor.retry") }),
-        el("p", { class: "field-hint", text: t("editor.retry.hint") }),
-        field({
-          label: t("editor.retry.baseMs"),
-          control: this.#input(
-            "retryBaseMs",
-            t("editor.retry.inherit"),
-            "number",
-          ),
-          errorKey: "retryBaseMs",
-        }),
-        field({
-          label: t("editor.retry.maxMs"),
-          control: this.#input(
-            "retryMaxMs",
-            t("editor.retry.inherit"),
-            "number",
-          ),
-          errorKey: "retryMaxMs",
-        }),
-        field({
-          label: t("editor.retry.maxAttempts"),
-          control: this.#input(
-            "retryMaxAttempts",
-            t("editor.retry.inherit"),
-            "number",
-          ),
-          errorKey: "retryMaxAttempts",
-        }),
-      ]),
-      this.#buildResolveBlock(),
-    ]);
-
     this.#entryField = field({
       label: t("editor.entryPort"),
       control: this.#input(
@@ -425,13 +390,23 @@ export class TunnelEditorDialog {
     });
     this.#exitSection = this.#section([this.#exitField]);
 
-    this.#dialog.body.append(
-      field({
-        label: t("editor.name"),
-        control: this.#input("name", "e.g. Prod database", "text"),
-        errorKey: "name",
-      }),
-      this.#buildTypeSelector(),
+    // General — the basic tunnel: name, forwarding type, the three address fields,
+    // and the credential. The route-validation block ("Test resolution") lives here
+    // too since it checks the route this tab defines.
+    this.#dialog.tabBody("general").append(
+      // Name (left half) + Forwarding type selector (right half) share one row.
+      el("div", { class: "editor-block editor-name-type" }, [
+        field({
+          label: t("editor.name"),
+          control: this.#input("name", "e.g. Prod database", "text"),
+          errorKey: "name",
+        }),
+        field({
+          label: t("editor.type"),
+          control: this.#buildTypeSelect(),
+        }),
+      ]),
+      el("p", { class: "field-hint editor-type-hint" }),
       this.#section([
         this.#entryField,
         this.#entryWarningEl,
@@ -453,30 +428,84 @@ export class TunnelEditorDialog {
       ]),
       this.#exitSection,
       this.#credPicker.element,
-      this.#detailsEl,
-      this.#scheduleField.element,
     );
+
+    // "Test resolution" sits at the LEFT of the footer; its results open in a
+    // separate stacked popup (built once here).
+    this.#buildResolvePopup();
+    this.#dialog.footerStart.append(this.#buildResolveButton());
+
+    // Jump Hosts — the ordered jump-host chain.
+    this.#dialog.tabBody("jumps").append(this.#jumpPicker.element);
+
+    // Config — idle linger, the option toggles, and the per-tunnel reconnect
+    // override (Feature 130; blank inherits the global policy).
+    this.#dialog.tabBody("config").append(
+      this.#section([
+        field({
+          label: t("editor.linger"),
+          control: this.#input("lingerMs", "10000", "number", MS_STEP),
+          errorKey: "lingerMs",
+          hint: t("editor.linger.hint"),
+        }),
+        this.#check("enabled", t("editor.enabled")),
+        this.#check("keepAlive", t("editor.keepAlive")),
+        this.#check("autoReconnect", t("editor.autoReconnect")),
+      ]),
+      this.#section([
+        el("span", { class: "field-label", text: t("editor.retry") }),
+        el("p", { class: "field-hint", text: t("editor.retry.hint") }),
+        field({
+          label: t("editor.retry.baseMs"),
+          control: this.#input(
+            "retryBaseMs",
+            t("editor.retry.inherit"),
+            "number",
+            MS_STEP,
+          ),
+          errorKey: "retryBaseMs",
+        }),
+        field({
+          label: t("editor.retry.maxMs"),
+          control: this.#input(
+            "retryMaxMs",
+            t("editor.retry.inherit"),
+            "number",
+            MS_STEP,
+          ),
+          errorKey: "retryMaxMs",
+        }),
+        field({
+          label: t("editor.retry.maxAttempts"),
+          control: this.#input(
+            "retryMaxAttempts",
+            t("editor.retry.inherit"),
+            "number",
+          ),
+          errorKey: "retryMaxAttempts",
+        }),
+      ]),
+    );
+
+    // Schedule — the optional time / network auto-arm rule (Feature 150).
+    this.#dialog.tabBody("schedule").append(this.#scheduleField.element);
   }
 
-  /** The forwarding-type segmented control (local / remote / dynamic). */
-  #buildTypeSelector() {
-    const buttons = TYPE_ORDER.map((type) => {
-      const btn = el("button", {
-        type: "button",
-        class: "editor-type-btn",
-        text: t(`editor.type.${type}`),
-        title: t(`editor.type.${type}.desc`),
-        "aria-pressed": "false",
-        onClick: () => this.#onTypeChange(type),
-      });
-      this.#typeButtons[type] = btn;
-      return btn;
-    });
-    return el("div", { class: "editor-block editor-type" }, [
-      el("span", { class: "field-label", text: t("editor.type") }),
-      el("div", { class: "editor-type-row" }, buttons),
-      el("p", { class: "field-hint editor-type-hint" }),
-    ]);
+  /** The forwarding-type selector (local / remote / dynamic) as a <select>. */
+  #buildTypeSelect() {
+    this.#typeSelect = el(
+      "select",
+      {
+        class: "dialog-input editor-input-type",
+        onChange: (e) => this.#onTypeChange(e.target.value),
+      },
+      TYPE_ORDER.map((type) =>
+        el("option", { value: type, text: t(`editor.type.${type}`) }),
+      ),
+    );
+    // Registered like the other controls so #load's generic pass sets its value.
+    this.#controls.type = this.#typeSelect;
+    return this.#typeSelect;
   }
 
   /** Switch the forwarding type: relabel/hide fields, then revalidate. */
@@ -486,21 +515,19 @@ export class TunnelEditorDialog {
     this.#applyType();
     this.#updateEntryWarning();
     this.#changed();
+    // The type governs whether the Exit field shows, so General's height changes;
+    // re-fit the dialog to it (General is the active tab when the type changes).
+    this.#lockBodyHeight();
   }
 
   /**
-   * Reflect the current forwarding type into the UI: press the active button,
-   * relabel the two repurposed address fields, hide the Exit field for dynamic,
-   * and update the type hint.
+   * Reflect the current forwarding type into the UI: relabel the two repurposed
+   * address fields, hide the Exit field for dynamic, and update the type hint. The
+   * <select>'s own value already tracks the type (set by #load / user choice).
    */
   #applyType() {
     const type = this.#form.type;
     const cfg = addressFieldConfig(type);
-    for (const [name, btn] of Object.entries(this.#typeButtons)) {
-      const active = name === type;
-      btn.classList.toggle("editor-type-btn--active", active);
-      btn.setAttribute("aria-pressed", active ? "true" : "false");
-    }
     this.#relabelField(
       this.#entryField,
       cfg.entry,
@@ -534,12 +561,13 @@ export class TunnelEditorDialog {
     return el("div", { class: "editor-block" }, children);
   }
 
-  #input(key, placeholder, type) {
+  #input(key, placeholder, type, extra = {}) {
     const control = el("input", {
       class: `dialog-input editor-input-${key}`,
       type,
       placeholder,
       value: this.#form[key],
+      ...extra, // e.g. { step: "1000", min: "0" } for the millisecond fields
       onInput: (e) => {
         this.#form[key] = e.target.value;
         if (key === "entryAddress") this.#updateEntryWarning();
@@ -574,25 +602,71 @@ export class TunnelEditorDialog {
     return el("p", { class: "editor-resolve-warning", hidden: true });
   }
 
-  #buildResolveBlock() {
+  /** The footer's "Test resolution" button (left-aligned via the dialog's slot). */
+  #buildResolveButton() {
     this.#resolveBtn = el("button", {
       type: "button", // never submit the form
       class: "btn btn--secondary editor-resolve-btn",
       text: t("editor.resolve.test"),
+      title: t("editor.resolve.hint"),
       onClick: () => this.#onTestResolution(),
     });
-    this.#resolveResultsEl = el("div", {
-      class: "editor-resolve-results",
-      hidden: true,
+    return this.#resolveBtn;
+  }
+
+  /**
+   * The results popup — its own native <dialog>, so it stacks in the top layer
+   * ABOVE the (modal) editor rather than behind it like a PopupManager overlay
+   * would. It reuses the editor-dialog chrome (header / body / footer bars). The
+   * one footer button is "Cancel test" while a probe runs, else "Close".
+   */
+  #buildResolvePopup() {
+    this.#resolveResultsEl = el("div", { class: "editor-resolve-results" });
+    this.#resolveActionBtn = el("button", {
+      type: "button",
+      class: "btn btn--secondary",
+      text: t("common.close"),
+      onClick: () => this.#closeResolvePopup(),
     });
-    return el("div", { class: "editor-block editor-resolve" }, [
-      this.#resolveBtn,
-      el("p", {
-        class: "field-hint editor-resolve-hint",
-        text: t("editor.resolve.hint"),
-      }),
-      this.#resolveResultsEl,
-    ]);
+    this.#resolvePopup = el(
+      "dialog",
+      { class: "editor-dialog resolve-popup" },
+      [
+        el("div", { class: "dialog-header" }, [
+          el("h2", { class: "dialog-title", text: t("editor.resolve.test") }),
+        ]),
+        el("div", { class: "dialog-body" }, [this.#resolveResultsEl]),
+        el("div", { class: "dialog-footer" }, [this.#resolveActionBtn]),
+      ],
+    );
+    // Escape closes (and cancels an in-flight probe), like the footer button.
+    this.#resolvePopup.addEventListener("cancel", (e) => {
+      e.preventDefault();
+      this.#closeResolvePopup();
+    });
+  }
+
+  #openResolvePopup() {
+    if (!this.#resolvePopup.isConnected) {
+      document.body.appendChild(this.#resolvePopup);
+    }
+    if (!this.#resolvePopup.open) this.#resolvePopup.showModal();
+  }
+
+  /** Close the results popup, cancelling a still-running probe. */
+  #closeResolvePopup() {
+    if (this.#probeRunning && !this.#probeCancelled) {
+      this.#probeCancelled = true;
+      this.#porthippo?.resolve?.cancel?.();
+    }
+    if (this.#resolvePopup?.open) this.#resolvePopup.close();
+  }
+
+  /** Reflect probe-in-flight state onto the popup's action button. */
+  #setResolveBusy(busy) {
+    this.#resolveActionBtn.textContent = busy
+      ? t("editor.resolve.cancel")
+      : t("common.close");
   }
 
   #scheduleResolveCheck() {
@@ -680,15 +754,12 @@ export class TunnelEditorDialog {
   }
 
   async #onTestResolution() {
-    if (this.#probeRunning) {
-      // The button doubles as Cancel while a test is running.
-      this.#probeCancelled = true;
-      this.#porthippo?.resolve?.cancel?.();
-      return;
-    }
+    if (this.#probeRunning) return; // the footer button is disabled while running
     this.#probeRunning = true;
     this.#probeCancelled = false;
-    this.#resolveBtn.textContent = t("editor.resolve.cancel");
+    this.#resolveBtn.disabled = true;
+    this.#openResolvePopup();
+    this.#setResolveBusy(true);
     this.#renderResolveMessage(t("editor.resolve.testing"));
 
     let result;
@@ -699,9 +770,10 @@ export class TunnelEditorDialog {
     }
 
     this.#probeRunning = false;
-    this.#resolveBtn.textContent = t("editor.resolve.test");
+    this.#resolveBtn.disabled = false;
+    this.#setResolveBusy(false);
     if (this.#probeCancelled) {
-      this.#clearProbeResult();
+      // The user cancelled (footer/Escape/Close already tore the popup down).
       return;
     }
     if (!result || result.__hippoError) {
@@ -718,7 +790,6 @@ export class TunnelEditorDialog {
 
   #renderProbeResult(result) {
     clear(this.#resolveResultsEl);
-    this.#resolveResultsEl.hidden = false;
     this.#resolveResultsEl.append(
       el("p", {
         class: `editor-resolve-summary${result.ok ? "" : " editor-resolve-summary--warn"}`,
@@ -775,7 +846,6 @@ export class TunnelEditorDialog {
 
   #renderResolveMessage(text, warn = false) {
     clear(this.#resolveResultsEl);
-    this.#resolveResultsEl.hidden = false;
     this.#resolveResultsEl.append(
       el("p", {
         class: `editor-resolve-summary${warn ? " editor-resolve-summary--warn" : ""}`,
@@ -787,17 +857,15 @@ export class TunnelEditorDialog {
   #clearProbeResult() {
     if (this.#probeRunning) return; // never wipe an in-flight run's status
     clear(this.#resolveResultsEl);
-    this.#resolveResultsEl.hidden = true;
   }
 
+  /** Reset the probe between opens: cancel + close the popup, re-enable the button. */
   #resetProbe() {
-    if (this.#probeRunning) this.#porthippo?.resolve?.cancel?.();
+    this.#closeResolvePopup();
     this.#probeRunning = false;
     this.#probeCancelled = false;
-    if (this.#resolveBtn)
-      this.#resolveBtn.textContent = t("editor.resolve.test");
+    if (this.#resolveBtn) this.#resolveBtn.disabled = false;
     clear(this.#resolveResultsEl);
-    this.#resolveResultsEl.hidden = true;
   }
 
   // ── Behaviour ─────────────────────────────────────────────────────────────
@@ -920,8 +988,7 @@ export class TunnelEditorDialog {
     this.#showErrors = true;
     const errors = this.#revalidate();
     if (Object.keys(errors).length > 0) {
-      // Open Advanced if the only remaining problems live inside it.
-      if (this.#hasAdvancedError(errors)) this.#detailsEl.open = true;
+      this.#focusErrorTab(errors);
       return;
     }
 
@@ -941,7 +1008,7 @@ export class TunnelEditorDialog {
       if (result.errors) {
         const mapped = this.#mapConcreteErrors(result.errors);
         applyFieldErrors(this.#dialog.body, mapped);
-        if (this.#hasAdvancedError(mapped)) this.#detailsEl.open = true;
+        this.#focusErrorTab(mapped);
       }
       this.#dialog.showError(
         t("editor.saveError", { message: result.message || result.code || "" }),
@@ -953,12 +1020,24 @@ export class TunnelEditorDialog {
     this.#onSaved?.(result);
   }
 
-  #hasAdvancedError(errors) {
-    return Object.keys(errors).some(
-      (k) =>
-        k === "lingerMs" ||
-        k.startsWith("jumpHostIds") ||
-        k.startsWith("retry"),
+  /** The tab that owns a (remapped) validation-error key. */
+  #tabForErrorKey(key) {
+    if (key.startsWith("schedule")) return "schedule";
+    if (key.startsWith("jumpHostIds")) return "jumps";
+    if (key === "lingerMs" || key.startsWith("retry")) return "config";
+    return "general"; // name / type / the three address fields / credential
+  }
+
+  /**
+   * Reveal the tab that owns the failing fields so a validation error is never
+   * hidden behind an inactive tab. General problems win over later tabs.
+   */
+  #focusErrorTab(errors) {
+    const owned = new Set(
+      Object.keys(errors).map((k) => this.#tabForErrorKey(k)),
     );
+    const order = ["general", "jumps", "config", "schedule"];
+    const target = order.find((tab) => owned.has(tab));
+    if (target) this.#dialog.showTab(target);
   }
 }

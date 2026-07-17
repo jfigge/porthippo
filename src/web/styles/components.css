@@ -381,9 +381,12 @@
 
 /* ── Editor dialogs (native <dialog>, Feature 45) ─────────────────────────── */
 .editor-dialog {
-  width: min(520px, calc(100vw - 2 * var(--space-4)));
-  max-width: 520px;
+  /* Sized in rem (1rem = --font-size) so the dialog scales with the UI font. */
+  width: min(40rem, calc(100vw - 2 * var(--space-4)));
+  max-width: 40rem;
+  max-height: calc(100vh - 2 * var(--space-5));
   padding: 0;
+  overflow: hidden; /* clip the header/footer bars to the rounded corners */
   border: 1px solid var(--color-overlay);
   border-radius: var(--radius-lg);
   background: var(--color-surface-0);
@@ -391,12 +394,28 @@
   box-shadow: var(--shadow-1);
 }
 
+/* Only the OPEN dialog is a flex column. Applying `display:flex` unconditionally
+   would override the UA's `dialog:not([open]) { display:none }`, leaving a closed
+   (but DOM-mounted) editor permanently visible in the page. */
+.editor-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+
 .editor-dialog::backdrop {
   background: rgba(0, 0, 0, 0.5);
 }
 
+/* Pinned header bar (matches the Settings dialog). */
 .dialog-header {
-  padding: var(--space-4) var(--space-4) 0;
+  flex-shrink: 0;
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-base);
+  border-bottom: 1px solid var(--color-overlay);
+}
+/* With a tab strip the tabs provide the separator, so the header drops its own. */
+.editor-dialog:has(.dialog-tabs) .dialog-header {
+  border-bottom: none;
 }
 
 .dialog-title {
@@ -405,19 +424,55 @@
   font-weight: 600;
 }
 
+/* The form fills the space below the header so its body can scroll while the tab
+   strip and footer stay pinned. */
 .dialog-form {
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
 
+/* Horizontal tab strip. */
+.dialog-tabs {
+  flex-shrink: 0;
+  display: flex;
+  gap: var(--space-2);
+  padding: 0 var(--space-4);
+  background: var(--color-base);
+  border-bottom: 1px solid var(--color-overlay);
+}
+.dialog-tab {
+  padding: var(--space-2) var(--space-1);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--color-subtext);
+  font-size: 13px;
+  cursor: pointer;
+}
+.dialog-tab:hover {
+  color: var(--color-text);
+}
+.dialog-tab--active {
+  color: var(--color-text);
+  border-bottom-color: var(--color-accent);
+  font-weight: 600;
+}
+.dialog-tab-panel[hidden] {
+  display: none;
+}
+
 .dialog-body {
+  flex: 1 1 auto;
+  min-height: 0;
   padding: var(--space-3) var(--space-4);
-  max-height: 70vh;
   overflow: auto;
 }
 
 .dialog-error {
-  margin: 0 var(--space-4);
+  flex-shrink: 0;
+  margin: var(--space-2) var(--space-4);
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--color-danger);
   border-radius: var(--radius-sm);
@@ -426,11 +481,22 @@
   color: var(--color-danger);
 }
 
+/* Pinned footer bar (matches the Settings dialog). */
 .dialog-footer {
+  flex-shrink: 0;
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   gap: var(--space-2);
-  padding: var(--space-3) var(--space-4) var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-base);
+  border-top: 1px solid var(--color-overlay);
+}
+/* Left-aligned footer actions; the auto margin pushes Cancel/Save to the right. */
+.dialog-footer-start {
+  display: flex;
+  gap: var(--space-2);
+  margin-right: auto;
 }
 
 /* Inputs inside a dialog mirror the .field input styling. */
@@ -466,35 +532,18 @@
   margin-bottom: var(--space-1);
 }
 
-/* Forwarding-type segmented control (Feature 110). */
-.editor-type-row {
+/* Name (left) + Forwarding-type <select> (right) share one row, each half-width. */
+.editor-name-type {
   display: flex;
-  gap: var(--space-1);
-  margin: var(--space-1) 0 var(--space-2);
+  gap: var(--space-3);
+  align-items: flex-start;
+}
+.editor-name-type > .field {
+  flex: 1 1 0;
+  min-width: 0;
 }
 
-.editor-type-btn {
-  flex: 1;
-  padding: var(--space-2);
-  border: 1px solid var(--color-overlay);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface-0);
-  color: var(--color-muted);
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.editor-type-btn:hover {
-  color: var(--color-text);
-}
-
-.editor-type-btn--active {
-  border-color: var(--color-accent);
-  background: var(--color-surface-1);
-  color: var(--color-text);
-  font-weight: 600;
-}
-
+/* The forwarding-type description, shown full-width under the Name/Type row. */
 .editor-type-hint {
   margin: 0 0 var(--space-2);
 }
@@ -649,30 +698,12 @@
   color: var(--color-warning);
 }
 
-/* Test-resolution block (Feature 100): the button, its hint, and the per-hop
-   result list the probe returns. */
-.editor-resolve {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-
-.editor-resolve-btn {
-  align-self: flex-start;
-}
-
-.editor-resolve-hint {
-  margin: 0;
-}
-
+/* Test-resolution (Feature 100): the footer button + the per-hop result list the
+   probe returns, shown in its own stacked results popup. */
 .editor-resolve-results {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
-  padding: var(--space-2);
-  border: 1px solid var(--color-overlay);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface-0);
 }
 
 .editor-resolve-summary {
@@ -704,23 +735,6 @@
 
 .editor-resolve-row--fail .editor-resolve-row-status {
   color: var(--color-warning);
-}
-
-/* Advanced disclosure (native <details>). */
-.editor-advanced {
-  margin-top: var(--space-2);
-  padding-top: var(--space-3);
-  border-top: 1px solid var(--color-overlay);
-}
-
-.editor-advanced-summary {
-  margin-bottom: var(--space-3);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.5px;
-  text-transform: uppercase;
-  color: var(--color-muted);
-  cursor: pointer;
 }
 
 /* ── Pickers (credential / jump-host) ─────────────────────────────────────── */
