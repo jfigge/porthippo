@@ -46,9 +46,11 @@ done
 
 ## Notes / limitations
 
-- Uses the **dark** theme and a fixed 1280×820 viewport (captured at 2× → 2560×1640
-  originals), seeded by `seed.mjs`. Keep these fixed so the guide stays visually
-  consistent across re-captures.
+- Uses the **dark** theme and a fixed **1280×800** viewport captured at 2× →
+  **2560×1600** originals; the bundled 50% copies are exactly **1280×800**. Both
+  sizes are valid **Mac App Store** screenshot dimensions (16:10), so the same
+  captures serve the guide and a store listing. Keep these fixed so the guide stays
+  visually consistent across re-captures.
 - `settings.armOnLaunch` is seeded **false** so launching binds no local listeners.
   `capture.mjs` then arms the tunnels it wants shown as **Listening** (amber) — this
   only binds the local port; it never opens a real SSH connection (the demo hosts

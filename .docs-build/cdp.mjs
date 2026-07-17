@@ -82,7 +82,9 @@ export class CDP {
     return r.result.value;
   }
   // Lock the rendered viewport to a fixed size for deterministic, crisp shots.
-  async setViewport(width = 1280, height = 820, scale = 2) {
+  // Default 1280×800 @2× → 2560×1600 — both are valid Mac App Store screenshot
+  // sizes (16:10), so the same captures serve the guide and a store listing.
+  async setViewport(width = 1280, height = 800, scale = 2) {
     await this.send("Emulation.setDeviceMetricsOverride", {
       width,
       height,

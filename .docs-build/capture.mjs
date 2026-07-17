@@ -12,7 +12,8 @@ import { CDP } from "./cdp.mjs";
 
 const only = process.argv.slice(2);
 const cdp = await CDP.connect();
-await cdp.setViewport(1280, 820, 2);
+// 1280×800 @2× → 2560×1600 originals; both are valid Mac App Store sizes (16:10).
+await cdp.setViewport(1280, 800, 2);
 const J = JSON.stringify;
 
 // Seeded tunnel ids (must match seed.mjs).
