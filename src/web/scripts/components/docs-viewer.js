@@ -58,6 +58,7 @@ const PAGES = [
   { slug: "import-export", title: "Import & Export" },
   { slug: "monitoring", title: "Monitoring & Pause" },
   { slug: "tray-and-background", title: "Tray & Background" },
+  { slug: "scheduling", title: "Scheduling" },
   { slug: "security", title: "Security" },
   { slug: "troubleshooting", title: "Troubleshooting" },
 ];

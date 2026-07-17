@@ -32,6 +32,7 @@
 import { el, clear } from "../dom.js";
 import { t } from "../i18n.js";
 import { icons } from "../icons.js";
+import { newScheduleBadge, renderScheduleBadge } from "./schedule-badge.js";
 import {
   buildSections,
   sectionRollup,
@@ -309,6 +310,9 @@ export class TunnelList {
   #buildRow(def, section) {
     const state = this.#states.get(def.id) || "disarmed";
     const signal = buildSignal(state);
+    // Feature 150: a scheduled tunnel is badged with its next transition; the
+    // holder is empty (and hidden) when the tunnel isn't governed.
+    const sched = newScheduleBadge(def.id);
 
     // Edit, delete and the other row actions all live on the row's right-click
     // context menu (owned by TunnelsView), so the row carries no inline buttons.
@@ -345,10 +349,16 @@ export class TunnelList {
           class: "tunnel-row-name",
           text: def.name || t("def.unnamed"),
         }),
+        sched,
       ],
     );
 
-    return { root, signal, sectionId: section ? section.id : null };
+    return { root, signal, sched, sectionId: section ? section.id : null };
+  }
+
+  /** Refresh every row's schedule badge from the store (Feature 150). */
+  applySchedule() {
+    for (const [id, rec] of this.#rows) renderScheduleBadge(rec.sched, id);
   }
 
   #buildGroupHeader(section) {

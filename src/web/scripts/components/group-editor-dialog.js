@@ -24,6 +24,7 @@ import { el } from "../dom.js";
 import { field, applyFieldErrors } from "../field.js";
 import { t } from "../i18n.js";
 import { Dialog } from "../dialog.js";
+import { ScheduleEditorField } from "./schedule-editor-field.js";
 import {
   GROUP_COLORS,
   DEFAULT_GROUP_COLOR,
@@ -41,6 +42,7 @@ export class GroupEditorDialog {
   #labelInput;
   #swatchesEl;
   #swatchButtons = new Map(); // color key → its <button>
+  #scheduleField; // Feature 150 — the group's schedule (inherited by its members)
 
   /**
    * @param {object} [opts]
@@ -50,6 +52,11 @@ export class GroupEditorDialog {
   constructor({ porthippo, onSaved } = {}) {
     this.#porthippo = porthippo || window.porthippo;
     this.#onSaved = onSaved;
+
+    this.#scheduleField = new ScheduleEditorField({
+      porthippo: this.#porthippo,
+      onChange: () => this.#dialog.clearError(),
+    });
 
     this.#dialog = new Dialog({
       className: "group-dialog",
@@ -88,13 +95,18 @@ export class GroupEditorDialog {
       color: GROUP_COLORS.includes(g.color) ? g.color : DEFAULT_GROUP_COLOR,
     };
     this.#labelInput.value = this.#form.label;
+    this.#scheduleField.setValue(g.schedule);
     this.#syncSwatches();
     applyFieldErrors(this.#dialog.body, {});
     this.#dialog.clearError();
   }
 
   buildPayload() {
-    return { label: this.#form.label.trim(), color: this.#form.color };
+    const payload = { label: this.#form.label.trim(), color: this.#form.color };
+    // Feature 150 — the group's schedule, inherited by members without their own.
+    const schedule = this.#scheduleField.value;
+    if (schedule) payload.schedule = schedule;
+    return payload;
   }
 
   // ── Rendering ───────────────────────────────────────────────────────────────
@@ -139,6 +151,7 @@ export class GroupEditorDialog {
         control: this.#swatchesEl,
         errorKey: "color",
       }),
+      this.#scheduleField.element,
     );
     this.#syncSwatches();
   }

@@ -62,6 +62,9 @@ const DEFAULTS = Object.freeze({
   reconnectBaseMs: 1000, // reconnect backoff base (first delay)
   reconnectMaxMs: 30000, // reconnect backoff ceiling
   reconnectMaxAttempts: 6, // attempts before a non-held-open tunnel gives up
+
+  // ── Feature 150: scheduling & connectivity-aware auto-arm ─────────────────
+  schedulingEnabled: false, // master switch: honour per-tunnel/group schedules
 });
 
 class SettingsStore {

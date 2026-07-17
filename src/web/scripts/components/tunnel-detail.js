@@ -36,6 +36,7 @@ import {
 import { CardMenu } from "./card-menu.js";
 import { CardCanvas } from "./card-canvas.js";
 import { typeIcon } from "./tunnel-list.js";
+import { newScheduleBadge, renderScheduleBadge } from "./schedule-badge.js";
 
 /** Armed = the engine holds this tunnel (anything but disarmed / error). */
 function isArmed(state) {
@@ -56,6 +57,7 @@ export class TunnelDetail {
   #def = null;
   #state = "disarmed";
   #snap = null;
+  #schedBadge = null; // the breadcrumb's schedule badge (Feature 150)
   #jumpsById = new Map();
   #visible = [...DEFAULT_CARD_ORDER]; // ordered VISIBLE card keys
   #layout = null; // this tunnel's stored {col,row} map (from show())
@@ -203,6 +205,13 @@ export class TunnelDetail {
     this.#updateValues();
   }
 
+  /** Refresh the breadcrumb's schedule badge from the store (Feature 150). */
+  applySchedule() {
+    if (this.#schedBadge && this.#def) {
+      renderScheduleBadge(this.#schedBadge, this.#def.id);
+    }
+  }
+
   // ── Rendering ─────────────────────────────────────────────────────────────
 
   #renderAll() {
@@ -258,6 +267,9 @@ export class TunnelDetail {
   #renderBreadcrumb() {
     clear(this.#breadcrumbEl);
     this.#breadcrumbEl.appendChild(typeIcon(this.#def));
+    // Feature 150: badge a scheduled tunnel with its next transition.
+    this.#schedBadge = newScheduleBadge(this.#def?.id);
+    this.#breadcrumbEl.appendChild(this.#schedBadge);
     const segs = this.#routeSegments();
     segs.forEach((seg, i) => {
       if (i > 0) {

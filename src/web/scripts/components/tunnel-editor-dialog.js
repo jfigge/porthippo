@@ -50,6 +50,7 @@ import {
 } from "../address.js";
 import { CredentialPickerField } from "./credential-picker-field.js";
 import { JumpHostPickerField } from "./jump-host-picker-field.js";
+import { ScheduleEditorField } from "./schedule-editor-field.js";
 import {
   LOOPBACKS,
   TYPE_ORDER,
@@ -80,6 +81,7 @@ export class TunnelEditorDialog {
   #controls = {};
   #credPicker;
   #jumpPicker;
+  #scheduleField; // Feature 150 — the optional per-tunnel schedule section
   #detailsEl;
   #typeButtons = {}; // Feature 110 forwarding-type segmented control
   #entryField; // the Entry/Remote-bind/SOCKS field wrapper (relabelled per type)
@@ -127,6 +129,10 @@ export class TunnelEditorDialog {
     this.#jumpPicker = new JumpHostPickerField({
       porthippo: this.#porthippo,
       openKeyFile,
+      onChange: () => this.#changed(),
+    });
+    this.#scheduleField = new ScheduleEditorField({
+      porthippo: this.#porthippo,
       onChange: () => this.#changed(),
     });
 
@@ -211,6 +217,8 @@ export class TunnelEditorDialog {
     await Promise.all([this.#credPicker.load(), this.#jumpPicker.load()]);
     this.#credPicker.setValue(this.#form.credentialId);
     this.#jumpPicker.setValue(this.#form.jumpHostIds);
+    // Feature 150 — the optional per-tunnel schedule (absent ⇒ not scheduled).
+    this.#scheduleField.setValue(d.schedule);
 
     // Existing tunnels for the local-port conflict check.
     this.#existing = (await this.#porthippo?.tunnels?.list?.()) || [];
@@ -274,6 +282,11 @@ export class TunnelEditorDialog {
     // blank so the tunnel inherits the global policy.
     const retry = buildRetryOverride(this.#form);
     if (retry) payload.retry = retry;
+
+    // Feature 150 — the optional schedule (all types); omitted when the user has
+    // enabled neither a time nor a network condition.
+    const schedule = this.#scheduleField.value;
+    if (schedule) payload.schedule = schedule;
 
     if (type === "dynamic") {
       // Entry slot = the local SOCKS listener. No destination.
@@ -441,6 +454,7 @@ export class TunnelEditorDialog {
       this.#exitSection,
       this.#credPicker.element,
       this.#detailsEl,
+      this.#scheduleField.element,
     );
   }
 

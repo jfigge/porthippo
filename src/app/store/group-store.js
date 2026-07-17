@@ -98,6 +98,10 @@ class GroupStore {
     if (i === -1) throw io.notFoundError(`group not found: ${id}`);
 
     const merged = applyDefaults({ ...doc.groups[i], ...patch, id });
+    // Feature 150: the schedule is authoritative — the editor sends a complete
+    // group, so a `schedule` absent from `patch` was turned off by the user; drop
+    // it rather than inherit the stale stored rule through the shallow merge.
+    if (!("schedule" in patch)) delete merged.schedule;
     const { valid, errors } = validateGroup(merged);
     if (!valid) throw invalidGroupError(errors);
 

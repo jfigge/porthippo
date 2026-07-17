@@ -77,6 +77,34 @@ test("create stamps id + defaults and returns a view with order + summary", () =
   }
 });
 
+test("a schedule (Feature 150) round-trips and clears when a later update omits it", () => {
+  const dir = freshDir();
+  try {
+    const stores = new Stores(dir);
+    const ts = stores.tunnelStore();
+    const cred = makeCred(stores.credentialStore());
+    const schedule = {
+      time: { days: [1, 2, 3, 4, 5], start: "09:00", end: "17:00" },
+      network: { ssids: ["Home"] },
+    };
+
+    const created = ts.create(makeDef(cred.id, { schedule }));
+    assert.deepEqual(created.schedule, schedule);
+    assert.deepEqual(ts.get(created.id).schedule, schedule); // persisted
+
+    // A full-payload update that still carries the schedule keeps it.
+    const kept = ts.update(created.id, makeDef(cred.id, { schedule }));
+    assert.deepEqual(kept.schedule, schedule);
+
+    // A full-payload update that OMITS it clears it (schedule is authoritative).
+    const cleared = ts.update(created.id, makeDef(cred.id));
+    assert.equal(cleared.schedule, undefined);
+    assert.equal(ts.get(created.id).schedule, undefined);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("a tunnel record carries no secret; the credential holds the sealed one", () => {
   const dir = freshDir();
   try {

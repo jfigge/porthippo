@@ -39,6 +39,7 @@ import {
 } from "./card-catalog.js";
 import { CardMenu } from "./card-menu.js";
 import { signalLamp, buildSignal, typeIcon } from "./tunnel-list.js";
+import { newScheduleBadge, renderScheduleBadge } from "./schedule-badge.js";
 import {
   buildSections,
   sectionRollup,
@@ -268,6 +269,11 @@ export class TunnelTable {
     this.#updateControls();
   }
 
+  /** Refresh every row's schedule badge from the store (Feature 150). */
+  applySchedule() {
+    for (const [id, rec] of this.#rowNodes) renderScheduleBadge(rec.sched, id);
+  }
+
   // ── Rendering ──────────────────────────────────────────────────────────────
 
   /** The active sort, falling back to identity if the key isn't a live column. */
@@ -391,6 +397,8 @@ export class TunnelTable {
   #buildRow(def, section) {
     const id = def.id;
     const signal = buildSignal(this.#states.get(id) || "disarmed");
+    // Feature 150: the scheduled-tunnel badge (empty/hidden when not governed).
+    const sched = newScheduleBadge(id);
     // Row actions (edit, delete, …) all live on the right-click context menu, so
     // the identity cell carries no inline buttons.
     const identityCell = el("td", { class: "tt-td tt-td--identity" }, [
@@ -401,6 +409,7 @@ export class TunnelTable {
           class: "tunnel-row-name",
           text: def.name || t("def.unnamed"),
         }),
+        sched,
       ]),
     ]);
 
@@ -444,7 +453,7 @@ export class TunnelTable {
       [identityCell, ...metricCells],
     );
 
-    return { tr, signal, cells, sectionId: section ? section.id : null };
+    return { tr, signal, sched, cells, sectionId: section ? section.id : null };
   }
 
   /** A group section header spanning the whole table (Feature 140). */

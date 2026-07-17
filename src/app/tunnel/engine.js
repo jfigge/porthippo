@@ -59,6 +59,7 @@ class TunnelEngine {
   #getStores;
   #broadcast;
   #knownHostsFile;
+  #getManagedIds;
 
   #tunnels = new Map();
   #prompts = new Map(); // promptId → { resolve } for pending host-key decisions
@@ -75,11 +76,26 @@ class TunnelEngine {
    * @param {(channel: string, payload: object) => void} [deps.broadcast]
    * @param {string} [deps.knownHostsFile]  override the OpenSSH known_hosts path
    *        (defaults to the user's `~/.ssh/known_hosts`); used by tests.
+   * @param {() => Set<string>} [deps.getManagedIds]  the ids currently owned by the
+   *        Feature 150 scheduler. `reconcile`/`reconcileAll` never arm these — their
+   *        armed state is the scheduler's to own — so a store write / unlock can't
+   *        arm a tunnel the schedule wants disarmed. Defaults to "none managed".
    */
-  constructor({ getStores, broadcast, knownHostsFile }) {
+  constructor({ getStores, broadcast, knownHostsFile, getManagedIds }) {
     this.#getStores = getStores;
     this.#broadcast = broadcast;
     this.#knownHostsFile = knownHostsFile;
+    this.#getManagedIds = getManagedIds || (() => new Set());
+  }
+
+  /** The scheduler-managed id set, coerced + fail-safe to empty. */
+  #managedIds() {
+    try {
+      const set = this.#getManagedIds();
+      return set instanceof Set ? set : new Set(set || []);
+    } catch {
+      return new Set();
+    }
   }
 
   // ── Public control surface (IPC-facing; these never throw for expected cases) ──
@@ -189,11 +205,19 @@ class TunnelEngine {
     return this.#tunnels.get(id)?.events() ?? [];
   }
 
-  /** Arm every enabled definition (startup). */
-  async armAll() {
+  /**
+   * Arm every enabled definition (startup). An optional `skip` set of ids is left
+   * untouched — the caller uses it to hand those ids to another owner (Feature 150
+   * hands scheduled tunnels to the scheduler); the engine stays unaware of *why*.
+   *
+   * @param {object} [opts]
+   * @param {Set<string>} [opts.skip]
+   */
+  async armAll({ skip } = {}) {
     const defs = this.#getStores().tunnelStore().listDecrypted();
     for (const def of defs) {
       if (!def.enabled) continue;
+      if (skip && skip.has(def.id)) continue;
       try {
         await this.arm(def.id);
       } catch (err) {
@@ -216,8 +240,17 @@ class TunnelEngine {
    * Re-read a definition after a store write and reconcile the running tunnel:
    * deleted → dispose; new + enabled → arm; existing → apply the edit in place
    * (idle re-arm now, active → pending); newly enabled while disarmed → arm.
+   *
+   * A tunnel the scheduler MANAGES (Feature 150) is never armed here — its armed
+   * state belongs to the scheduler — so this applies edits / disposal but leaves
+   * arming to it. Every caller (store afterWrite, refs write, import, unlock,
+   * reconcileAll) gets this for free via the injected managed-id set.
+   *
+   * @param {string} id
+   * @param {Set<string>} [managed]  the scheduler-managed ids (computed if absent)
    */
-  async reconcile(id) {
+  async reconcile(id, managed) {
+    const m = managed || this.#managedIds();
     const def = this.#getStores().tunnelStore().getDecrypted(id);
     const tunnel = this.#tunnels.get(id);
 
@@ -236,12 +269,14 @@ class TunnelEngine {
     }
 
     if (!tunnel) {
-      if (def.enabled) await this.arm(id);
+      if (def.enabled && !m.has(id)) await this.arm(id);
       return;
     }
 
     tunnel.applyDefinition(def);
-    if (def.enabled && tunnel.state === "disarmed") await tunnel.arm();
+    if (def.enabled && tunnel.state === "disarmed" && !m.has(id)) {
+      await tunnel.arm();
+    }
   }
 
   /**
@@ -251,10 +286,11 @@ class TunnelEngine {
    * Best-effort per tunnel: one failure never aborts the sweep.
    */
   async reconcileAll() {
+    const managed = this.#managedIds(); // compute once for the whole sweep
     const defs = this.#getStores().tunnelStore().list();
     for (const def of defs) {
       try {
-        await this.reconcile(def.id);
+        await this.reconcile(def.id, managed);
       } catch (err) {
         console.error(
           `[engine] reconcile ${def.id} failed:`,

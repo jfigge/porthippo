@@ -517,6 +517,127 @@
   color: var(--color-text);
 }
 
+/* ── Schedule section (Feature 150) — shared by the tunnel + group editors ── */
+.schedule-editor {
+  margin-top: var(--space-2);
+}
+.schedule-cond {
+  margin: var(--space-2) 0;
+}
+.schedule-cond-label {
+  margin-bottom: var(--space-1);
+}
+/* The revealed detail sits indented under its condition checkbox. */
+.schedule-cond-body {
+  margin: var(--space-2) 0 var(--space-3) var(--space-4);
+  padding-left: var(--space-3);
+  border-left: 2px solid var(--color-surface-1);
+}
+.schedule-cond-body[hidden] {
+  display: none;
+}
+
+.schedule-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+}
+.schedule-day-btn {
+  min-width: 42px;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-overlay);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-0);
+  color: var(--color-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.schedule-day-btn:hover {
+  color: var(--color-text);
+}
+.schedule-day-btn--on {
+  border-color: var(--color-accent);
+  background: var(--color-surface-1);
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.schedule-times,
+.schedule-reach {
+  display: flex;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+.schedule-times .field {
+  flex: 1;
+}
+.schedule-reach .field:first-child {
+  flex: 2;
+}
+.schedule-reach .field:last-child {
+  flex: 1;
+}
+.schedule-time-input {
+  width: 100%;
+}
+
+.schedule-ssid-builder {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.schedule-ssids {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  min-height: 22px;
+  align-items: center;
+}
+.schedule-ssids-empty {
+  margin: 0;
+}
+.schedule-ssid-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-1) 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-1);
+  color: var(--color-text);
+  font-size: 12px;
+}
+.schedule-ssid-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-muted);
+  cursor: pointer;
+  transform: rotate(45deg); /* the "+" glyph reads as an × */
+}
+.schedule-ssid-chip-remove:hover {
+  color: var(--color-text);
+}
+.schedule-ssid-chip-remove svg {
+  width: 13px;
+  height: 13px;
+}
+.schedule-ssid-row {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.schedule-ssid-input {
+  flex: 1;
+  min-width: 140px;
+}
+.schedule-ssid-note {
+  margin: 0;
+  color: var(--color-warning);
+}
+
 .editor-bind-warning,
 .editor-port-warning,
 .editor-resolve-warning {
@@ -1693,6 +1814,45 @@
 .tt-row:hover .tunnel-type-icon,
 .tt-row--selected .tunnel-type-icon {
   color: var(--color-text);
+}
+
+/* Scheduled-tunnel badge (Feature 150): a small clock + next transition, pinned
+   after the (truncating) name in the list row, table row, and detail breadcrumb. */
+.tunnel-schedule-badge {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: var(--space-1);
+  color: var(--color-subtext);
+  font-size: 0.85em;
+  line-height: 1;
+  white-space: nowrap;
+}
+.tunnel-schedule-badge[hidden] {
+  display: none;
+}
+.tunnel-schedule-badge svg {
+  width: 1em;
+  height: 1em;
+}
+.tunnel-schedule-badge-text {
+  font-variant-numeric: tabular-nums;
+}
+.tunnel-schedule-badge--overridden {
+  color: var(--color-warning);
+}
+.tunnel-row:hover .tunnel-schedule-badge,
+.tunnel-row--selected .tunnel-schedule-badge,
+.tt-row:hover .tunnel-schedule-badge,
+.tt-row--selected .tunnel-schedule-badge {
+  color: var(--color-text);
+}
+.tunnel-row:hover .tunnel-schedule-badge--overridden,
+.tunnel-row--selected .tunnel-schedule-badge--overridden,
+.tt-row:hover .tunnel-schedule-badge--overridden,
+.tt-row--selected .tunnel-schedule-badge--overridden {
+  color: var(--color-warning);
 }
 
 .tunnel-add-btn svg,

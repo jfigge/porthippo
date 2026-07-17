@@ -81,6 +81,7 @@ export class TunnelsView {
   #onStats;
   #onTunnelState;
   #onSetMode;
+  #onScheduleUpdated;
 
   constructor({ porthippo, openKeyFile, now } = {}) {
     this.#porthippo = porthippo || window.porthippo;
@@ -187,6 +188,9 @@ export class TunnelsView {
 
     this.#onStats = (e) => this.#applyStats(e.detail);
     this.#onTunnelState = (e) => this.#applyState(e.detail);
+    // Feature 150: the scheduler re-evaluated — refresh the row schedule badges in
+    // place (no full re-render, so scroll/selection are untouched).
+    this.#onScheduleUpdated = () => this.#applySchedule();
     // The view-mode toggle lives in the app header; it broadcasts the intent
     // and we echo the resolved mode back so the toggle's glyph/hint stays in sync.
     this.#onSetMode = (e) => this.#setMode(e.detail && e.detail.mode);
@@ -197,6 +201,17 @@ export class TunnelsView {
     window.addEventListener("porthippo:tunnel-state", this.#onTunnelState);
     window.addEventListener("porthippo:set-detail-mode", this.#onSetMode);
     window.addEventListener("porthippo:groups-changed", this.#onGroupsChanged);
+    window.addEventListener(
+      "porthippo:schedule-updated",
+      this.#onScheduleUpdated,
+    );
+  }
+
+  /** Refresh the schedule badge on every row + the detail breadcrumb. */
+  #applySchedule() {
+    this.#list.applySchedule();
+    this.#table.applySchedule();
+    this.#detail.applySchedule();
   }
 
   get element() {
@@ -285,6 +300,10 @@ export class TunnelsView {
     window.removeEventListener(
       "porthippo:groups-changed",
       this.#onGroupsChanged,
+    );
+    window.removeEventListener(
+      "porthippo:schedule-updated",
+      this.#onScheduleUpdated,
     );
     this.#resizer.destroy();
     this.#listResizer.destroy();

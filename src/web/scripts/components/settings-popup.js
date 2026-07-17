@@ -287,6 +287,13 @@ export class SettingsPopup {
         "settings.behaviour.confirmOnQuit",
         "settings.behaviour.confirmOnQuit.hint",
       ),
+      // Feature 150 — the scheduling master switch. Off by default; per-tunnel /
+      // per-group schedules only take effect while this is on.
+      this.#check(
+        "setting-schedulingEnabled",
+        "settings.behaviour.scheduling",
+        "settings.behaviour.scheduling.hint",
+      ),
     ]);
   }
 
@@ -459,6 +466,10 @@ export class SettingsPopup {
       this.#get("setting-armOnLaunch").checked = Boolean(s.armOnLaunch);
     if (s.confirmOnQuit !== undefined)
       this.#get("setting-confirmOnQuit").checked = Boolean(s.confirmOnQuit);
+    if (s.schedulingEnabled !== undefined)
+      this.#get("setting-schedulingEnabled").checked = Boolean(
+        s.schedulingEnabled,
+      );
     // Feature 130 — notifications & reliability.
     if (s.notificationsEnabled !== undefined)
       this.#get("setting-notificationsEnabled").checked = Boolean(
@@ -507,6 +518,7 @@ export class SettingsPopup {
       startMinimized: this.#get("setting-startMinimized").checked,
       armOnLaunch: this.#get("setting-armOnLaunch").checked,
       confirmOnQuit: this.#get("setting-confirmOnQuit").checked,
+      schedulingEnabled: this.#get("setting-schedulingEnabled").checked,
       // Feature 130 — notifications & reliability (defaults mirror settings-store).
       notificationsEnabled: this.#get("setting-notificationsEnabled").checked,
       notifyOnDrop: this.#get("setting-notifyOnDrop").checked,

@@ -84,6 +84,33 @@ const DEF_FIXTURES = [
   def({ groupId: null }),
   def({ groupId: "" }),
   def({ groupId: 5 }),
+  // Feature 150 — optional scheduling rule (time window and/or network trigger).
+  def({
+    schedule: { time: { days: [1, 2, 3, 4, 5], start: "09:00", end: "17:00" } },
+  }),
+  def({ schedule: { network: { ssids: ["Home"] } } }),
+  def({ schedule: { network: { reach: { host: "10.0.0.1", port: 22 } } } }),
+  def({
+    schedule: {
+      time: { days: [0, 6], start: "22:00", end: "06:00" },
+      network: { ssids: ["Home", "Office"], reach: { host: "h", port: 443 } },
+    },
+  }),
+  def({ schedule: null }),
+  def({ schedule: [] }),
+  def({ schedule: "nope" }),
+  def({ schedule: {} }),
+  def({ schedule: { time: {} } }),
+  def({ schedule: { time: { days: [], start: "09:00", end: "17:00" } } }),
+  def({ schedule: { time: { days: [7], start: "09:00", end: "17:00" } } }),
+  def({ schedule: { time: { days: [1], start: "9:00", end: "17:00" } } }),
+  def({ schedule: { time: { days: [1], start: "09:00", end: "09:00" } } }),
+  def({ schedule: { time: { days: [1], start: "24:00", end: "17:00" } } }),
+  def({ schedule: { network: { ssids: "Home" } } }),
+  def({ schedule: { network: { ssids: [""] } } }),
+  def({ schedule: { network: { reach: { host: "", port: 22 } } } }),
+  def({ schedule: { network: { reach: { host: "h", port: 0 } } } }),
+  def({ schedule: { network: { reach: null } } }),
 ];
 
 const CRED_FIXTURES = [
@@ -122,6 +149,23 @@ const GROUP_FIXTURES = [
   null,
   [],
   "nope",
+  // Feature 150 — a group may carry a schedule its members inherit.
+  {
+    label: "Work",
+    color: "blue",
+    schedule: { time: { days: [1, 2, 3, 4, 5], start: "09:00", end: "17:00" } },
+  },
+  {
+    label: "Work",
+    color: "blue",
+    schedule: { time: { days: [], start: "09:00", end: "17:00" } },
+  },
+  { label: "Work", color: "blue", schedule: "nope" },
+  {
+    label: "Work",
+    color: "blue",
+    schedule: { network: { reach: { host: "h", port: 70000 } } },
+  },
 ];
 
 test("renderer and store validateDefinition agree for every fixture", () => {

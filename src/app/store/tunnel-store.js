@@ -87,6 +87,10 @@ const OPTIONAL_FIELDS = [
   // it (moved the tunnel to Ungrouped), so a shallow merge must drop the stored
   // groupId rather than keep the tunnel in its old group.
   "groupId",
+  // Feature 150: the per-tunnel scheduling rule. Absent from the editor's payload
+  // means the user turned scheduling off for this tunnel, so a shallow merge must
+  // drop the stored schedule rather than resurrect a cleared rule.
+  "schedule",
 ];
 
 /** Index an array of `{ id }` records into a Map for O(1) reference lookup. */

@@ -91,6 +91,112 @@ function isValidPort(v) {
   return Number.isInteger(v) && v >= MIN_PORT && v <= MAX_PORT;
 }
 
+// ── Schedule (Feature 150) ────────────────────────────────────────────────────
+// An optional `schedule` may ride a tunnel OR a group: a time window and/or a
+// network condition, ANDed together, each independently optional (absent ⇒ not a
+// constraint). Validated identically on both record types so a rule authored on
+// either is held to the same shape.
+const TIME_OF_DAY_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/** A "HH:MM" 24-hour wall-clock string. */
+function isTimeOfDay(v) {
+  return typeof v === "string" && TIME_OF_DAY_RE.test(v);
+}
+
+/** A day-of-week index (0 = Sunday … 6 = Saturday). */
+function isWeekday(v) {
+  return Number.isInteger(v) && v >= 0 && v <= 6;
+}
+
+/**
+ * Validate an optional `schedule`, writing dotted errors under `prefix` (e.g.
+ * `schedule.time.days`, `schedule.network.reach.port`). Absent is always valid
+ * (no schedule). A present `time` needs a non-empty day list plus a start/end
+ * pair of distinct HH:MM strings (a window that wraps past midnight is fine, so
+ * only `start === end` is rejected). A present `network` may carry an SSID
+ * allow-list and/or a reachability `host:port`; each is optional but must be
+ * well-formed when given.
+ *
+ * @param {Object<string,string>} errors  accumulator to write into
+ * @param {*} schedule
+ * @param {string} prefix
+ */
+function collectScheduleErrors(errors, schedule, prefix) {
+  if (schedule === undefined) return;
+  if (
+    schedule === null ||
+    typeof schedule !== "object" ||
+    Array.isArray(schedule)
+  ) {
+    errors[prefix] = "schedule must be an object when set";
+    return;
+  }
+
+  const { time, network } = schedule;
+
+  if (time !== undefined) {
+    if (time === null || typeof time !== "object" || Array.isArray(time)) {
+      errors[`${prefix}.time`] = "time must be an object when set";
+    } else {
+      if (!Array.isArray(time.days) || time.days.length === 0) {
+        errors[`${prefix}.time.days`] = "select at least one day";
+      } else if (!time.days.every(isWeekday)) {
+        errors[`${prefix}.time.days`] = "days must be integers 0–6";
+      }
+      if (!isTimeOfDay(time.start)) {
+        errors[`${prefix}.time.start`] = "start must be HH:MM (24-hour)";
+      }
+      if (!isTimeOfDay(time.end)) {
+        errors[`${prefix}.time.end`] = "end must be HH:MM (24-hour)";
+      }
+      if (
+        isTimeOfDay(time.start) &&
+        isTimeOfDay(time.end) &&
+        time.start === time.end
+      ) {
+        errors[`${prefix}.time.end`] = "end must differ from start";
+      }
+    }
+  }
+
+  if (network !== undefined) {
+    if (
+      network === null ||
+      typeof network !== "object" ||
+      Array.isArray(network)
+    ) {
+      errors[`${prefix}.network`] = "network must be an object when set";
+    } else {
+      if (network.ssids !== undefined) {
+        if (!Array.isArray(network.ssids)) {
+          errors[`${prefix}.network.ssids`] = "ssids must be an array when set";
+        } else if (!network.ssids.every(isNonEmptyString)) {
+          errors[`${prefix}.network.ssids`] =
+            "each SSID must be a non-empty string";
+        }
+      }
+      if (network.reach !== undefined) {
+        if (
+          network.reach === null ||
+          typeof network.reach !== "object" ||
+          Array.isArray(network.reach)
+        ) {
+          errors[`${prefix}.network.reach`] =
+            "reach must be an object when set";
+        } else {
+          if (!isNonEmptyString(network.reach.host)) {
+            errors[`${prefix}.network.reach.host`] = "reach host is required";
+          }
+          if (!isValidPort(network.reach.port)) {
+            errors[`${prefix}.network.reach.port`] =
+              `reach port must be an integer ${MIN_PORT}–${MAX_PORT}`;
+          }
+        }
+      }
+    }
+  }
+}
+
 /**
  * Validate a tunnel definition (reference shape).
  *
@@ -264,6 +370,9 @@ function validateDefinition(def) {
     errors.exitAddress = "exitAddress must be a string";
   }
 
+  // Optional scheduling rule (Feature 150): a time window and/or network trigger.
+  collectScheduleErrors(errors, def.schedule, "schedule");
+
   return { valid: Object.keys(errors).length === 0, errors };
 }
 
@@ -350,6 +459,9 @@ function validateGroup(group) {
   if (!GROUP_COLORS.includes(group.color)) {
     errors.color = `color must be one of ${GROUP_COLORS.join(", ")}`;
   }
+
+  // A group may carry a scheduling rule its members inherit (Feature 150).
+  collectScheduleErrors(errors, group.schedule, "schedule");
 
   return { valid: Object.keys(errors).length === 0, errors };
 }

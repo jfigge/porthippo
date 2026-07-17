@@ -189,6 +189,18 @@ contextBridge.exposeInMainWorld("porthippo", {
     copy: () => ipcRenderer.invoke("diagnostics:copy"),
   },
 
+  // ── Scheduling & auto-arm (Feature 150) ───────────────────────────────────
+  // `status` returns which tunnels the scheduler currently manages, each one's
+  // next time-window transition, and whether the user has overridden it until
+  // then. Live changes arrive one-way over the porthippo:schedule event (below).
+  // No SSID / network name / probe result ever crosses — only ids + timings.
+  schedule: {
+    status: () => ipcRenderer.invoke("schedule:status"),
+    // The editor's "use current network" helper: the current Wi-Fi SSID (or null
+    // when it can't be read). Shown only in the user's own editor.
+    currentNetwork: () => ipcRenderer.invoke("schedule:current-network"),
+  },
+
   // ── Selectable secret storage (Feature 90) ────────────────────────────────
   // The renderer only sends mode/unlock INTENTS; all crypto, keychain access and
   // re-encryption happen in main. Nothing here ever carries a decrypted secret or
@@ -248,6 +260,10 @@ for (const channel of [
   // Feature 90: the at-rest secret-storage mode / lock status changed. Carries
   // { mode, locked, available, hasPassword } — never a secret or key material.
   "porthippo:secret-storage-changed",
+  // Feature 150: the scheduler re-evaluated. Carries { enabled, tunnels: [{ id,
+  // wanted, overridden, nextTransitionAt, nextTransitionKind }] } — ids + timings
+  // only, never an SSID / network name / probe result.
+  "porthippo:schedule",
 ]) {
   ipcRenderer.on(channel, (_event, detail) => {
     window.dispatchEvent(new CustomEvent(channel, { detail }));

@@ -35,6 +35,7 @@ const {
   dialog,
   ipcMain,
   nativeImage,
+  powerMonitor,
   screen,
   shell,
   webContents,
@@ -54,6 +55,8 @@ const { registerShellIPC } = require("./ipc/shell");
 const { registerSecretStorageIPC } = require("./ipc/secret-storage");
 const { registerPortableIPC } = require("./ipc/portable");
 const { TunnelEngine } = require("./tunnel/engine");
+const { Scheduler } = require("./scheduler");
+const { readSsid } = require("./network-info");
 const {
   listOsKnownHosts,
   defaultKnownHostsPath,
@@ -133,6 +136,11 @@ let _engine = null;
 function getEngine() {
   return _engine;
 }
+
+// ─── Scheduler (Feature 150) ────────────────────────────────────────────────────
+// Owns time/network-driven auto-arm; issues plain engine arm/disarm. Created in
+// app.whenReady after the engine, and fed the master switch from settings.
+let _scheduler = null;
 
 /**
  * Push a one-way event to every live renderer. Skips destroyed contexts so it
@@ -368,15 +376,42 @@ function tunnelName(id) {
   return (def && def.name) || undefined;
 }
 
-const armAll = () =>
-  getEngine()
+/** Tell the scheduler the user hand-armed/disarmed these tunnels (Feature 150). */
+function noteManualOverride(ids) {
+  if (_scheduler && Array.isArray(ids) && ids.length) {
+    _scheduler.noteManual(ids);
+  }
+}
+
+// The user's "Arm all" (tray/menu): arm every enabled tunnel, and tell the
+// scheduler it now owns the governed ones by hand until the next boundary.
+const armAll = () => {
+  noteManualOverride([...(_scheduler?.governedIds() ?? [])]);
+  return getEngine()
     ?.armAll()
     .catch((err) => console.error("[main] armAll failed:", err && err.message));
+};
+
+// Startup arming: arm enabled tunnels but leave scheduled ones to the scheduler
+// (Feature 150), so launch and the scheduler never race over the same tunnel.
+const launchArm = () => {
+  const skip = _scheduler?.governedIds() ?? new Set();
+  return getEngine()
+    ?.armAll({ skip })
+    .catch((err) =>
+      console.error("[main] launch arm failed:", err && err.message),
+    );
+};
 
 // Set true when startup arming is deferred because the secret store booted
 // LOCKED (master-password mode). A successful unlock — from the launch prompt or
 // Settings → Security — runs the deferred armAll exactly once (see onUnlock).
 let armOnUnlockPending = false;
+
+// Set true when the scheduler's start was deferred because the secret store booted
+// LOCKED (master-password mode); enabled on unlock, so a governed tunnel's listener
+// isn't bound before the session can decrypt its credential (Feature 150).
+let schedulerEnablePending = false;
 
 /** Is the secret store currently locked (master-password mode, no key loaded)? */
 function secretStorageLocked() {
@@ -398,22 +433,29 @@ function armEnabledOrDeferForUnlock() {
     armOnUnlockPending = true;
     return;
   }
-  armAll();
+  launchArm();
 }
 
-/** Resume the deferred launch arm after the session is unlocked. */
+/** Resume the deferred scheduler start + launch arm after the session is unlocked. */
 function resumeDeferredArm() {
+  // Start the scheduler first so `launchArm` can skip the tunnels it now governs.
+  if (schedulerEnablePending) {
+    schedulerEnablePending = false;
+    _scheduler?.setEnabled(true);
+  }
   if (!armOnUnlockPending) return;
   armOnUnlockPending = false;
-  armAll();
+  launchArm();
 }
 
-const disarmAll = () =>
-  getEngine()
+const disarmAll = () => {
+  noteManualOverride([...(_scheduler?.governedIds() ?? [])]);
+  return getEngine()
     ?.disarmAll()
     .catch((err) =>
       console.error("[main] disarmAll failed:", err && err.message),
     );
+};
 
 // ── Group bulk actions (Feature 140) ─────────────────────────────────────────
 // The engine stays group-unaware: "arm this group" is resolved to its member ids
@@ -430,6 +472,9 @@ function groupMemberIds(groupId) {
 function applyToGroup(groupId, action) {
   const ids = groupMemberIds(groupId);
   if (ids.length === 0) return;
+  // Arming / disarming a group by hand is a scheduling override for its governed
+  // members; pause/resume don't change the armed state, so they aren't.
+  if (action === "arm" || action === "disarm") noteManualOverride(ids);
   getEngine()
     ?.applyToMany(ids, action)
     .catch((err) =>
@@ -463,18 +508,22 @@ function createTrayPresence() {
       showWindow,
       armAll,
       disarmAll,
-      arm: (id) =>
-        getEngine()
+      arm: (id) => {
+        noteManualOverride([id]);
+        return getEngine()
           ?.arm(id)
           .catch((err) =>
             console.error("[main] arm failed:", err && err.message),
-          ),
-      disarm: (id) =>
-        getEngine()
+          );
+      },
+      disarm: (id) => {
+        noteManualOverride([id]);
+        return getEngine()
           ?.disarm(id)
           .catch((err) =>
             console.error("[main] disarm failed:", err && err.message),
-          ),
+          );
+      },
       armGroup,
       disarmGroup,
       openSettings,
@@ -546,6 +595,9 @@ function registerIpc() {
         .catch((err) =>
           console.error(`[main] reconcile ${id} error:`, err && err.message),
         );
+      // A create/edit/delete can add, change, or remove a tunnel's schedule, so
+      // the scheduler must re-read the governed set (Feature 150).
+      _scheduler?.refresh();
       // The tray renders the tunnel list; a create/rename/delete (or an edit to a
       // disabled/disarmed tunnel, which emits no state broadcast) must refresh it,
       // otherwise a deleted tunnel lingers and a new one is absent until some
@@ -567,17 +619,48 @@ function registerIpc() {
     // triggers NO engine reconcile — but the tray + native-menu group submenus
     // must rebuild to reflect the new set (a group edit emits no state broadcast).
     afterGroupsWrite: () => {
+      // A group's schedule is inherited by its members, so a group edit can change
+      // the governed set (Feature 150) — re-read it.
+      _scheduler?.refresh();
       _tray?.update();
       refreshMenu();
     },
     // After a settings change, apply the platform side-effects the renderer
-    // can't (launch-at-login). Theme/language/defaults are live-applied in the
-    // renderer; language additionally re-localizes main chrome on the reload
-    // (did-finish-load → refreshCatalog + refreshMenu + tray.update).
-    afterSettingsWrite: (settings) => applyLoginItem(settings),
+    // can't (launch-at-login), and toggle the scheduler master switch (Feature
+    // 150). Theme/language/defaults are live-applied in the renderer; language
+    // additionally re-localizes main chrome on the reload (did-finish-load →
+    // refreshCatalog + refreshMenu + tray.update).
+    afterSettingsWrite: (settings) => {
+      applyLoginItem(settings);
+      _scheduler?.setEnabled(settings.schedulingEnabled === true);
+    },
   });
 
-  registerEngineIPC({ ipcMain, getEngine });
+  registerEngineIPC({
+    ipcMain,
+    getEngine,
+    // Feature 150: a hand arm/disarm over IPC is a scheduling override.
+    onManual: noteManualOverride,
+  });
+
+  // Feature 150: current schedule status (which tunnels are managed, their next
+  // transition, and any manual override) for the renderer's row adornments. Live
+  // updates arrive one-way over the porthippo:schedule broadcast.
+  ipcMain.handle("schedule:status", () =>
+    _scheduler ? _scheduler.status() : { enabled: false, tunnels: [] },
+  );
+
+  // Feature 150: the editor's "use current network" helper. Reads the current
+  // Wi-Fi SSID best-effort and returns it (null when it can't be read); the name
+  // is shown only in the user's own editor and is never logged.
+  ipcMain.handle("schedule:current-network", async () => {
+    try {
+      const res = await readSsid();
+      return { ssid: res.status === "ok" ? res.ssid : null };
+    } catch {
+      return { ssid: null };
+    }
+  });
 
   // Hostname-resolution validation (Feature 100): live local DNS lookups + the
   // "Test resolution" probe that walks the real chain (host-key prompts flow over
@@ -920,7 +1003,24 @@ function bootstrap() {
     // Resolve the catalog for main-side chrome, then create the engine (broadcasts
     // fan out to the renderer + tray).
     refreshCatalog();
-    _engine = new TunnelEngine({ getStores, broadcast });
+    _engine = new TunnelEngine({
+      getStores,
+      broadcast,
+      // Feature 150: a store write / unlock must not arm a tunnel the scheduler
+      // manages — the scheduler owns its armed state. Read live (the scheduler is
+      // created just below), so an empty set until then means "nothing managed".
+      getManagedIds: () => _scheduler?.governedIds() ?? new Set(),
+    });
+
+    // Scheduler (Feature 150): time/network auto-arm. It only reaches the renderer
+    // (row adornments) — the tray tracks armed state via the engine broadcast — so
+    // it's fed the renderer-only broadcaster.
+    _scheduler = new Scheduler({
+      getStores,
+      engine: _engine,
+      powerMonitor,
+      broadcast: broadcastToRenderer,
+    });
 
     // Desktop failure/health notifications (Feature 130): fed by the broadcast tee
     // above. Reads notification prefs live, resolves the tunnel NAME only, and a
@@ -961,6 +1061,16 @@ function bootstrap() {
       STARTUP_UPDATE_CHECK_DELAY_MS,
     );
 
+    // Start the scheduler (Feature 150) from the persisted master switch. It
+    // governs scheduled tunnels; launch-arming below skips those so the two never
+    // race over the same tunnel. When the store boots LOCKED (master password),
+    // defer it — like startup arming — so it doesn't bind a governed tunnel's
+    // listener before the session can decrypt its credential (resumed on unlock).
+    if (settings.schedulingEnabled === true) {
+      if (secretStorageLocked()) schedulerEnablePending = true;
+      else _scheduler.setEnabled(true);
+    }
+
     // Arm enabled definitions on startup unless the user opted out. In
     // master-password mode the store can boot LOCKED — defer arming until the
     // unlock-on-launch prompt (or Settings) unlocks the session.
@@ -985,6 +1095,7 @@ function bootstrap() {
     isQuitting = true;
     if (_disarmed) return; // second pass, after teardown → let the quit proceed
     _tray?.destroy();
+    _scheduler?.dispose(); // stop its timers + powerMonitor subscriptions
     if (!_engine) return;
     // Hold the quit until SSH sessions close cleanly, then re-issue it — so remote
     // servers see a graceful close, not an abrupt TCP drop. Bounded by a timeout

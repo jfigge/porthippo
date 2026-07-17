@@ -102,6 +102,11 @@ export const icons = {
         '<line x1="3" y1="18" x2="3.01" y2="18"/>',
     ),
 
+  // A small clock, em-sized to sit beside row text like the type glyphs — the
+  // scheduled-tunnel badge (Feature 150).
+  clock: () =>
+    stroke16('<circle cx="8" cy="8" r="6"/><path d="M8 4.6V8l2.4 1.4"/>'),
+
   // Forwarding-type glyphs — one per tunnel type, a consistent family (see stroke16).
   // Local: anchor dot + arrow out to the remote. Remote: far-side anchor + arrow back
   // in. Dynamic (SOCKS): local anchor fanning out to many destinations.

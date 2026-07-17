@@ -564,6 +564,46 @@ test("engine armAll arms enabled definitions and skips disabled ones", async () 
   }
 });
 
+test("reconcile does not arm a scheduler-managed tunnel (Feature 150)", async () => {
+  const echo = await startEcho();
+  const ssh = await startSsh();
+  const def = makeDef({
+    localPort: await freePort(),
+    echoPort: echo.port,
+    sshPort: ssh.port,
+  });
+  const managed = new Set([def.id]);
+  const engine = new TunnelEngine({
+    getStores: () => fakeStores([def]),
+    broadcast: () => {},
+    knownHostsFile: "/nonexistent/known_hosts",
+    getManagedIds: () => managed,
+  });
+  try {
+    // A store write / unlock reconciles this enabled tunnel — but the scheduler
+    // owns its armed state, so reconcile must NOT bind its listener.
+    await engine.reconcile(def.id);
+    assert.equal(
+      engine.status().find((s) => s.id === def.id),
+      undefined,
+      "a managed tunnel is not armed by reconcile",
+    );
+
+    // The same tunnel, no longer managed, reconciles-and-arms as usual.
+    managed.clear();
+    await engine.reconcile(def.id);
+    const armed = engine.status().find((s) => s.id === def.id);
+    assert.ok(
+      armed && armed.state === "listening",
+      "unmanaged tunnel is armed",
+    );
+  } finally {
+    await engine.disarmAll();
+    await ssh.close();
+    await echo.close();
+  }
+});
+
 test("re-arming a tunnel stuck in error (transient bind conflict) recovers it", async () => {
   const echo = await startEcho();
   const ssh = await startSsh();
