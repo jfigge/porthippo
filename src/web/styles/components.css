@@ -2025,8 +2025,10 @@
 
 /* ── Stat cards: snap-to-grid infinite canvas ──────────────────────────────────
    .detail-cards is the scroll viewport; .detail-cards-surface is the sized
-   content plane the cards are absolutely positioned on (see card-canvas.js). The
-   plane grows past the viewport in both axes, so both scrollbars can appear. */
+   content plane the cards are absolutely positioned on (see card-canvas.js). At
+   rest the plane is tight to the placed cards' bounding box; while a card is
+   dragged it expands with drag room, so scrollbars appear only when the cards
+   (or a live drag) outgrow the viewport. */
 .detail-cards {
   position: relative;
   flex: 1 1 auto;

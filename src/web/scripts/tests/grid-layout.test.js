@@ -32,6 +32,7 @@ import {
   placeCards,
   applyDrop,
   contentSize,
+  dragSize,
   boundingBox,
 } from "../components/grid-layout.js";
 
@@ -198,10 +199,20 @@ test("dragging a card deliberately forfeits its own home", () => {
 
 // ── Sizing ────────────────────────────────────────────────────────────────────
 
-test("contentSize is at least the default width and grows with the cards", () => {
-  const min = contentSize({ a: { col: 0, row: 0 } });
+test("contentSize is tight: exactly the bottom-right card's bottom-right edge", () => {
+  assert.deepEqual(contentSize({}), { width: 0, height: 0 });
+  const one = contentSize({ a: { col: 0, row: 0 } });
+  assert.equal(one.width, CELL.w);
+  assert.equal(one.height, CELL.h);
+  const wide = contentSize({ a: { col: 9, row: 4 }, b: { col: 0, row: 0 } });
+  assert.equal(wide.width, 9 * strideX + CELL.w);
+  assert.equal(wide.height, 4 * strideY + CELL.h);
+});
+
+test("dragSize is at least the default width plus margin and grows with the cards", () => {
+  const min = dragSize({ a: { col: 0, row: 0 } });
   assert.equal(min.width, (DEFAULT_COLS + 2) * strideX); // +MARGIN_CELLS(2)
-  const wide = contentSize({ a: { col: 9, row: 4 } });
+  const wide = dragSize({ a: { col: 9, row: 4 } });
   assert.equal(wide.width, (9 + 1 + 2) * strideX);
   assert.equal(wide.height, (4 + 1 + 2) * strideY);
 });

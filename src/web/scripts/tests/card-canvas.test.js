@@ -102,12 +102,14 @@ test("the canvas exposes the surface, overlay, and two target ghosts", () => {
   );
 });
 
-test("setCards sizes the surface and places cards at their cells", () => {
+test("setCards sizes the surface tight and places cards at their cells", () => {
   const { canvas } = mount();
   canvas.setCards("t1", entries("a", "b", "c"), null);
   const surface = canvas.element.querySelector(".detail-cards-surface");
-  // At least DEFAULT_COLS(4) + MARGIN_CELLS(2) wide → a scrollable plane.
-  assert.equal(surface.style.width, `${6 * strideX}px`);
+  // At rest the surface ends at the bottom-right card's bottom-right edge —
+  // three cards in a row: cols 0..2 wide, one row tall. No drag margin.
+  assert.equal(surface.style.width, `${cellLeft(2) + CELL.w}px`);
+  assert.equal(surface.style.height, `${CELL.h}px`);
   assert.match(transform(canvas, "a"), /translate\(0px,\s*0px\)/);
   assert.equal(transform(canvas, "b"), `translate(${cellLeft(1)}px, 0px)`);
 });
@@ -130,8 +132,10 @@ test("lifting a card reveals the grid overlay; dropping hides it again", () => {
   const { canvas } = mount();
   canvas.setCards("t1", entries("a", "b"), null);
   const overlay = canvas.element.querySelector(".card-grid-overlay");
+  const surface = canvas.element.querySelector(".detail-cards-surface");
   const a = cardEl(canvas, "a");
   assert.equal(overlay.hidden, true, "overlay hidden at rest");
+  const restWidth = surface.style.width;
 
   a.dispatchEvent(
     new window.MouseEvent("pointerdown", {
@@ -146,12 +150,16 @@ test("lifting a card reveals the grid overlay; dropping hides it again", () => {
   );
   assert.equal(overlay.hidden, false, "overlay revealed while dragging");
   assert.ok(a.classList.contains("detail-card--dragging"));
+  // The surface expands with drag room only while the grid is showing:
+  // DEFAULT_COLS(4) + MARGIN_CELLS(2) wide.
+  assert.equal(surface.style.width, `${6 * strideX}px`);
 
   a.dispatchEvent(
     new window.MouseEvent("pointerup", { clientX: 40, clientY: 0 }),
   );
   assert.equal(overlay.hidden, true, "overlay hidden after drop");
   assert.ok(!a.classList.contains("detail-card--dragging"));
+  assert.equal(surface.style.width, restWidth, "surface shrinks back tight");
 });
 
 test("a below-threshold press is treated as a click, not a drag", () => {

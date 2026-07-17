@@ -29,8 +29,9 @@ export const CELL = Object.freeze({ w: 150, h: 90, gap: 16 });
  *  infinite for dragging — this only shapes where auto-placed cards land). */
 export const DEFAULT_COLS = 4;
 
-/** Extra cells of scroll room kept beyond the placed cards' bounding box, so
- *  there is always somewhere to drag a card one cell further out. */
+/** Extra cells of scroll room kept beyond the placed cards' bounding box
+ *  while a drag is live, so there is always somewhere to drag a card one cell
+ *  further out. At rest the surface is sized tight (see contentSize). */
 export const MARGIN_CELLS = 2;
 
 /** Horizontal cell stride (card width + gutter). */
@@ -240,10 +241,32 @@ export function applyDrop(state, key, cell) {
 }
 
 /**
- * The scrollable content size (px) for a positions map: the placed cards'
- * bounding box, at least DEFAULT_COLS wide, plus MARGIN_CELLS of scroll room.
+ * The resting content size (px) for a positions map: exactly the placed cards'
+ * bounding box — no wider or taller than the bottom-right card's bottom-right
+ * edge. Zero when nothing is placed. The drag margin only exists while a drag
+ * is live (see dragSize).
  */
-export function contentSize(positions, cols = DEFAULT_COLS) {
+export function contentSize(positions) {
+  let maxCol = -1;
+  let maxRow = -1;
+  for (const p of Object.values(positions || {})) {
+    if (!p) continue;
+    if (p.col > maxCol) maxCol = p.col;
+    if (p.row > maxRow) maxRow = p.row;
+  }
+  if (maxCol < 0) return { width: 0, height: 0 };
+  return {
+    width: cellLeft(maxCol) + CELL.w,
+    height: cellTop(maxRow) + CELL.h,
+  };
+}
+
+/**
+ * The scrollable surface size (px) while a card is being dragged: the placed
+ * cards' bounding box, at least DEFAULT_COLS wide, plus MARGIN_CELLS of drag
+ * room in both axes so a card can always be dropped one cell further out.
+ */
+export function dragSize(positions, cols = DEFAULT_COLS) {
   let maxCol = cols - 1;
   let maxRow = 0;
   for (const p of Object.values(positions || {})) {

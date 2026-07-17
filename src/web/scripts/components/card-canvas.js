@@ -17,8 +17,9 @@
 // card-canvas.js — the snap-to-grid infinite canvas that lays out the tunnel
 // detail's stat cards. It owns none of the card content (TunnelDetail builds the
 // nodes and updates their values); it owns only *where* each card sits. Cards are
-// absolutely positioned on a scrolling surface whose extent tracks the placed
-// cards, so the canvas grows and scrolls in both axes. Positions are a {col,row}
+// absolutely positioned on a scrolling surface sized tight to the placed cards'
+// bounding box at rest; only while a drag is live does it expand (dragSize) to
+// give the grid room to drop a card further out. Positions are a {col,row}
 // map: the owner hands in one layout shared by every tunnel, adopted on a tunnel
 // switch (keyed by the id below), kept while only the visible set changes, and
 // reported back via `onLayoutChange` so the owner can persist it.
@@ -39,6 +40,7 @@ import {
   applyDrop,
   placeCards,
   contentSize,
+  dragSize,
   boundingBox,
 } from "./grid-layout.js";
 
@@ -195,8 +197,12 @@ export class CardCanvas {
     )}px)`;
   }
 
+  /** Size the surface: tight to the cards at rest, expanded while dragging so
+   *  the revealed grid has drop room beyond the placed cards. */
   #resize() {
-    const size = contentSize(this.#positions);
+    const size = this.#drag?.lifted
+      ? dragSize(this.#positions)
+      : contentSize(this.#positions);
     this.#surface.style.width = `${size.width}px`;
     this.#surface.style.height = `${size.height}px`;
   }
@@ -304,6 +310,7 @@ export class CardCanvas {
     d.cardEl.style.transition = "none";
     d.cardEl.style.zIndex = "20";
     this.#overlay.hidden = false;
+    this.#resize(); // expand the surface with drag room while the grid shows
   }
 
   /** Reflect the drag target: a free "snap" cell, or an occupied-cell swap. */
@@ -396,6 +403,7 @@ export class CardCanvas {
     d.cardEl.style.transition = "";
     d.cardEl.style.zIndex = "";
     this.#overlay.hidden = true;
+    this.#resize(); // the drag is over — shrink back tight to the cards
     this.#clearPreview();
     if (d.overDelete) this.#onDeleteHover(false);
   }
