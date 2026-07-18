@@ -30,6 +30,7 @@
 "use strict";
 
 const crypto = require("crypto");
+const fs = require("fs");
 
 const { Tunnel } = require("./tunnel");
 const { makeHostVerifier } = require("./host-verifier");
@@ -60,6 +61,7 @@ class TunnelEngine {
   #broadcast;
   #knownHostsFile;
   #getManagedIds;
+  #keyReader;
 
   #tunnels = new Map();
   #prompts = new Map(); // promptId → { resolve } for pending host-key decisions
@@ -80,12 +82,25 @@ class TunnelEngine {
    *        Feature 150 scheduler. `reconcile`/`reconcileAll` never arm these — their
    *        armed state is the scheduler's to own — so a store write / unlock can't
    *        arm a tunnel the schedule wants disarmed. Defaults to "none managed".
+   * @param {typeof import('fs').readFileSync} [deps.keyReader]  the `readFileSync`-
+   *        shaped reader used for every private-key read (Feature 190). On the Mac
+   *        App Store main injects a security-scoped-bookmark reader here; everywhere
+   *        else it's a plain `fs.readFileSync` (the default). Threaded into each
+   *        Tunnel as `readFileSync` — the same seam the tests inject a fake through
+   *        — so the engine never imports Electron.
    */
-  constructor({ getStores, broadcast, knownHostsFile, getManagedIds }) {
+  constructor({
+    getStores,
+    broadcast,
+    knownHostsFile,
+    getManagedIds,
+    keyReader,
+  }) {
     this.#getStores = getStores;
     this.#broadcast = broadcast;
     this.#knownHostsFile = knownHostsFile;
     this.#getManagedIds = getManagedIds || (() => new Set());
+    this.#keyReader = keyReader || fs.readFileSync;
   }
 
   /** The scheduler-managed id set, coerced + fail-safe to empty. */
@@ -339,6 +354,9 @@ class TunnelEngine {
         destination: probeDest,
         tunnelId: d.id || "probe",
         hostVerifierFactory: (ctx) => this.#buildHostVerifier(ctx),
+        // Read key-auth hops through the same injected reader as a real connect,
+        // so a "Test resolution" on MAS uses the security-scoped bookmark too.
+        readFileSync: this.#keyReader,
         signal: controller.signal,
       });
     } finally {
@@ -372,6 +390,9 @@ class TunnelEngine {
   #makeTunnel(def) {
     return new Tunnel(def, {
       hostVerifierFactory: (ctx) => this.#buildHostVerifier(ctx),
+      // Feature 190: every key read goes through the injected reader (a plain
+      // fs.readFileSync off MAS; a bookmark-bracketing reader on the Mac App Store).
+      readFileSync: this.#keyReader,
       getLingerMs: (d) => this.#effectiveLinger(d),
       // Feature 130 — reconnect policy (settings + per-tunnel override) and the
       // SSH-layer keepalive interval, both read live so a settings edit lands on

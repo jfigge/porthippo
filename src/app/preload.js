@@ -138,10 +138,20 @@ contextBridge.exposeInMainWorld("jumphippo", {
 
   // ── Native file pickers (Feature 40) ──────────────────────────────────────
   // The sandboxed renderer can't read a typed path, so the auth editor's Browse
-  // asks main to open a native picker; only the chosen path comes back (or null
-  // if cancelled) — never file bytes.
+  // asks main to open a native picker. Resolves to `{ path, remembered }` (or null
+  // if cancelled) — never file bytes. `remembered` is true only when main stored a
+  // durable security-scoped bookmark for the file (Mac App Store, Feature 190), so
+  // the editor can tell the user the key will survive a relaunch; the bookmark blob
+  // itself never crosses.
   dialog: {
-    openKeyFile: () => ipcRenderer.invoke("dialog:open-key-file"),
+    // `defaultPath` (optional) opens the panel at that file's location and
+    // pre-selects it — used when re-picking an already-chosen key.
+    openKeyFile: (defaultPath) =>
+      ipcRenderer.invoke("dialog:open-key-file", { defaultPath }),
+    // Feature 190 re-pick nudge: whether a stored key `path` needs re-picking to
+    // stay readable (true only in a MAS build with no bookmark for it). Returns
+    // `{ needsRepick }` — a boolean only; no bookmark blob or file bytes cross.
+    keyStatus: (path) => ipcRenderer.invoke("dialog:key-status", { path }),
   },
 
   // ── Native OS context menu ────────────────────────────────────────────────

@@ -133,6 +133,8 @@
   "auth.password": "Mot de passe",
   "auth.secretSet": "•••• défini",
   "auth.secretKeep": "Enregistré — laissez vide pour conserver",
+  "auth.keyRemembered": "Mémorisé pour ce Mac — reste lisible après un redémarrage.",
+  "auth.keyNeedsRepick": "Cette clé n’est pas accessible dans la version App Store — cliquez sur « Parcourir » pour la resélectionner et rétablir l’accès.",
   "auth.agentHint": "Utilise votre agent SSH en cours d’exécution — aucun fichier de clé ni mot de passe.",
   "auth.agentUnavailable": "L’authentification par agent SSH n’est pas disponible dans cette version. Choisissez plutôt une clé privée ou un mot de passe.",
   "mon.title": "Tunnels en direct",

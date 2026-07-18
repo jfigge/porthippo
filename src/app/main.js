@@ -75,7 +75,13 @@ const {
   trackWindowState,
 } = require("./window-state");
 const updater = require("./updater");
-const { distribution, isStoreBuild, buildInfo } = require("./store-build");
+const {
+  distribution,
+  isMas,
+  isStoreBuild,
+  buildInfo,
+} = require("./store-build");
+const { makeKeyReader } = require("./secure-file");
 
 // Delay the silent startup update check so it never competes with window
 // creation / first paint. A manual check (Settings/menu) runs immediately.
@@ -684,7 +690,17 @@ function registerIpc() {
   // the engine's existing jumphippo:hostkey-unknown broadcast).
   registerResolveIPC({ ipcMain, getStores, getEngine });
 
-  registerDialogIPC({ ipcMain, dialog, getMainWindow: () => mainWindow });
+  // Feature 190: capture a security-scoped bookmark for a picked key (MAS) so it
+  // survives a relaunch; the store is a no-op token holder off the sandbox.
+  registerDialogIPC({
+    ipcMain,
+    dialog,
+    getMainWindow: () => mainWindow,
+    getKeyBookmarkStore: () => getStores().keyBookmarkStore(),
+    // MAS is the only build where a stored key path needs a bookmark to survive a
+    // relaunch, so the re-pick nudge (dialog:key-status) only fires there.
+    isMas: isMas(),
+  });
 
   // Native OS context menu for a right-clicked tunnel row: the renderer sends a
   // label/id template and awaits the clicked id; main just pops the menu.
@@ -1027,6 +1043,24 @@ function bootstrap() {
       // manages — the scheduler owns its armed state. Read live (the scheduler is
       // created just below), so an empty set until then means "nothing managed".
       getManagedIds: () => _scheduler?.governedIds() ?? new Set(),
+      // Feature 190: on the Mac App Store, read picked private keys through their
+      // security-scoped bookmark so they survive a relaunch; a plain fs.readFileSync
+      // everywhere else. The reader owns the Electron `app` access — the engine
+      // stays Electron-free behind this injected seam.
+      keyReader: makeKeyReader({
+        app,
+        getBookmark: (p) =>
+          safeCall(
+            "keybookmark:get",
+            () => getStores().keyBookmarkStore().get(p),
+            null,
+          ),
+        deleteBookmark: (p) =>
+          safeCall("keybookmark:delete", () =>
+            getStores().keyBookmarkStore().delete(p),
+          ),
+        isMas: isMas(),
+      }),
     });
 
     // Scheduler (Feature 150): time/network auto-arm. It only reaches the renderer

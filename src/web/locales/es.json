@@ -133,6 +133,8 @@
   "auth.password": "Contraseña",
   "auth.secretSet": "•••• establecida",
   "auth.secretKeep": "Almacenada — deja en blanco para conservarla",
+  "auth.keyRemembered": "Recordada para este Mac — seguirá siendo legible tras reiniciar.",
+  "auth.keyNeedsRepick": "Esta clave no es accesible en la versión de la App Store — haz clic en «Examinar» para volver a seleccionarla y restaurar el acceso.",
   "auth.agentHint": "Usa tu agente SSH en ejecución — sin archivo de clave ni contraseña.",
   "auth.agentUnavailable": "La autenticación con agente SSH no está disponible en esta versión. Elige una clave privada o una contraseña en su lugar.",
   "mon.title": "Túneles en vivo",

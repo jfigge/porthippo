@@ -220,6 +220,10 @@ export const EN = {
   "auth.password": "Password",
   "auth.secretSet": "•••• set",
   "auth.secretKeep": "Stored — leave blank to keep",
+  "auth.keyRemembered":
+    "Remembered for this Mac — stays readable after a relaunch.",
+  "auth.keyNeedsRepick":
+    "This key isn’t accessible in the App Store build — click Browse to re-select it and restore access.",
   "auth.agentHint": "Uses your running SSH agent — no key file or password.",
   "auth.agentUnavailable":
     "SSH agent authentication isn't available in this build. Choose a private key or a password instead.",

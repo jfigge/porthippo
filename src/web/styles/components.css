@@ -879,6 +879,14 @@
   color: var(--color-warning);
 }
 
+/* Feature 190 (MAS): a stored key with no security-scoped bookmark can't be read
+   after a relaunch — prompt the user to re-pick it via Browse. */
+.auth-keypath-warning {
+  margin-top: var(--space-2);
+  font-size: 12px;
+  color: var(--color-warning);
+}
+
 /* ── Monitoring view ──────────────────────────────────────────────────────── */
 .monitoring-view {
   display: flex;

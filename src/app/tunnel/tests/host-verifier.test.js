@@ -34,6 +34,8 @@ const {
   makeHostVerifier,
   sha256Fingerprint,
   listOsKnownHosts,
+  realHomeDir,
+  defaultKnownHostsPath,
 } = require("../host-verifier");
 
 // A minimal SSH public-key wire blob: uint32be(algoLen) ++ algo ++ material.
@@ -250,4 +252,40 @@ test("listOsKnownHosts reports host/fingerprint/keyType, hashes → null, skips 
 
 test("listOsKnownHosts tolerates an absent file", () => {
   assert.deepEqual(listOsKnownHosts("/no/such/dir/known_hosts"), []);
+});
+
+// In the MAS sandbox, $HOME (os.homedir()) is redirected to the app container, so
+// the known_hosts path MUST derive from the real home (os.userInfo().homedir, via
+// getpwuid) — otherwise it lands on a dead container path that never holds the
+// user's file. Force the two apart and assert we follow userInfo, not homedir.
+test("defaultKnownHostsPath resolves against the REAL home, not the redirected $HOME", () => {
+  const realUserInfo = os.userInfo;
+  const realHomedir = os.homedir;
+  try {
+    os.userInfo = () => ({ homedir: "/Users/real" });
+    os.homedir = () => "/Users/real/Library/Containers/app/Data"; // sandbox $HOME
+    assert.equal(realHomeDir(), "/Users/real");
+    assert.equal(
+      defaultKnownHostsPath(),
+      path.join("/Users/real", ".ssh", "known_hosts"),
+    );
+  } finally {
+    os.userInfo = realUserInfo;
+    os.homedir = realHomedir;
+  }
+});
+
+test("realHomeDir falls back to os.homedir() when getpwuid has no entry", () => {
+  const realUserInfo = os.userInfo;
+  const realHomedir = os.homedir;
+  try {
+    os.userInfo = () => {
+      throw new Error("no passwd entry");
+    };
+    os.homedir = () => "/fallback/home";
+    assert.equal(realHomeDir(), "/fallback/home");
+  } finally {
+    os.userInfo = realUserInfo;
+    os.homedir = realHomedir;
+  }
 });

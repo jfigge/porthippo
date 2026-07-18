@@ -133,6 +133,8 @@
   "auth.password": "Password",
   "auth.secretSet": "•••• impostata",
   "auth.secretKeep": "Memorizzata — lascia vuoto per mantenerla",
+  "auth.keyRemembered": "Memorizzata per questo Mac — resta leggibile dopo un riavvio.",
+  "auth.keyNeedsRepick": "Questa chiave non è accessibile nella build App Store — fai clic su «Sfoglia» per riselezionarla e ripristinare l’accesso.",
   "auth.agentHint": "Usa l’agent SSH in esecuzione — nessun file di chiave o password.",
   "auth.agentUnavailable": "L’autenticazione tramite agent SSH non è disponibile in questa versione. Scegli invece una chiave privata o una password.",
   "mon.title": "Tunnel attivi",

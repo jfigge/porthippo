@@ -16,6 +16,26 @@
                                   through the native open dialog
                                   (dialog:open-key-file). The sandbox grants
                                   access only to files the user selected.
+    * files.bookmarks.app-scope   mint + resolve app-scoped security bookmarks so
+                                  a picked private key stays readable across
+                                  relaunches (Feature 190). Without it the
+                                  user-selected grant evaporates on quit and a
+                                  key-auth tunnel silently fails to authenticate
+                                  on the next launch.
+    * temporary-exception.files.home-relative-path.read-only  ["/.ssh/known_hosts"]
+                                  read the user's REAL OpenSSH known_hosts file so
+                                  host-key verification matches the same hosts the
+                                  system `ssh` already trusts, and the Host Keys →
+                                  "Operating System" tab shows a real inventory.
+                                  The sandbox redirects $HOME to the container, so
+                                  without this the file is invisible; the app reads
+                                  the real home via getpwuid (os.userInfo()) and
+                                  this exception grants read access to that one
+                                  file. NOTE (App Store review): temporary-exception
+                                  entitlements need a justification in App Review
+                                  notes and MAY be challenged — scoped to the single
+                                  known_hosts file (NOT the whole ~/.ssh, so private
+                                  keys are never granted) to keep the ask minimal.
     * cs.allow-jit                V8's JIT compiler.
 
   Deliberately ABSENT (and why):
@@ -26,11 +46,11 @@
                                   produces a MAS-signed bundle that doesn't need it.
 
   Sandbox caveats (see STORE-PUBLISHING.md → "MAS functional caveats"): the
-  container gets its own $HOME, so ~/.ssh/known_hosts is invisible (host keys
-  fall back to the accepted-keys store / TOFU prompts, which still work),
-  ssh-agent's socket is unreachable (agent auth fails; use key/password auth),
-  and a key-file path picked in a previous session needs re-selection after a
-  relaunch until security-scoped bookmarks are implemented.
+  container gets its own $HOME, but the app resolves the REAL home via getpwuid, so
+  ~/.ssh/known_hosts IS read (granted by the temporary exception above). ssh-agent's
+  socket is still unreachable (agent auth fails; use key/password auth). A key-file
+  path picked in a previous session survives a relaunch via the app-scoped security
+  bookmark above (Feature 190).
 -->
 <plist version="1.0">
   <dict>
@@ -42,6 +62,15 @@
     <true/>
     <key>com.apple.security.files.user-selected.read-only</key>
     <true/>
+    <key>com.apple.security.files.bookmarks.app-scope</key>
+    <true/>
+    <!-- Read-only access to the user's real ~/.ssh/known_hosts (home-relative, so
+         it targets the REAL home the app resolves via getpwuid, not the container's
+         redirected $HOME). Scoped to the single file — never the whole ~/.ssh. -->
+    <key>com.apple.security.temporary-exception.files.home-relative-path.read-only</key>
+    <array>
+      <string>/.ssh/known_hosts</string>
+    </array>
     <key>com.apple.security.cs.allow-jit</key>
     <true/>
   </dict>

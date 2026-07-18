@@ -19,6 +19,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { CredentialEditorDialog } from "../components/credential-editor-dialog.js";
 import { init as initBuildInfo } from "../build-info.js";
+import { t } from "../i18n.js";
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
@@ -66,6 +67,15 @@ function mount(calls = {}, onSaved) {
   });
   return dlg;
 }
+
+// Mount with a custom key picker (Feature 190 returns `{ path, remembered }`).
+function mountPicker(openKeyFile) {
+  resetDom();
+  return new CredentialEditorDialog({ jumphippo: stub({}), openKeyFile });
+}
+
+const keyHint = (dlg) =>
+  dlg.element.querySelector('.field[data-error-key="keyPath"] .field-info');
 
 const el = (dlg, sel) => dlg.element.querySelector(sel);
 
@@ -119,6 +129,105 @@ test("Browse fills the key path from the native picker", async () => {
   await flush();
   assert.equal(el(dlg, ".cred-keypath-input").value, "/picked/key");
   assert.equal(dlg.buildPayload().keyPath, "/picked/key");
+});
+
+test("Browse accepts the { path, remembered } object shape (Feature 190)", async () => {
+  const dlg = mountPicker(async () => ({
+    path: "/picked/key",
+    remembered: true,
+  }));
+  dlg.openCreate();
+  change(el(dlg, ".cred-type-select"), "key");
+  assert.equal(keyHint(dlg), null, "no hint before a pick");
+  el(dlg, ".auth-browse-btn").click();
+  await flush();
+  assert.equal(el(dlg, ".cred-keypath-input").value, "/picked/key");
+  assert.equal(dlg.buildPayload().keyPath, "/picked/key");
+  // A durable bookmark → the "remembered for this Mac" reassurance appears.
+  assert.equal(keyHint(dlg)?.title, t("auth.keyRemembered"));
+});
+
+test("Browse without a durable bookmark shows no remembered hint", async () => {
+  const dlg = mountPicker(async () => ({
+    path: "/picked/key",
+    remembered: false,
+  }));
+  dlg.openCreate();
+  change(el(dlg, ".cred-type-select"), "key");
+  el(dlg, ".auth-browse-btn").click();
+  await flush();
+  assert.equal(el(dlg, ".cred-keypath-input").value, "/picked/key");
+  assert.equal(keyHint(dlg), null, "no hint for a non-remembered pick");
+});
+
+// ── Re-pick nudge (Feature 190): a stored key with no bookmark (MAS) ───────────
+
+const warnEl = (dlg) => dlg.element.querySelector(".auth-keypath-warning");
+
+test("a stored key with no bookmark shows the re-pick nudge on edit", async () => {
+  resetDom();
+  const dlg = new CredentialEditorDialog({
+    jumphippo: stub({}),
+    keyStatus: async () => ({ needsRepick: true }),
+  });
+  dlg.openEdit({
+    id: "c1",
+    label: "Bastion",
+    user: "ec2-user",
+    authType: "key",
+    keyPath: "/Users/j/.ssh/x.pem",
+  });
+  await flush(); // let the async key-status query resolve + re-render
+  assert.ok(warnEl(dlg), "re-pick warning shown");
+  assert.equal(warnEl(dlg).textContent, t("auth.keyNeedsRepick"));
+});
+
+test("a stored key that IS bookmarked shows no nudge", async () => {
+  resetDom();
+  const dlg = new CredentialEditorDialog({
+    jumphippo: stub({}),
+    keyStatus: async () => ({ needsRepick: false }),
+  });
+  dlg.openEdit({
+    id: "c1",
+    label: "Bastion",
+    user: "ec2-user",
+    authType: "key",
+    keyPath: "/Users/j/.ssh/x.pem",
+  });
+  await flush();
+  assert.equal(warnEl(dlg), null, "no nudge when the key is accessible");
+});
+
+test("re-picking a nudged key clears the warning and shows the remembered hint", async () => {
+  resetDom();
+  let bookmarked = false;
+  const dlg = new CredentialEditorDialog({
+    jumphippo: stub({}),
+    keyStatus: async () => ({ needsRepick: !bookmarked }),
+    openKeyFile: async () => {
+      bookmarked = true; // the re-pick mints the bookmark
+      return { path: "/Users/j/.ssh/x.pem", remembered: true };
+    },
+  });
+  dlg.openEdit({
+    id: "c1",
+    label: "Bastion",
+    user: "ec2-user",
+    authType: "key",
+    keyPath: "/Users/j/.ssh/x.pem",
+  });
+  await flush();
+  assert.ok(warnEl(dlg), "nudge shown before re-pick");
+
+  el(dlg, ".auth-browse-btn").click();
+  await flush();
+  assert.equal(warnEl(dlg), null, "warning cleared after re-pick");
+  assert.equal(
+    keyHint(dlg)?.title,
+    t("auth.keyRemembered"),
+    "remembered reassurance shown instead",
+  );
 });
 
 test("a valid create persists, closes, emits, and calls onSaved", async () => {

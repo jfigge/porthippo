@@ -133,6 +133,8 @@
   "auth.password": "Passwort",
   "auth.secretSet": "•••• gesetzt",
   "auth.secretKeep": "Gespeichert — leer lassen, um es beizubehalten",
+  "auth.keyRemembered": "Für diesen Mac gespeichert — bleibt nach einem Neustart lesbar.",
+  "auth.keyNeedsRepick": "Dieser Schlüssel ist im App-Store-Build nicht zugänglich — auf „Durchsuchen“ klicken, um ihn neu auszuwählen und den Zugriff wiederherzustellen.",
   "auth.agentHint": "Verwendet Ihren laufenden SSH-Agent — keine Schlüsseldatei oder Passwort.",
   "auth.agentUnavailable": "SSH-Agent-Authentifizierung ist in dieser Version nicht verfügbar. Wählen Sie stattdessen einen privaten Schlüssel oder ein Passwort.",
   "mon.title": "Aktive Tunnel",

@@ -38,9 +38,11 @@
 //
 // The renderer is sandboxed and can't read process.mas itself, so `capabilities()`
 // is handed to it over IPC (app:capabilities → window.jumphippo.build) and the UI
-// gates on the map; main gates the same features directly on the predicates. The
-// remaining sandbox caveats (~/.ssh/known_hosts, key-file paths across relaunch)
-// still degrade gracefully and are documented in STORE-PUBLISHING.md.
+// gates on the map; main gates the same features directly on the predicates. Two
+// former sandbox caveats are now fixed at the entitlement level — key-file paths
+// survive a relaunch (Feature 190, app-scoped bookmarks) and ~/.ssh/known_hosts is
+// read from the real home (home-relative-path temporary exception) — so the only
+// remaining hard limit is the ssh-agent socket. See STORE-PUBLISHING.md.
 "use strict";
 
 /** True in a Mac App Store (sandboxed) build. */

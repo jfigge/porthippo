@@ -133,6 +133,8 @@
   "auth.password": "パスワード",
   "auth.secretSet": "•••• 設定済み",
   "auth.secretKeep": "保存済み — 空欄のままにすると維持されます",
+  "auth.keyRemembered": "この Mac に記憶されました — 再起動後も読み取れます。",
+  "auth.keyNeedsRepick": "この鍵は App Store 版ではアクセスできません — 「参照」をクリックして選び直し、アクセスを回復してください。",
   "auth.agentHint": "実行中の SSH エージェントを使用します — 鍵ファイルやパスワードは不要です。",
   "auth.agentUnavailable": "このバージョンでは SSH エージェント認証を使用できません。代わりに秘密鍵またはパスワードを選択してください。",
   "mon.title": "稼働中のトンネル",

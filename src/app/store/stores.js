@@ -38,6 +38,7 @@ const { CredentialStore } = require("./credential-store");
 const { JumpHostStore } = require("./jump-host-store");
 const { GroupStore } = require("./group-store");
 const { KnownHostsStore } = require("./known-hosts-store");
+const { KeyBookmarkStore } = require("./key-bookmark-store");
 const { SettingsStore } = require("./settings-store");
 
 class Stores {
@@ -59,6 +60,7 @@ class Stores {
     this._jumpHostStore = new JumpHostStore(this._paths);
     this._groupStore = new GroupStore(this._paths);
     this._knownHostsStore = new KnownHostsStore(this._paths);
+    this._keyBookmarkStore = new KeyBookmarkStore(this._paths);
     this._settingsStore = new SettingsStore(this._paths);
   }
 
@@ -85,6 +87,14 @@ class Stores {
   /** Jump-Hippo-accepted SSH host-key fingerprints (TOFU). */
   knownHostsStore() {
     return this._knownHostsStore;
+  }
+
+  /**
+   * Machine-local security-scoped bookmarks for picked private keys (Feature 190,
+   * MAS only; a no-op token store off the sandbox). Never exported, never logged.
+   */
+  keyBookmarkStore() {
+    return this._keyBookmarkStore;
   }
 
   /** App-wide preferences. */

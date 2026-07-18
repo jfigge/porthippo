@@ -42,6 +42,7 @@ export class CredentialEditorDialog {
   #dialog;
   #jumphippo;
   #openKeyFile;
+  #keyStatus;
   #onSaved;
 
   #form = blankForm();
@@ -57,13 +58,18 @@ export class CredentialEditorDialog {
   /**
    * @param {object} [opts]
    * @param {object} [opts.jumphippo]  IPC bridge (defaults to window.jumphippo)
-   * @param {() => Promise<string|null>} [opts.openKeyFile]
+   * @param {() => Promise<string|{path:string,remembered?:boolean}|null>} [opts.openKeyFile]
+   * @param {(path: string) => Promise<{needsRepick:boolean}>} [opts.keyStatus]
+   *        query whether a stored key path needs re-picking (Feature 190, MAS).
    * @param {(record: object) => void} [opts.onSaved]  the created/updated record
    */
-  constructor({ jumphippo, openKeyFile, onSaved } = {}) {
+  constructor({ jumphippo, openKeyFile, keyStatus, onSaved } = {}) {
     this.#jumphippo = jumphippo || window.jumphippo;
     this.#openKeyFile =
-      openKeyFile || (() => this.#jumphippo?.dialog?.openKeyFile?.());
+      openKeyFile ||
+      ((defaultPath) => this.#jumphippo?.dialog?.openKeyFile?.(defaultPath));
+    this.#keyStatus =
+      keyStatus || ((path) => this.#jumphippo?.dialog?.keyStatus?.(path));
     this.#onSaved = onSaved;
 
     this.#dialog = new Dialog({
@@ -108,6 +114,15 @@ export class CredentialEditorDialog {
         : this.#defaultAuthType(),
       keyPath: str(c.keyPath),
       secretValue: "",
+      // Feature 190: set true right after a Browse that stored a durable
+      // security-scoped bookmark (MAS), to reassure the user the key survives a
+      // relaunch. Never known from a loaded credential — the renderer never sees
+      // the bookmark — so it always starts false.
+      keyRemembered: false,
+      // Feature 190: set true when the stored key path has NO bookmark in a MAS
+      // build (so it can't be read after a relaunch) — resolved async against main
+      // in #refreshKeyStatus, which then shows the "re-pick this key" warning.
+      keyNeedsRepick: false,
     };
     this.#labelInput.value = this.#form.label;
     this.#userInput.value = this.#form.user;
@@ -119,6 +134,33 @@ export class CredentialEditorDialog {
     this.#renderTypeFields();
     applyFieldErrors(this.#dialog.body, {});
     this.#dialog.clearError();
+    // A stored key credential may predate Feature 190 (or have a typed path), so it
+    // has no bookmark and can't be read in the MAS sandbox. Check async and, if so,
+    // surface the "re-pick this key" nudge.
+    this.#refreshKeyStatus();
+  }
+
+  /**
+   * Ask main whether the current key path needs re-picking to stay readable
+   * (Feature 190, MAS only) and reflect it in the warning. Off MAS / with a
+   * bookmark present this resolves `needsRepick:false` and shows nothing. A result
+   * for a path the user has since changed (or a non-key type) is ignored.
+   */
+  async #refreshKeyStatus() {
+    if (this.#form.authType !== "key" || !this.#form.keyPath) return;
+    const path = this.#form.keyPath;
+    let status;
+    try {
+      status = await this.#keyStatus(path);
+    } catch {
+      return; // query unavailable / failed → no nudge (fail safe)
+    }
+    if (this.#form.authType !== "key" || this.#form.keyPath !== path) return;
+    const needs = status?.needsRepick === true;
+    if (needs !== this.#form.keyNeedsRepick) {
+      this.#form.keyNeedsRepick = needs;
+      this.#renderTypeFields();
+    }
   }
 
   /** The default auth type for a NEW credential: agent when this build allows it. */
@@ -261,8 +303,20 @@ export class CredentialEditorDialog {
             browseBtn,
           ]),
           errorKey: "keyPath",
+          // Feature 190 (MAS): confirm a picked key was bookmarked for reuse.
+          hint: this.#form.keyRemembered ? t("auth.keyRemembered") : undefined,
         }),
       );
+      // Feature 190 (MAS): the stored key has no bookmark, so it can't be read
+      // after a relaunch — prompt a re-pick (Browse re-mints the bookmark).
+      if (this.#form.keyNeedsRepick && !this.#form.keyRemembered) {
+        this.#typeFieldsEl.append(
+          el("p", {
+            class: "auth-keypath-warning",
+            text: t("auth.keyNeedsRepick"),
+          }),
+        );
+      }
     }
 
     const secretField = secretFieldForAuthType(type);
@@ -312,13 +366,29 @@ export class CredentialEditorDialog {
     this.#form.authType = type;
     this.#form.secretValue = ""; // a password isn't a passphrase — never carry over
     this.#renderTypeFields();
+    // Switching TO key with a retained path may need the re-pick nudge (F190).
+    if (type === "key") this.#refreshKeyStatus();
   }
 
   async #browse(pathInput) {
-    const path = await this.#openKeyFile();
+    // main returns `{ path, remembered }` (Feature 190); tolerate a bare string
+    // too so an injected picker stays compatible. Pass the current path so the
+    // panel opens at that key's location (pre-selected) when re-picking.
+    const picked = await this.#openKeyFile(this.#form.keyPath || undefined);
+    const path = typeof picked === "string" ? picked : picked?.path;
     if (!path) return;
     this.#form.keyPath = path;
     pathInput.value = path;
+    // A fresh pick that minted a bookmark (MAS) clears any "re-pick" warning and
+    // shows the "remembered" reassurance. Off MAS `remembered` is always false.
+    const remembered =
+      typeof picked === "object" && picked?.remembered === true;
+    this.#form.keyRemembered = remembered;
+    if (remembered) this.#form.keyNeedsRepick = false;
+    this.#renderTypeFields();
+    // Re-confirm the new path's status against main (authoritative — covers a MAS
+    // pick whose bookmark failed to store, and clears a stale nudge off MAS).
+    this.#refreshKeyStatus();
   }
 
   // ── Save ────────────────────────────────────────────────────────────────────
@@ -371,5 +441,7 @@ function blankForm() {
     authType: "agent",
     keyPath: "",
     secretValue: "",
+    keyRemembered: false,
+    keyNeedsRepick: false,
   };
 }

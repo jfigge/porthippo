@@ -37,9 +37,36 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
-/** Default location of the user's OpenSSH known_hosts file. */
+/**
+ * The user's REAL home directory.
+ *
+ * `os.homedir()` reads `$HOME`, which the macOS App Sandbox REDIRECTS to the app's
+ * own container (`…/Containers/com.jumphippo.app/Data`) — so a `~`-relative path
+ * resolves to a dead directory inside the container that never holds the user's
+ * real `.ssh`. `os.userInfo()` reads the passwd database via `getpwuid()`, which
+ * returns the true home even inside the sandbox. Off-sandbox the two are identical.
+ * Fall back to `os.homedir()` only if the passwd lookup has no entry (rare — some
+ * minimal CI / container users).
+ */
+function realHomeDir() {
+  try {
+    const home = os.userInfo().homedir;
+    if (home) return home;
+  } catch {
+    /* no passwd entry — fall back to $HOME */
+  }
+  return os.homedir();
+}
+
+/**
+ * Default location of the user's OpenSSH known_hosts file. Resolved against the
+ * REAL home (see {@link realHomeDir}), so the Mac App Store sandbox reads the
+ * user's actual `~/.ssh/known_hosts` — granted by the read-only home-relative-path
+ * temporary exception in `entitlements.mas.plist` — not the empty path under the
+ * container's redirected `$HOME`.
+ */
 function defaultKnownHostsPath() {
-  return path.join(os.homedir(), ".ssh", "known_hosts");
+  return path.join(realHomeDir(), ".ssh", "known_hosts");
 }
 
 /** OpenSSH-style `SHA256:<base64-no-padding>` fingerprint of a host-key blob. */
@@ -310,6 +337,7 @@ module.exports = {
   parseKnownHosts,
   matchHostList,
   sha256Fingerprint,
+  realHomeDir,
   defaultKnownHostsPath,
   listOsKnownHosts,
 };

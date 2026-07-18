@@ -33,18 +33,33 @@ The MAS build runs under Apple's App Sandbox
 manager more than a typical app. The gated features above surface an in-UI
 explanation; the remaining caveats degrade gracefully:
 
-- **`~/.ssh/known_hosts` is invisible** — the sandbox container gets its own
-  `$HOME`, so OS-level known hosts can't be read. Host-key verification falls
-  back to Jump Hippo's own accepted-keys store and the TOFU prompts, which work
-  unchanged.
+- **`~/.ssh/known_hosts` is read from the real home** — the sandbox redirects
+  `$HOME` to the container, so a naïve `os.homedir()` lookup lands on a dead
+  `…/Containers/…/Data/.ssh` path. Jump Hippo instead resolves the **real** home
+  via `getpwuid` (`os.userInfo().homedir`, which ignores the redirected `$HOME`)
+  and reads the actual `~/.ssh/known_hosts`, granted by a **read-only
+  home-relative-path temporary exception** scoped to that single file
+  (`entitlements.mas.plist`). So host-key verification matches the same hosts the
+  system `ssh` already trusts, and the Host Keys → "Operating System" tab shows a
+  real inventory (not an empty container path). Jump Hippo's own accepted-keys
+  store + TOFU prompts still apply on top. **App Store review note:**
+  temporary-exception entitlements require a justification in the App Review notes
+  and can be challenged; the grant is deliberately the single `known_hosts` file
+  (never the whole `~/.ssh`, so private keys are never exposed) to keep the ask
+  minimal and defensible. Verify the read actually works on-device with a
+  `make mas-dev` build (below).
 - **ssh-agent auth doesn't work** — the agent's socket (`SSH_AUTH_SOCK`) is
   outside the sandbox. The agent auth option is now **gated out** of the MAS
   build (see the table above); use key-file or password credentials.
-- **Key-file paths don't survive a relaunch** — the open dialog
-  (`files.user-selected.read-only`) grants access only for the session; on the
-  next launch the stored path can't be re-read until the user re-picks the
-  file. Fixing this properly needs security-scoped bookmarks — see
-  `features/190-security-scoped-key-bookmarks.md`.
+- **Key-file paths survive a relaunch (Feature 190)** — the open dialog
+  (`files.user-selected.read-only`) grants access only for the session, so on
+  its own the stored path can't be re-read after a quit. Jump Hippo now mints an
+  app-scoped **security-scoped bookmark** at pick time
+  (`files.bookmarks.app-scope`, stored machine-locally in `key-bookmarks.json`,
+  never exported) and brackets every key read with start/stop-accessing, so a
+  key-auth tunnel authenticates on the next launch with no re-pick. A
+  moved/deleted key (stale bookmark) degrades to the old "re-pick the key" flow
+  — a clean auth failure, never a crash — and re-picking re-mints the bookmark.
 - **Local-network hosts need permission (macOS 15+)** — a jump host or
   destination on the LAN (`10.x`, `172.16–31.x`, `192.168.x`) triggers macOS's
   Local Network privacy gate. The connection is refused *before* the SSH

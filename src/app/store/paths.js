@@ -25,6 +25,8 @@
  *   known-hosts.json       ← Jump-Hippo-accepted SSH host-key fingerprints (TOFU)
  *   secret-storage.json    ← UNENCRYPTED secret-storage mode config (read pre-decrypt)
  *   secret.key             ← 0600 random app key for "app-key" storage mode
+ *   key-bookmarks.json     ← MACHINE-LOCAL security-scoped bookmarks for picked
+ *                            private keys (MAS only, Feature 190; never exported)
  */
 "use strict";
 
@@ -67,6 +69,16 @@ class Paths {
   /** App-key file (0600): the random 256-bit key for "app-key" storage mode. */
   secretKeyPath() {
     return path.join(this.dataDir, "secret.key");
+  }
+
+  /**
+   * Security-scoped bookmarks for user-picked private-key files (Feature 190,
+   * MAS only). MACHINE-LOCAL OS access tokens keyed by absolute path — never a
+   * secret value, never exported (kept out of the `.jumphippo` bundle) and never
+   * logged.
+   */
+  keyBookmarksPath() {
+    return path.join(this.dataDir, "key-bookmarks.json");
   }
 
   /** Directory holding the rotating application log files (Feature 60). */

@@ -133,6 +133,8 @@
   "auth.password": "密码",
   "auth.secretSet": "•••• 已设置",
   "auth.secretKeep": "已存储——留空以保持不变",
+  "auth.keyRemembered": "已为此 Mac 记住——重启后仍可读取。",
+  "auth.keyNeedsRepick": "此密钥在 App Store 版本中不可访问——点击“浏览”重新选择以恢复访问。",
   "auth.agentHint": "使用你正在运行的 SSH 代理——无需密钥文件或密码。",
   "auth.agentUnavailable": "此版本不支持 SSH 代理认证。请改用私钥或密码。",
   "mon.title": "实时隧道",
