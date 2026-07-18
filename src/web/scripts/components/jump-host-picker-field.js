@@ -15,11 +15,14 @@
  */
 
 // jump-host-picker-field.js — build the ordered jump-host chain a tunnel routes
-// through. It renders the chosen hops as a reorderable list, plus an "add" row (a
-// <select> of the remaining jump hosts and a "New…" that opens the
-// JumpHostEditorDialog). Row order IS hop order; the chosen ids are reported up as
-// `jumpHostIds[]` via the `onChange` callback. Reloads on
-// `jumphippo:jumphosts-changed`, preserving the chain (dropping any deleted ref).
+// through. It renders the chosen hops as a reorderable list, plus a picker row: a
+// <select> of every known jump host (the "focused" host) with "Add" (append it to
+// the chain), "New…" (create one) and "Edit" (edit the focused record) — the last
+// two open the JumpHostEditorDialog. Selecting focuses a host but doesn't mutate
+// the chain, so a host can be edited without being added. Row order IS hop order;
+// the chosen ids are reported up as `jumpHostIds[]` via the `onChange` callback.
+// Reloads on `jumphippo:jumphosts-changed`, preserving the chain (dropping any
+// deleted ref).
 
 import { el, clear } from "../dom.js";
 import { t } from "../i18n.js";
@@ -30,12 +33,16 @@ export class JumpHostPickerField {
   #listEl;
   #emptyEl;
   #addSelect;
+  #addBtn;
+  #editBtn;
   #jumphippo;
   #openKeyFile;
   #onChange;
   #jumpHosts = []; // available records
   #chain = []; // ordered selected ids
+  #selected = ""; // the host focused in the picker (Add/Edit target)
   #editor = null;
+  #creating = false; // whether the open editor is a create (vs. edit)
   #onJumpsChanged;
 
   /**
@@ -107,13 +114,27 @@ export class JumpHostPickerField {
     this.#addSelect = el("select", {
       class: "dialog-input jumps-add-select",
       "aria-label": t("jumps.choose"),
-      onChange: (e) => this.#add(e.target.value),
+      onChange: (e) => this.#focus(e.target.value),
+    });
+    this.#addBtn = el("button", {
+      class: "btn btn--secondary jumps-add-btn",
+      type: "button",
+      text: t("jumps.add"),
+      disabled: true,
+      onClick: () => this.#add(this.#selected),
     });
     const newBtn = el("button", {
       class: "btn btn--secondary jumps-new-btn",
       type: "button",
       text: t("jumps.new"),
       onClick: () => this.#openNew(),
+    });
+    this.#editBtn = el("button", {
+      class: "btn btn--secondary jumps-edit-btn",
+      type: "button",
+      text: t("common.edit"),
+      disabled: true,
+      onClick: () => this.#openEdit(),
     });
 
     return el("div", { class: "jump-host-picker" }, [
@@ -124,7 +145,9 @@ export class JumpHostPickerField {
       this.#listEl,
       el("div", { class: "picker-row jumps-add-row" }, [
         this.#addSelect,
+        this.#addBtn,
         newBtn,
+        this.#editBtn,
       ]),
     ]);
   }
@@ -139,17 +162,33 @@ export class JumpHostPickerField {
     this.#emptyEl.hidden = this.#chain.length > 0;
     this.#chain.forEach((id, i) => this.#listEl.appendChild(this.#row(id, i)));
 
-    // Add-select options: only jump hosts not already in the chain.
+    // The picker lists every known jump host so any of them can be focused for
+    // editing; Add is what guards against re-adding one already in the chain.
     clear(this.#addSelect);
-    const inChain = new Set(this.#chain);
-    const available = this.#jumpHosts.filter((j) => !inChain.has(j.id));
     this.#addSelect.append(
       el("option", { value: "", text: t("jumps.choose") }),
-      ...available.map((j) =>
+      ...this.#jumpHosts.map((j) =>
         el("option", { value: j.id, text: this.#label(j) }),
       ),
     );
-    this.#addSelect.value = "";
+    this.#addSelect.value = this.#selected;
+    // A focused host that has since been deleted falls back to the placeholder.
+    if (this.#addSelect.value !== this.#selected) this.#selected = "";
+    this.#syncButtons();
+  }
+
+  // Enable Add only for a focused host not already in the chain; Edit for any
+  // focused host.
+  #syncButtons() {
+    this.#addBtn.disabled =
+      !this.#selected || this.#chain.includes(this.#selected);
+    this.#editBtn.disabled = !this.#selected;
+  }
+
+  // Focus a host in the picker (the Add/Edit target); does not touch the chain.
+  #focus(id) {
+    this.#selected = typeof id === "string" ? id : "";
+    this.#syncButtons();
   }
 
   #row(id, index) {
@@ -218,11 +257,16 @@ export class JumpHostPickerField {
       jumphippo: this.#jumphippo,
       openKeyFile: this.#openKeyFile,
       onSaved: async (record) => {
+        const created = this.#creating;
         await this.refresh();
-        if (record && record.id && !this.#chain.includes(record.id)) {
-          this.#chain.push(record.id);
+        if (record && record.id) {
+          this.#selected = record.id; // keep the saved host focused
+          // A newly created host joins the chain; an edit leaves it untouched.
+          if (created && !this.#chain.includes(record.id)) {
+            this.#chain.push(record.id);
+            this.#onChange?.(this.value);
+          }
           this.#render();
-          this.#onChange?.(this.value);
         }
       },
     });
@@ -230,6 +274,15 @@ export class JumpHostPickerField {
   }
 
   #openNew() {
+    this.#creating = true;
     this.#ensureEditor().openCreate();
+  }
+
+  async #openEdit() {
+    if (!this.#selected) return;
+    const jump = await this.#jumphippo?.jumpHosts?.get?.(this.#selected);
+    if (!jump) return;
+    this.#creating = false;
+    this.#ensureEditor().openEdit(jump);
   }
 }

@@ -43,12 +43,22 @@ explanation; the remaining caveats degrade gracefully:
 - **Key-file paths don't survive a relaunch** — the open dialog
   (`files.user-selected.read-only`) grants access only for the session; on the
   next launch the stored path can't be re-read until the user re-picks the
-  file. Fixing this properly needs security-scoped bookmarks — write a numbered
-  feature plan for that before submitting to MAS.
+  file. Fixing this properly needs security-scoped bookmarks — see
+  `features/190-security-scoped-key-bookmarks.md`.
+- **Local-network hosts need permission (macOS 15+)** — a jump host or
+  destination on the LAN (`10.x`, `172.16–31.x`, `192.168.x`) triggers macOS's
+  Local Network privacy gate. The connection is refused *before* the SSH
+  handshake — so no host-key prompt appears and it looks like a host-key
+  problem, not a permission one. The `mac`/`mas` builds now declare
+  `NSLocalNetworkUsageDescription` (in `package.json` → `build.mac/mas.extendInfo`)
+  so macOS shows a proper prompt; the user must approve it (Settings → Privacy &
+  Security → Local Network). Purely public / non-LAN hosts are unaffected.
 
 Local listeners keep working (`network.server` is entitled), as do outbound SSH
 connections (`network.client`) and everything stored in `userData` (definitions,
-encrypted secrets, accepted keys, logs).
+encrypted secrets, accepted keys, logs). Note the log path is resolved *after*
+`app.whenReady()` (a lazy dir thunk in `logger.js`) — resolving it at module-load
+lands it outside the sandbox container, where every write is silently denied.
 
 The build targets and CI jobs **graceful-skip** until you supply the external
 accounts and certificates, so all of this is already in the repo and nothing

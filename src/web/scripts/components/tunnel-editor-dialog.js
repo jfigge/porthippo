@@ -541,19 +541,21 @@ export class TunnelEditorDialog {
     if (hint) hint.textContent = t(`editor.type.${type}.desc`);
   }
 
-  /** Update a field wrapper's label / hint / tooltip + its input placeholder. */
+  /** Update a field wrapper's label / help icon / tooltip + its input placeholder. */
   #relabelField(fieldEl, cfg, input) {
     if (!fieldEl || !cfg) return;
     const labelEl = fieldEl.querySelector(".field-label");
-    if (labelEl) {
-      labelEl.textContent = cfg.label;
-      if (cfg.description) labelEl.title = cfg.description;
+    if (labelEl) labelEl.textContent = cfg.label;
+    // Help now lives on the (i) icon beside the label (and the input's tooltip).
+    const help = [cfg.hint, cfg.description].filter(Boolean).join("\n\n");
+    const infoEl = fieldEl.querySelector(".field-info");
+    if (infoEl) {
+      infoEl.title = help;
+      infoEl.setAttribute("aria-label", help);
     }
-    const hintEl = fieldEl.querySelector(".field-hint");
-    if (hintEl) hintEl.textContent = cfg.hint || "";
     if (input) {
       if (cfg.placeholder !== undefined) input.placeholder = cfg.placeholder;
-      if (cfg.description) input.title = cfg.description;
+      input.title = help;
     }
   }
 

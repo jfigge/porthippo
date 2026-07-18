@@ -102,7 +102,13 @@ function resolveLogsDir() {
     return path.join(os.tmpdir(), "jumphippo-logs");
   }
 }
-const logger = createLogger({ dir: resolveLogsDir() });
+// Pass the resolver as a THUNK, not a resolved string: under the macOS App
+// Sandbox, app.getPath("userData") read here at module-load (before
+// app.whenReady()) points outside the writable container, so every log write
+// would be silently denied and the entire MAS log would go missing. The lazy
+// dir re-resolves on each write, landing the log in the container once the app
+// is ready — matching how the store (getStores) already defers its path.
+const logger = createLogger({ dir: resolveLogsDir });
 logger.install();
 
 /**

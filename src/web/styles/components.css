@@ -111,12 +111,36 @@
   color: var(--color-subtext);
 }
 
-/* A label carrying a long-form description (native title tooltip): hint that
-   there's more on hover with a dotted underline + a help cursor. */
-.field-label--described {
-  text-decoration: underline dotted var(--color-overlay);
-  text-underline-offset: 3px;
+/* A field's help lives on an (i) info icon beside the label rather than as
+   always-visible helper text; the text is carried in the icon's native tooltip. */
+.field-label-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.field-info {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--color-overlay);
+  border-radius: 50%;
+  color: var(--color-muted);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 10px;
+  font-style: italic;
+  font-weight: 700;
+  line-height: 1;
   cursor: help;
+  user-select: none;
+}
+
+.field-info:hover {
+  color: var(--color-subtext);
+  border-color: var(--color-subtext);
 }
 
 .field input,

@@ -286,8 +286,15 @@ function makeHostVerifier(opts) {
         if (accepted) {
           try {
             knownHostsStore.trust(hostPort, fingerprint);
-          } catch {
-            // Persisting the trust is best-effort; the connection may still proceed.
+          } catch (err) {
+            // Persisting the trust is best-effort; the connection may still
+            // proceed. Surface it though — a swallowed failure here is exactly
+            // how "new known hosts are not added" hides (e.g. a sandboxed store
+            // that can't write its accepted-keys file).
+            console.warn(
+              `[host-verifier] failed to persist accepted key for ${hostPort}:`,
+              (err && err.message) || err,
+            );
           }
           verify(true);
         } else {

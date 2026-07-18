@@ -88,13 +88,22 @@ function formatArg(arg) {
  * @returns {object} the logger API
  */
 function createLogger(opts = {}) {
-  const dir = opts.dir;
+  // The log directory may be resolved LAZILY: pass a `() => dir` thunk to defer
+  // it until each write instead of freezing it at construction. This matters
+  // under the macOS App Sandbox — `app.getPath("userData")` read at module-load
+  // (before `app.whenReady()`) resolves OUTSIDE the writable container, so every
+  // append there is denied and silently lost (the whole MAS log went missing).
+  // Re-resolving after the app is ready lands the log inside the container, like
+  // the rest of the store. A plain string keeps the old eager behaviour (tests
+  // and non-sandboxed callers).
+  const resolveDir = typeof opts.dir === "function" ? opts.dir : () => opts.dir;
   const fileName = opts.fileName || DEFAULTS.fileName;
   const maxBytes = opts.maxBytes || DEFAULTS.maxBytes;
   const maxFiles = opts.maxFiles || DEFAULTS.maxFiles;
   const minLevel = LEVELS[opts.level] || LEVELS[DEFAULTS.level];
 
-  const currentPath = path.join(dir, fileName);
+  const currentDir = () => resolveDir();
+  const currentPathOf = () => path.join(currentDir(), fileName);
 
   // Capture the real console up front so a write failure can be reported without
   // recursing through the patched methods that install() puts in place.
@@ -111,7 +120,7 @@ function createLogger(opts = {}) {
   const rotatedPath = (n) => {
     const ext = path.extname(fileName);
     const stem = ext ? fileName.slice(0, -ext.length) : fileName;
-    return path.join(dir, `${stem}.${n}${ext}`);
+    return path.join(currentDir(), `${stem}.${n}${ext}`);
   };
 
   function rotate() {
@@ -129,7 +138,7 @@ function createLogger(opts = {}) {
       }
     }
     try {
-      fs.renameSync(currentPath, rotatedPath(1));
+      fs.renameSync(currentPathOf(), rotatedPath(1));
     } catch {
       /* nothing to rotate yet — ignore */
     }
@@ -142,17 +151,19 @@ function createLogger(opts = {}) {
       scope ? ` [${scope}]` : ""
     } ${message}\n`;
     try {
-      fs.mkdirSync(dir, { recursive: true });
+      const activeDir = currentDir();
+      const activePath = path.join(activeDir, fileName);
+      fs.mkdirSync(activeDir, { recursive: true });
       let size = 0;
       try {
-        size = fs.statSync(currentPath).size;
+        size = fs.statSync(activePath).size;
       } catch {
         size = 0;
       }
       // Rotate before writing when a non-empty file would exceed the cap. A
       // single over-cap line still lands (in a fresh file) rather than be lost.
       if (size > 0 && size + Buffer.byteLength(line) > maxBytes) rotate();
-      fs.appendFileSync(currentPath, line);
+      fs.appendFileSync(activePath, line);
     } catch (err) {
       // Never let logging crash the app; surface via the untouched console.
       origConsole.error("[logger] write failed:", err && err.message);
@@ -165,10 +176,14 @@ function createLogger(opts = {}) {
     warn: (scope, ...parts) => write("warn", scope, parts),
     error: (scope, ...parts) => write("error", scope, parts),
 
-    /** The directory holding the log files. */
-    dir,
+    /** The directory holding the log files (re-resolved from a lazy dir thunk). */
+    get dir() {
+      return currentDir();
+    },
     /** Absolute path of the current (newest) log file. */
-    currentPath,
+    get currentPath() {
+      return currentPathOf();
+    },
 
     /**
      * Tee `console.*` into the log file. Idempotent. The original console still
@@ -206,6 +221,7 @@ function createLogger(opts = {}) {
     /** Existing log files, newest-first: [main.log, main.1.log, …]. */
     listFiles() {
       const files = [];
+      const currentPath = currentPathOf();
       try {
         if (fs.statSync(currentPath).size >= 0) files.push(currentPath);
       } catch {

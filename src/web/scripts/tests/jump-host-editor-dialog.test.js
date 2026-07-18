@@ -77,6 +77,48 @@ test("a valid create persists, closes and emits jumphosts-changed", async () => 
   assert.deepEqual(changed[0], { id: "j9" });
 });
 
+test("openEdit prefills the form and a save updates that record", async () => {
+  const calls = {};
+  const changed = [];
+  const saved = [];
+  const dlg = mount(calls, (r) => saved.push(r));
+  window.addEventListener("jumphippo:jumphosts-changed", (e) =>
+    changed.push(e.detail),
+  );
+  await dlg.openEdit({
+    id: "j5",
+    label: "Corp bastion",
+    host: "bastion.corp",
+    port: 2222,
+    credentialId: "c1",
+  });
+
+  assert.ok(dlg.element.open);
+  assert.equal(q(dlg, '[aria-label="Name"]').value, "Corp bastion");
+  assert.equal(q(dlg, '[aria-label="Host"]').value, "bastion.corp");
+  assert.equal(q(dlg, '[aria-label="Port"]').value, "2222");
+
+  typeInto(q(dlg, '[aria-label="Host"]'), "bastion2.corp");
+  dlg.element
+    .querySelector("form")
+    .dispatchEvent(new Event("submit", { cancelable: true }));
+  await flush();
+
+  assert.equal(calls.create, undefined, "edit must not create");
+  assert.deepEqual(calls.update[0], {
+    id: "j5",
+    p: {
+      label: "Corp bastion",
+      host: "bastion2.corp",
+      port: 2222,
+      credentialId: "c1",
+    },
+  });
+  assert.ok(!dlg.element.open);
+  assert.deepEqual(changed[0], { id: "j5" });
+  assert.equal(saved[0].id, "j5");
+});
+
 test("a jump host with no credential shows a field error and doesn't persist", async () => {
   const calls = {};
   const dlg = mount(calls);

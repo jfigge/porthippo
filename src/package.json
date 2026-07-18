@@ -28,11 +28,11 @@
   "devDependencies": {
     "@eslint/js": "^9.39.4",
     "dompurify": "^3.4.7",
-    "electron": "^42.1.0",
-    "electron-builder": "~26.8.1",
+    "electron": "^43.1.1",
+    "electron-builder": "~26.15.3",
     "esbuild": "^0.28.0",
     "eslint": "^9.39.4",
-    "globals": "^16.1.0",
+    "globals": "^17.7.0",
     "jsdom": "^27.0.1",
     "marked": "^18.0.4",
     "prettier": "^3.3.3"
@@ -67,7 +67,8 @@
       "category": "public.app-category.developer-tools",
       "icon": "web/jumphippo-mac-icon.png",
       "extendInfo": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSLocalNetworkUsageDescription": "Jump Hippo needs local network access to open SSH tunnels to hosts on your local network, such as a jump host or destination at a 10.x, 172.16–31.x or 192.168.x address."
       },
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
@@ -94,7 +95,8 @@
     "mas": {
       "type": "distribution",
       "extendInfo": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSLocalNetworkUsageDescription": "Jump Hippo needs local network access to open SSH tunnels to hosts on your local network, such as a jump host or destination at a 10.x, 172.16–31.x or 192.168.x address."
       },
       "category": "public.app-category.developer-tools",
       "icon": "web/jumphippo-mac-icon.png",

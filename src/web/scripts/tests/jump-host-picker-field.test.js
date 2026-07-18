@@ -24,7 +24,10 @@ const flush = () => new Promise((r) => setTimeout(r, 0));
 function stub(jumps) {
   const list = [...jumps];
   return {
-    jumpHosts: { list: async () => list },
+    jumpHosts: {
+      list: async () => list,
+      get: async (id) => list.find((j) => j.id === id) || null,
+    },
     credentials: { list: async () => [] },
     _list: list,
   };
@@ -45,6 +48,8 @@ async function mount(jumps, onChange) {
 }
 
 const addSelect = (p) => p.element.querySelector(".jumps-add-select");
+const addBtn = (p) => p.element.querySelector(".jumps-add-btn");
+const editBtn = (p) => p.element.querySelector(".jumps-edit-btn");
 const rows = (p) => p.element.querySelectorAll(".jumps-chain-row");
 
 test("an empty chain shows the direct-connection hint", async () => {
@@ -53,18 +58,32 @@ test("an empty chain shows the direct-connection hint", async () => {
   assert.equal(rows(picker).length, 0);
 });
 
-test("adding a jump host appends it and reports the chain", async () => {
+test("choosing a jump host focuses it without touching the chain", async () => {
   const emitted = [];
   const { picker } = await mount(undefined, (ids) => emitted.push(ids));
   change(addSelect(picker), "j1");
+  assert.deepEqual(picker.value, []);
+  assert.deepEqual(emitted, []);
+  assert.equal(rows(picker).length, 0);
+  // Focusing enables Add + Edit for that host.
+  assert.equal(addBtn(picker).disabled, false);
+  assert.equal(editBtn(picker).disabled, false);
+});
+
+test("Add appends the focused jump host and reports the chain", async () => {
+  const emitted = [];
+  const { picker } = await mount(undefined, (ids) => emitted.push(ids));
+  change(addSelect(picker), "j1");
+  addBtn(picker).click();
   assert.deepEqual(picker.value, ["j1"]);
   assert.deepEqual(emitted.at(-1), ["j1"]);
   assert.equal(rows(picker).length, 1);
-  // The add-select no longer offers an already-chosen host.
+  // The picker still lists every host, but Add is now disabled for the chosen one.
   const optionValues = [...addSelect(picker).querySelectorAll("option")].map(
     (o) => o.value,
   );
-  assert.deepEqual(optionValues, ["", "j2"]);
+  assert.deepEqual(optionValues, ["", "j1", "j2"]);
+  assert.equal(addBtn(picker).disabled, true);
 });
 
 test("reorder + remove keep the chain in sync", async () => {
@@ -102,4 +121,22 @@ test("New… opens the jump-host editor dialog", async () => {
   await flush();
   const dialog = document.querySelector(".jump-host-dialog");
   assert.ok(dialog && dialog.open);
+});
+
+test("Edit is disabled until a jump host is focused", async () => {
+  const { picker } = await mount();
+  assert.equal(editBtn(picker).disabled, true);
+  change(addSelect(picker), "j1");
+  assert.equal(editBtn(picker).disabled, false);
+});
+
+test("Edit opens the editor for the focused host without adding it", async () => {
+  const { picker } = await mount();
+  change(addSelect(picker), "j1");
+  editBtn(picker).click();
+  await flush();
+  const dialog = document.querySelector(".jump-host-dialog");
+  assert.ok(dialog && dialog.open);
+  // Editing a host that isn't in the chain must not add it.
+  assert.deepEqual(picker.value, []);
 });
