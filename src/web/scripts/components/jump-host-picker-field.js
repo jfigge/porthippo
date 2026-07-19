@@ -16,16 +16,20 @@
 
 // jump-host-picker-field.js — build the ordered jump-host chain a tunnel routes
 // through. It renders the chosen hops as a reorderable list, plus a picker row: a
-// <select> of every known jump host (the "focused" host) with "Add" (append it to
-// the chain), "New…" (create one) and "Edit" (edit the focused record) — the last
-// two open the JumpHostEditorDialog. Selecting focuses a host but doesn't mutate
-// the chain, so a host can be edited without being added. Row order IS hop order;
-// the chosen ids are reported up as `jumpHostIds[]` via the `onChange` callback.
-// Reloads on `jumphippo:jumphosts-changed`, preserving the chain (dropping any
-// deleted ref).
+// <select> of every known jump host (the "focused" host) with icon actions — Add
+// (append it to the chain), New… (create one), Edit (edit the focused record) and
+// Delete (remove the focused record entirely). New…/Edit open the
+// JumpHostEditorDialog; Delete confirms, then removes the reusable record (blocked
+// with an explanation when a tunnel still uses it). Selecting focuses a host but
+// doesn't mutate the chain, so a host can be edited/deleted without being added.
+// Row order IS hop order; the chosen ids are reported up as `jumpHostIds[]` via the
+// `onChange` callback. Reloads on `jumphippo:jumphosts-changed`, preserving the
+// chain (dropping any deleted ref).
 
 import { el, clear } from "../dom.js";
 import { t } from "../i18n.js";
+import { icons } from "../icons.js";
+import { PopupManager } from "../popup-manager.js";
 import { JumpHostEditorDialog } from "./jump-host-editor-dialog.js";
 
 export class JumpHostPickerField {
@@ -35,6 +39,7 @@ export class JumpHostPickerField {
   #addSelect;
   #addBtn;
   #editBtn;
+  #deleteBtn;
   #jumphippo;
   #openKeyFile;
   #onChange;
@@ -116,26 +121,33 @@ export class JumpHostPickerField {
       "aria-label": t("jumps.choose"),
       onChange: (e) => this.#focus(e.target.value),
     });
-    this.#addBtn = el("button", {
-      class: "btn btn--secondary jumps-add-btn",
-      type: "button",
-      text: t("jumps.add"),
-      disabled: true,
-      onClick: () => this.#add(this.#selected),
-    });
-    const newBtn = el("button", {
-      class: "btn btn--secondary jumps-new-btn",
-      type: "button",
-      text: t("jumps.new"),
-      onClick: () => this.#openNew(),
-    });
-    this.#editBtn = el("button", {
-      class: "btn btn--secondary jumps-edit-btn",
-      type: "button",
-      text: t("common.edit"),
-      disabled: true,
-      onClick: () => this.#openEdit(),
-    });
+    this.#addBtn = this.#iconBtn(
+      "jumps-add-btn",
+      t("jumps.add"),
+      icons.add(),
+      () => this.#add(this.#selected),
+      true,
+    );
+    const newBtn = this.#iconBtn(
+      "jumps-new-btn",
+      t("jumps.new"),
+      icons.filePlus(),
+      () => this.#openNew(),
+    );
+    this.#editBtn = this.#iconBtn(
+      "jumps-edit-btn",
+      t("common.edit"),
+      icons.edit(),
+      () => this.#openEdit(),
+      true,
+    );
+    this.#deleteBtn = this.#iconBtn(
+      "jumps-delete-btn",
+      t("jumps.delete"),
+      icons.trash(),
+      () => this.#confirmDelete(),
+      true,
+    );
 
     return el("div", { class: "jump-host-picker" }, [
       el("div", { class: "jumps-header" }, [
@@ -148,8 +160,22 @@ export class JumpHostPickerField {
         this.#addBtn,
         newBtn,
         this.#editBtn,
+        this.#deleteBtn,
       ]),
     ]);
+  }
+
+  /** A labelled icon button for the picker row. */
+  #iconBtn(className, label, glyph, onClick, disabled = false) {
+    return el("button", {
+      class: `btn btn--icon ${className}`,
+      type: "button",
+      title: label,
+      "aria-label": label,
+      html: glyph,
+      disabled,
+      onClick,
+    });
   }
 
   #byId(id) {
@@ -177,12 +203,13 @@ export class JumpHostPickerField {
     this.#syncButtons();
   }
 
-  // Enable Add only for a focused host not already in the chain; Edit for any
-  // focused host.
+  // Enable Add only for a focused host not already in the chain; Edit + Delete for
+  // any focused host.
   #syncButtons() {
     this.#addBtn.disabled =
       !this.#selected || this.#chain.includes(this.#selected);
     this.#editBtn.disabled = !this.#selected;
+    this.#deleteBtn.disabled = !this.#selected;
   }
 
   // Focus a host in the picker (the Add/Edit target); does not touch the chain.
@@ -284,5 +311,45 @@ export class JumpHostPickerField {
     if (!jump) return;
     this.#creating = false;
     this.#ensureEditor().openEdit(jump);
+  }
+
+  // Delete the focused jump-host RECORD (not just remove it from this chain). A
+  // light confirm (no type-to-confirm gate — it's a small, recreatable reference
+  // item, and the store blocks deletion while a tunnel still uses it). On success,
+  // announce so every open picker refreshes and prunes the dropped ref (this one
+  // included, via its jumphippo:jumphosts-changed listener).
+  #confirmDelete() {
+    const id = this.#selected;
+    if (!id) return;
+    const record = this.#byId(id);
+    const name = record ? this.#label(record) : id;
+    PopupManager.confirmDelete({
+      title: t("jumps.delete.title"),
+      message: t("jumps.delete.message", { name }),
+      requireText: false,
+      onConfirm: async () => {
+        let result;
+        try {
+          result = await this.#jumphippo?.jumpHosts?.delete?.(id);
+        } catch (err) {
+          PopupManager.notify({
+            message: err?.message || t("jumps.delete.failed"),
+          });
+          return;
+        }
+        if (result && result.__hippoError) {
+          PopupManager.notify({
+            message:
+              result.code === "IN_USE"
+                ? t("jumps.delete.inUse")
+                : result.message || t("jumps.delete.failed"),
+          });
+          return;
+        }
+        window.dispatchEvent(
+          new CustomEvent("jumphippo:jumphosts-changed", { detail: { id } }),
+        );
+      },
+    });
   }
 }

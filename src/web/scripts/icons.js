@@ -55,6 +55,15 @@ export const icons = {
     stroke(
       '<path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>',
     ),
+  // A document with a plus — "create a new record" (e.g. New jump host),
+  // distinct from the bare `add` plus used for "add an existing one".
+  filePlus: () =>
+    stroke(
+      '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>' +
+        '<polyline points="14 2 14 8 20 8"/>' +
+        '<line x1="12" y1="18" x2="12" y2="12"/>' +
+        '<line x1="9" y1="15" x2="15" y2="15"/>',
+    ),
   power: () =>
     stroke(
       '<path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/>',

@@ -18,28 +18,43 @@ import { resetDom, change } from "./jsdom-setup.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { JumpHostPickerField } from "../components/jump-host-picker-field.js";
+import { PopupManager } from "../popup-manager.js";
+import { t } from "../i18n.js";
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
+// The delete flow chains async hops (confirm → jumpHosts.delete → change event →
+// refresh → re-render); drain a few ticks so all settle.
+const settle = async () => {
+  for (let i = 0; i < 4; i++) await flush();
+};
 
-function stub(jumps) {
+function stub(jumps, deleteImpl) {
   const list = [...jumps];
   return {
     jumpHosts: {
       list: async () => list,
       get: async (id) => list.find((j) => j.id === id) || null,
+      delete:
+        deleteImpl ||
+        (async (id) => {
+          const i = list.findIndex((j) => j.id === id);
+          if (i !== -1) list.splice(i, 1);
+          return { id };
+        }),
     },
     credentials: { list: async () => [] },
     _list: list,
   };
 }
 
-async function mount(jumps, onChange) {
+async function mount(jumps, onChange, deleteImpl) {
   resetDom();
   const jumphippo = stub(
     jumps || [
       { id: "j1", label: "relay1", host: "r1", port: 22 },
       { id: "j2", label: "relay2", host: "r2", port: 22 },
     ],
+    deleteImpl,
   );
   const picker = new JumpHostPickerField({ jumphippo, onChange });
   document.body.appendChild(picker.element);
@@ -50,6 +65,7 @@ async function mount(jumps, onChange) {
 const addSelect = (p) => p.element.querySelector(".jumps-add-select");
 const addBtn = (p) => p.element.querySelector(".jumps-add-btn");
 const editBtn = (p) => p.element.querySelector(".jumps-edit-btn");
+const deleteBtn = (p) => p.element.querySelector(".jumps-delete-btn");
 const rows = (p) => p.element.querySelectorAll(".jumps-chain-row");
 
 test("an empty chain shows the direct-connection hint", async () => {
@@ -139,4 +155,74 @@ test("Edit opens the editor for the focused host without adding it", async () =>
   assert.ok(dialog && dialog.open);
   // Editing a host that isn't in the chain must not add it.
   assert.deepEqual(picker.value, []);
+});
+
+test("the picker-row actions are icon buttons with accessible labels", async () => {
+  const { picker } = await mount();
+  for (const [sel, label] of [
+    [".jumps-add-btn", t("jumps.add")],
+    [".jumps-new-btn", t("jumps.new")],
+    [".jumps-edit-btn", t("common.edit")],
+    [".jumps-delete-btn", t("jumps.delete")],
+  ]) {
+    const btn = picker.element.querySelector(sel);
+    assert.ok(btn, `${sel} present`);
+    assert.ok(btn.classList.contains("btn--icon"), `${sel} is an icon button`);
+    assert.equal(btn.getAttribute("aria-label"), label, `${sel} labelled`);
+    assert.ok(btn.querySelector("svg"), `${sel} renders an SVG glyph`);
+  }
+});
+
+test("Delete is disabled until a jump host is focused", async () => {
+  const { picker } = await mount();
+  assert.equal(deleteBtn(picker).disabled, true);
+  change(addSelect(picker), "j1");
+  assert.equal(deleteBtn(picker).disabled, false);
+});
+
+test("Delete confirms then removes the focused jump-host record (and prunes the chain)", async () => {
+  const { picker, jumphippo } = await mount();
+  const changed = [];
+  const onChanged = () => changed.push(1);
+  window.addEventListener("jumphippo:jumphosts-changed", onChanged);
+  try {
+    picker.setValue(["j1"]);
+    change(addSelect(picker), "j1");
+    deleteBtn(picker).click();
+
+    const danger = document.querySelector(".popup-confirm .btn--danger");
+    assert.ok(danger, "the delete confirm opened");
+    assert.equal(danger.disabled, false, "no type-to-confirm gate for a host");
+    danger.click();
+    await settle();
+
+    assert.equal(
+      jumphippo._list.find((j) => j.id === "j1"),
+      undefined,
+      "the record was deleted",
+    );
+    assert.deepEqual(picker.value, [], "and pruned from the chain");
+    assert.ok(changed.length >= 1, "announced jumphosts-changed");
+  } finally {
+    window.removeEventListener("jumphippo:jumphosts-changed", onChanged);
+    PopupManager.close();
+  }
+});
+
+test("Delete blocked while in use shows a notice and keeps the host", async () => {
+  const inUse = async () => ({ __hippoError: true, code: "IN_USE" });
+  const { picker, jumphippo } = await mount(undefined, undefined, inUse);
+  change(addSelect(picker), "j1");
+  deleteBtn(picker).click();
+  document.querySelector(".popup-confirm .btn--danger").click();
+  await settle();
+
+  const notify = document.querySelector(".popup-notify .popup-message");
+  assert.ok(notify, "an in-use notice is shown");
+  assert.equal(notify.textContent, t("jumps.delete.inUse"));
+  assert.ok(
+    jumphippo._list.find((j) => j.id === "j1"),
+    "the host is kept (not deleted)",
+  );
+  PopupManager.close();
 });

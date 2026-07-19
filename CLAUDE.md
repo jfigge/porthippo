@@ -21,8 +21,10 @@ engine, monitoring/stats, the Definition + Monitoring views, CI/CD packaging, th
 (tray, hide-to-tray, launch-at-login, settings, native menu, logging/diagnostics, i18n),
 selectable secret storage (Settings → Security: device key / OS keychain / master password),
 hostname-resolution validation, and the docs layer (Feature 80: single-source user guide
-rendered in-app + on the website, plus repo hygiene files). When a stage is finished, move
-its plan file into `features/done/`.
+rendered in-app + on the website, plus repo hygiene files). **Feature 190** (MAS
+security-scoped bookmarks for key files) has also landed, and with it the App-Sandbox
+`~/.ssh/known_hosts` read fix (resolve the real home via `getpwuid`, not the redirected
+`$HOME`). When a stage is finished, move its plan file into `features/done/`.
 
 ## Source Directories
 
@@ -32,7 +34,9 @@ its plan file into `features/done/`.
   `tray-icon.js`, `menu.js`, `login-item.js`, `logger.js`, `diagnostics.js`, and `i18n.js`
   (main-side catalog loader). `store-build.js` is the single "is this a Mac App Store /
   Microsoft Store build?" predicate — store-incompatible features (the self-updater)
-  gate on it at runtime; see `STORE-PUBLISHING.md`.
+  gate on it at runtime; see `STORE-PUBLISHING.md`. `secure-file.js` (Feature 190) owns the
+  Electron security-scoped-bookmark access and hands the engine an injected key reader, so
+  the engine stays Electron-free.
 - `src/web/` — **renderer** (Vanilla JS ES modules + CSS): UI. Sandboxed; talks to main
   only through `window.jumphippo.*`.
 - `src/web/fonts/` — bundled Inter variable font; never load fonts from a CDN.
@@ -66,7 +70,9 @@ Electron main process (src/app/main.js)
 - Request/response IPC channels are registered in `ipc/store.js` (CRUD + settings +
   `hostkeys:list|revoke`), `ipc/engine.js` (`tunnels:arm|disarm|status|pause|resume|apply`,
   `hostkeys:trust|reject`), `ipc/resolve.js` (`resolve:lookup|test|cancel` — Feature 100),
-  `ipc/dialog.js` (`dialog:open-key-file`), `ipc/context-menu.js` (`menu:popup` — the
+  `ipc/dialog.js` (`dialog:open-key-file` + `dialog:key-status` — the latter, Feature 190,
+  reports whether a stored key path still needs re-picking to be readable in a MAS build),
+  `ipc/context-menu.js` (`menu:popup` — the
   native tunnel-row right-click menu), `ipc/shell.js`
   (`i18n:load`, `diagnostics:copy`) and `ipc/secret-storage.js`
   (`secret-storage:get-mode|set-mode|unlock|lock`), and exposed through `preload.js`; **keep
@@ -89,10 +95,15 @@ socket and relay bytes ourselves — never shell out to the system `ssh`.
 - `listener.js` — the local `net` listener bound on `bindHost:localPort`; structured
   `EADDRINUSE` / privileged-port errors.
 - `ssh-chain.js` — connects the SSH chain (`jumps → sshServer`) by chaining `ssh2.Client`s
-  through the `sock` option; per-hop auth (agent / key / password) via `authHandler`.
+  through the `sock` option; per-hop auth (agent / key / password) via `authHandler`. Key
+  files are read through an **injected `readFileSync`** (the engine's `keyReader`, Feature
+  190), never `fs` directly, so the MAS bookmark bracket can wrap the read.
 - `relay.js` — `forwardOut` + bidirectional pipe with byte counters (Feature 30 reads them).
 - `host-verifier.js` — verifies each hop's key against `~/.ssh/known_hosts` + the accepted-
   keys store; TOFU-prompts on unknown, hard-rejects a changed key. Never auto-accepts.
+  `known_hosts` is resolved against the **real** home (`realHomeDir` → `getpwuid` /
+  `os.userInfo()`, NOT the sandbox-redirected `$HOME`), so a MAS build reads the user's
+  actual file — granted by the read-only home-relative-path entitlement.
 - `resolve-check.js` + `ssh-chain.js` `probeChain` (Feature 100) — hostname-resolution
   validation. `lookupHost` is a plain local `dns.lookup` (bind host / first hop). `probeChain`
   walks the real chain and probes the destination from the far end via `direct-tcpip`
@@ -105,7 +116,10 @@ socket and relay bytes ourselves — never shell out to the system `ssh`.
   host-key prompt mediation, and `probeDefinition` (Feature 100 — a disposable resolution
   probe that reuses the host-key verifier but never binds a listener or tracks a tunnel).
   Reads decrypted definitions via `tunnelStore().getDecrypted()/listDecrypted()` (and
-  `resolveDecrypted()` for a draft probe); never imports Electron (broadcasts are injected).
+  `resolveDecrypted()` for a draft probe); never imports Electron (broadcasts AND the
+  `keyReader` are injected). The `keyReader` (Feature 190) is `secure-file.js`'s
+  `makeKeyReader(...)` in a MAS build — it brackets each key read with a security-scoped
+  bookmark so a picked key survives a relaunch — and a plain `fs.readFileSync` everywhere else.
 
 ### App shell (Feature 60)
 
@@ -120,6 +134,9 @@ Jump Hippo is a **background utility**, so the shell keeps tunnels alive:
 - **Tray is the primary presence** (`tray.js`, macOS template glyph synthesised in
   `tray-icon.js`). It is fed by teeing the engine `broadcast` — `main.js` calls `tray.update()`
   on each `jumphippo:tunnel-state` (not on the byte-rate `jumphippo:stats` heartbeat).
+  **A tray-icon click never opens the window** — it only ever shows the menu (macOS opens it
+  via `setContextMenu`; off macOS the `click` handler calls `popUpContextMenu()`). The window
+  opens **only** via the menu's "Show" item, so a stray primary/secondary click can't launch it.
 - **Single-instance lock** in `main.js` (skipped under `--hot-reload`); a second launch focuses
   the running window.
 - **Native menu** (`menu.js`) and **tray** take injected Electron (`Menu`/`Tray`/`app`) — they
@@ -264,6 +281,14 @@ make clean     # Remove build/ and dist/
 - Hostname-resolution validation (Feature 100) is **protocol-only**: remote checks resolve
   via SSH `direct-tcpip`, never by executing a command on a remote host, and the renderer
   only ever sends a reference draft + hostnames — no secret leaves main.
+- **MAS key-file access (Feature 190):** in a Mac App Store build a picked private key is
+  minted an app-scoped **security-scoped bookmark** at pick time (`ipc/dialog.js`), stored
+  **machine-locally** in `key-bookmarks.json` (`store/key-bookmark-store.js`, wired as
+  `keyBookmarkStore()`), and every key read is bracketed with start/stop-accessing so the key
+  survives a relaunch. The bookmark blob is an OS access token, **never exported** (kept out
+  of the `.jumphippo` bundle) and **never logged**; the renderer only ever receives a boolean
+  (`remembered` / `needsRepick`), never the blob or file bytes. A stale bookmark self-heals to
+  the "re-pick the key" flow. Off MAS, all of this is a plain `fs.readFileSync`.
 - Redact secrets from logs, diagnostics, and any export.
 
 ## License headers

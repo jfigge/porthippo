@@ -205,6 +205,13 @@ export const EN = {
   "jumps.remove": "Remove jump host",
   "jumps.moveUp": "Move up",
   "jumps.moveDown": "Move down",
+  "jumps.delete": "Delete jump host",
+  "jumps.delete.title": "Delete jump host?",
+  "jumps.delete.message":
+    "Delete “{name}”? This removes the reusable jump host.",
+  "jumps.delete.inUse":
+    "This jump host is still used by one or more tunnels — remove it from them first.",
+  "jumps.delete.failed": "Couldn’t delete the jump host.",
 
   // ── Hop / auth field labels (shared by the editors) ─────────────────────
   "hop.host": "Host",
