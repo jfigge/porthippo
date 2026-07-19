@@ -61,7 +61,8 @@
       "app/**/*",
       "web/**/*",
       "package.json",
-      "REVISION_INFO.txt"
+      "REVISION_INFO.txt",
+      "!**/node_modules/ssh2/lib/protocol/crypto/build/**"
     ],
     "mac": {
       "category": "public.app-category.developer-tools",
