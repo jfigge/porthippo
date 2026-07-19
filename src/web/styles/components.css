@@ -37,7 +37,9 @@
   white-space: nowrap;
 }
 
-.btn:hover {
+/* Hover applies only to enabled buttons — a disabled button never responds to
+   hover (no background change). */
+.btn:not(:disabled):hover {
   background: var(--color-surface-1);
 }
 
@@ -56,7 +58,7 @@
   color: var(--color-crust);
 }
 
-.btn--primary:hover {
+.btn--primary:not(:disabled):hover {
   background: var(--color-accent-hover);
 }
 
@@ -70,13 +72,20 @@
   color: var(--color-crust);
 }
 
+/* A destructive button lights up BRIGHT RED on hover (never the generic grey);
+   when disabled (e.g. a type-to-confirm gate not yet satisfied) hover does
+   nothing — the :not(:disabled) rules already skip it. */
+.btn--danger:not(:disabled):hover {
+  background: var(--color-danger-hover);
+}
+
 .btn--ghost {
   background: transparent;
   border-color: var(--color-overlay);
   color: var(--color-subtext);
 }
 
-.btn--ghost:hover {
+.btn--ghost:not(:disabled):hover {
   background: var(--color-surface-0);
   color: var(--color-text);
 }
@@ -91,7 +100,7 @@
   border: 0px;
 }
 
-.btn--icon:hover {
+.btn--icon:not(:disabled):hover {
   background: var(--color-surface-1);
   color: var(--color-text);
 }

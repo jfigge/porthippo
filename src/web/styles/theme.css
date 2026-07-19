@@ -49,6 +49,7 @@
   --color-info: #78a8d8; /* upload / informational accent */
   --color-warning: #d4b060; /* paused / caution */
   --color-danger: #e07070; /* error */
+  --color-danger-hover: #f24a4a; /* bright red — destructive button hover */
 
   /* ── Group palette (Feature 140) — dedicated hues, kept distinct from the
         status colours above so a group tag never reads as a status signal. ─ */
@@ -115,6 +116,7 @@
     --color-info: #3a6ea5;
     --color-warning: #9a6800;
     --color-danger: #b82020;
+    --color-danger-hover: #d02525;
     --color-group-blue: #2f6fb0;
     --color-group-teal: #1f8a82;
     --color-group-green: #2f8a2f;
@@ -142,6 +144,7 @@
   --color-info: #3a6ea5;
   --color-warning: #9a6800;
   --color-danger: #b82020;
+  --color-danger-hover: #d02525;
   --color-group-blue: #2f6fb0;
   --color-group-teal: #1f8a82;
   --color-group-green: #2f8a2f;
