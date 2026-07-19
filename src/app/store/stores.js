@@ -34,6 +34,7 @@ const io = require("./io");
 const { Paths } = require("./paths");
 const { SecretStorage } = require("./secret-storage");
 const { TunnelStore } = require("./tunnel-store");
+const { ConsoleStore } = require("./console-store");
 const { CredentialStore } = require("./credential-store");
 const { JumpHostStore } = require("./jump-host-store");
 const { GroupStore } = require("./group-store");
@@ -56,6 +57,7 @@ class Stores {
     io.gcOrphanTempFiles(this._paths.dataDir);
 
     this._tunnelStore = new TunnelStore(this._paths);
+    this._consoleStore = new ConsoleStore(this._paths);
     this._credentialStore = new CredentialStore(this._paths);
     this._jumpHostStore = new JumpHostStore(this._paths);
     this._groupStore = new GroupStore(this._paths);
@@ -67,6 +69,11 @@ class Stores {
   /** Ordered collection of tunnel definitions (reference records, no secrets). */
   tunnelStore() {
     return this._tunnelStore;
+  }
+
+  /** Ordered collection of console definitions (Feature 200; no secrets). */
+  consoleStore() {
+    return this._consoleStore;
   }
 
   /** Reusable, named SSH credentials (secrets sealed at rest). */

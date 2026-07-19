@@ -121,6 +121,7 @@ async function startEcho({ transform } = {}) {
 async function startSsh({
   rejectForward = false,
   remoteForward = false,
+  shell = false,
   port = 0,
 } = {}) {
   const clients = new Set();
@@ -143,6 +144,29 @@ async function startSsh({
       }
     });
     client.on("ready", () => {
+      // Interactive-shell support (Feature 200 console sessions): accept a session
+      // channel, its pty + window-change requests, and a shell request; the shell
+      // is a simple echo — every byte written in is written back out — which lets a
+      // test prove connect → input → output relay → resize → close end-to-end.
+      if (shell) {
+        client.on("session", (accept) => {
+          const session = accept();
+          session.on("pty", (a) => a && a());
+          session.on("window-change", (a) => a && a());
+          session.on("shell", (acceptShell) => {
+            const stream = acceptShell();
+            stream.on("data", (d) => {
+              try {
+                stream.write(d);
+              } catch {
+                // stream tearing down
+              }
+            });
+            stream.on("error", () => {});
+          });
+        });
+      }
+
       client.on("tcpip", (accept, reject, info) => {
         if (rejectForward) {
           // Refuse the direct-tcpip channel so the client's forwardOut rejects —

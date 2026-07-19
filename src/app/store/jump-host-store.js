@@ -110,19 +110,25 @@ class JumpHostStore {
   }
 
   /**
-   * Remove a jump host. Blocked (IN_USE) while any tunnel still lists it in its
-   * `jumpHostIds`. Throws NOT_FOUND for an unknown id.
+   * Remove a jump host. Blocked (IN_USE) while any tunnel or console still lists it
+   * in its `jumpHostIds`. Throws NOT_FOUND for an unknown id.
    */
   delete(id) {
     const doc = this._read();
     const i = doc.jumpHosts.findIndex((j) => j && j.id === id);
     if (i === -1) throw io.notFoundError(`jump host not found: ${id}`);
 
-    const references = doc.tunnels
-      .filter(
-        (t) => t && Array.isArray(t.jumpHostIds) && t.jumpHostIds.includes(id),
-      )
-      .map((t) => ({ type: "tunnel", id: t.id, label: t.name || t.id }));
+    const lists = (arr, type, nameOf) =>
+      arr
+        .filter(
+          (r) =>
+            r && Array.isArray(r.jumpHostIds) && r.jumpHostIds.includes(id),
+        )
+        .map((r) => ({ type, id: r.id, label: nameOf(r) || r.id }));
+    const references = [
+      ...lists(doc.tunnels, "tunnel", (t) => t.name),
+      ...lists(doc.consoles, "console", (c) => c.name),
+    ];
     if (references.length > 0) throw inUseError(id, references);
 
     doc.jumpHosts.splice(i, 1);

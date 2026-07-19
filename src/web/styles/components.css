@@ -1730,6 +1730,42 @@
   border-right: 1px solid var(--color-crust);
 }
 
+/* ── Left-column stack: TUNNELS section + CONSOLES section (Feature 200) ─────── */
+/* The tunnels-split's first grid cell holds this vertical stack. Tunnels take the
+   growing share; the consoles section sits below, sized to its content up to a cap
+   and scrolling internally past it, separated by a hairline. */
+.sidebar-stack {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.sidebar-stack > .tunnel-sidebar {
+  flex: 1 1 auto;
+}
+
+.consoles-view {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 0 1 auto;
+  max-height: 45%;
+}
+
+.consoles-view > .tunnel-sidebar--consoles {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.tunnel-sidebar--consoles {
+  border-top: 1px solid var(--color-crust);
+}
+
+.tunnel-type-icon--console {
+  color: var(--color-subtext);
+}
+
 .tunnel-sidebar-header {
   display: flex;
   align-items: center;

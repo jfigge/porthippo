@@ -226,6 +226,70 @@ function summariseRoute(tunnel, { jumpHostsById } = {}) {
   return out + jumpSuffix();
 }
 
+/**
+ * Resolve a stored console (Feature 200) + its referenced records into the hop
+ * shape the console manager connects: `{ id, name, sshServer, jumps }`, where
+ * `sshServer` and each jump are `{ host, port, user, auth }` (reusing the same
+ * `hop()` / `credentialToAuth()` a tunnel uses). A console has no destination or
+ * forwarding — the chain terminates at the target server and a shell is opened
+ * there. A missing jump host fails closed (empty host + no auth → the chain
+ * errors) rather than silently bypassing a required bastion.
+ *
+ * @param {object} console  the reference-shape stored console
+ * @param {object} refs
+ * @param {Map<string,object>|Object<string,object>} refs.credentialsById  DECRYPTED credentials
+ * @param {Map<string,object>|Object<string,object>} refs.jumpHostsById     jump-host records
+ * @returns {object}  `{ id, name, sshServer, jumps }`
+ */
+function resolveConsole(console, { credentialsById, jumpHostsById } = {}) {
+  const c = console || {};
+  const creds = asGetter(credentialsById);
+  const jumps = asGetter(jumpHostsById);
+  const sshPort = Number.isInteger(c.sshPort) ? c.sshPort : DEFAULT_SSH_PORT;
+
+  const jumpHops = (Array.isArray(c.jumpHostIds) ? c.jumpHostIds : []).map(
+    (id) => {
+      const jh = jumps(id);
+      if (!jh) return { host: "", port: DEFAULT_SSH_PORT, user: "", auth: [] };
+      return hop(jh.host, jh.port, creds(jh.credentialId));
+    },
+  );
+
+  return {
+    id: c.id,
+    name: c.name,
+    sshServer: hop(c.sshHost, sshPort, creds(c.credentialId)),
+    jumps: jumpHops,
+  };
+}
+
+/**
+ * Build the compact route string for a console list row (Feature 200), reusing
+ * the same jump-host labelling as `summariseRoute`. Credential-free (no user), so
+ * the renderer view can build it without decrypting anything:
+ *
+ *   db.example.com:22
+ *   db.internal:22  via bastion  (jump: relay1)
+ *
+ * @param {object} console
+ * @param {object} [refs]
+ * @param {Map<string,object>|Object<string,object>} [refs.jumpHostsById]  for labels
+ * @returns {string}
+ */
+function summariseConsoleRoute(console, { jumpHostsById } = {}) {
+  const c = console || {};
+  const jumps = asGetter(jumpHostsById);
+  const host = isBlank(c.sshHost) ? "?" : c.sshHost;
+  const port = Number.isInteger(c.sshPort) ? c.sshPort : DEFAULT_SSH_PORT;
+  let out = `${host}:${port}`;
+  const ids = Array.isArray(c.jumpHostIds) ? c.jumpHostIds : [];
+  if (ids.length) {
+    const labels = ids.map((id) => jumps(id)?.label || id);
+    out += `  (jump: ${labels.join(", ")})`;
+  }
+  return out;
+}
+
 /** Accept either a Map or a plain object index and return a `(id) => record`. */
 function asGetter(index) {
   if (index instanceof Map) return (id) => index.get(id);
@@ -233,4 +297,10 @@ function asGetter(index) {
   return () => undefined;
 }
 
-module.exports = { resolveDefinition, summariseRoute, credentialToAuth };
+module.exports = {
+  resolveDefinition,
+  summariseRoute,
+  credentialToAuth,
+  resolveConsole,
+  summariseConsoleRoute,
+};

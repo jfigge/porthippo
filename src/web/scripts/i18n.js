@@ -302,6 +302,25 @@ export const EN = {
   "tunnels.menu.clone": "Clone",
   "tunnels.menu.delete": "Delete",
 
+  // ── Consoles (Feature 200) ──────────────────────────────────────────────
+  "consoles.title": "Consoles",
+  "consoles.add": "Add console",
+  "consoles.empty": "No consoles yet.",
+  "consoles.emptyHint": "Add one to open a remote shell.",
+  "consoles.unnamed": "Untitled console",
+  "consoles.newTitle": "New console",
+  "consoles.editTitle": "Edit console",
+  "consoles.name.placeholder": "e.g. db-prod shell",
+  "consoles.targetRequired": "A target server is required.",
+  "consoles.openError": "Couldn’t open the console.",
+  "consoles.delete.message": "Delete the console “{name}”?",
+  "consoles.menu.open": "Open",
+  "consoles.menu.edit": "Edit",
+  "consoles.menu.delete": "Delete",
+  "console.window.title": "Console",
+  "console.status.connecting": "Connecting…",
+  "console.status.closed": "Connection closed.",
+
   // ── Tunnel groups (Feature 140) ─────────────────────────────────────────
   "group.newTitle": "New group",
   "group.editTitle": "Edit group",
@@ -693,6 +712,7 @@ export const EN = {
   "menu.window": "Window",
   "menu.help": "Help",
   "menu.newTunnel": "New Tunnel",
+  "menu.newConsole": "New Console",
   "menu.armAll": "Arm All Tunnels",
   "menu.disarmAll": "Disarm All Tunnels",
   "menu.groups": "Groups",

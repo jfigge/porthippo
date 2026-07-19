@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;"
+    />
+    <title>Console</title>
+    <link rel="stylesheet" href="styles/theme.css" />
+    <link rel="stylesheet" href="scripts/vendor/xterm.css" />
+    <link rel="stylesheet" href="styles/terminal.css" />
+    <script>
+      // Apply the theme passed from main (?theme=light|dark) before first paint,
+      // mirroring app.js / docs.html: "light"/"dark" force a palette; anything
+      // else follows the OS preference (theme.css's prefers-color-scheme default).
+      (function () {
+        const t = new URLSearchParams(location.search).get("theme");
+        if (t === "light" || t === "dark")
+          document.documentElement.dataset.theme = t;
+      })();
+    </script>
+  </head>
+  <body class="console-window">
+    <div id="terminal"></div>
+    <script type="module" src="scripts/console-window.js"></script>
+  </body>
+</html>

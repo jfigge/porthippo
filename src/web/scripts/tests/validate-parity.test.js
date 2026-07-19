@@ -208,6 +208,54 @@ test("renderer and store validateGroup agree for every fixture", () => {
   });
 });
 
+// Feature 200 — console definitions.
+const CONSOLE_FIXTURES = [
+  { name: "shell", sshHost: "db.internal", credentialId: "cred-1" },
+  {
+    name: "shell",
+    sshHost: "db.internal",
+    sshPort: 2222,
+    credentialId: "cred-1",
+    jumpHostIds: ["j1"],
+  },
+  { name: "", sshHost: "db.internal", credentialId: "cred-1" },
+  { name: "shell", sshHost: "", credentialId: "cred-1" },
+  { name: "shell", sshHost: "db.internal", credentialId: "" },
+  { name: "shell", sshHost: "db.internal", credentialId: "cred-1", sshPort: 0 },
+  {
+    name: "shell",
+    sshHost: "db.internal",
+    credentialId: "cred-1",
+    sshPort: 70000,
+  },
+  {
+    name: "shell",
+    sshHost: "db.internal",
+    credentialId: "cred-1",
+    jumpHostIds: "nope",
+  },
+  {
+    name: "shell",
+    sshHost: "db.internal",
+    credentialId: "cred-1",
+    jumpHostIds: ["a", 5, ""],
+  },
+  {},
+  null,
+  [],
+  "nope",
+];
+
+test("renderer and store validateConsole agree for every fixture", () => {
+  CONSOLE_FIXTURES.forEach((fixture, i) => {
+    assert.deepEqual(
+      renderer.validateConsole(fixture),
+      main.validateConsole(fixture),
+      `console fixture #${i} diverged: ${JSON.stringify(fixture)}`,
+    );
+  });
+});
+
 test("the auth taxonomy matches", () => {
   assert.deepEqual(renderer.AUTH_TYPES, main.AUTH_TYPES);
   for (const type of [...renderer.AUTH_TYPES, "nope"]) {

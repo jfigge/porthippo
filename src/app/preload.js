@@ -92,6 +92,25 @@ contextBridge.exposeInMainWorld("jumphippo", {
       ipcRenderer.invoke("tunnels:apply-many", { ids, action }),
   },
 
+  // ── Consoles (Feature 200) ────────────────────────────────────────────────
+  // Interactive remote-shell targets. CRUD mirrors tunnels (reference records,
+  // no secrets — secrets live in the shared credential store). `open` mints a
+  // session + terminal window and resolves to `{ sessionId, id }` (or a
+  // `{ __hippoError }` envelope); the interactive byte stream then flows over the
+  // separate one-way console:* channels the terminal window's own bridge owns, not
+  // here. Live session state arrives via the jumphippo:console-state event below.
+  consoles: {
+    list: () => ipcRenderer.invoke("consoles:list"),
+    get: (id) => ipcRenderer.invoke("consoles:get", id),
+    create: (def) => ipcRenderer.invoke("consoles:create", def),
+    update: (id, patch) => ipcRenderer.invoke("consoles:update", id, patch),
+    delete: (id) => ipcRenderer.invoke("consoles:delete", id),
+    reorder: (ids) => ipcRenderer.invoke("consoles:reorder", ids),
+    open: (id) => ipcRenderer.invoke("consoles:open", id),
+    close: (sessionId) => ipcRenderer.invoke("consoles:close", sessionId),
+    sessions: () => ipcRenderer.invoke("consoles:sessions"),
+  },
+
   // ── Reusable credentials (Feature 45) ─────────────────────────────────────
   // Named SSH credentials a tunnel / jump host references by id. Reads return
   // the secret as a `hasSecret` flag only; a create/update writes a NEW secret
@@ -282,6 +301,10 @@ for (const channel of [
   // wanted, overridden, nextTransitionAt, nextTransitionKind }] } — ids + timings
   // only, never an SSID / network name / probe result.
   "jumphippo:schedule",
+  // Feature 200: a console session changed state. Carries { id, sessionId, state }
+  // (state ∈ connecting|connected|closed|error) — ids only, never a secret — so the
+  // sidebar's console row lamp can track open/closed.
+  "jumphippo:console-state",
 ]) {
   ipcRenderer.on(channel, (_event, detail) => {
     window.dispatchEvent(new CustomEvent(channel, { detail }));
@@ -297,6 +320,7 @@ for (const channel of [
 const MENU_EVENT_MAP = {
   "menu:open-settings": "jumphippo:open-settings",
   "menu:new-tunnel": "jumphippo:new-tunnel",
+  "menu:new-console": "jumphippo:new-console",
   "menu:show-about": "jumphippo:show-about",
   // View ▸ Increase/Decrease/Reset Font Size — payload is "in" | "out" | "reset".
   "menu:font-change": "jumphippo:ui-font-change",

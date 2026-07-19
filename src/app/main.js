@@ -54,7 +54,10 @@ const { registerContextMenuIPC } = require("./ipc/context-menu");
 const { registerShellIPC } = require("./ipc/shell");
 const { registerSecretStorageIPC } = require("./ipc/secret-storage");
 const { registerPortableIPC } = require("./ipc/portable");
+const { registerConsoleIPC } = require("./ipc/console");
 const { TunnelEngine } = require("./tunnel/engine");
+const { HostKeyMediator } = require("./tunnel/host-key-mediator");
+const { ConsoleManager } = require("./console/console-manager");
 const { Scheduler } = require("./scheduler");
 const { readSsid } = require("./network-info");
 const {
@@ -144,10 +147,21 @@ function getStores() {
 
 // ─── Tunnel engine (Feature 20) ─────────────────────────────────────────────────
 let _engine = null;
+// The host-key TOFU prompt mediator, shared by the engine + console manager
+// (Feature 200) so one hostkeys:trust/reject path resolves either's prompt.
+let _hostKeys = null;
 
 /** The shared TunnelEngine (created in app.whenReady). */
 function getEngine() {
   return _engine;
+}
+
+// ─── Console manager (Feature 200) ──────────────────────────────────────────────
+let _consoleManager = null;
+
+/** The shared ConsoleManager (created in app.whenReady). */
+function getConsoleManager() {
+  return _consoleManager;
 }
 
 // ─── Scheduler (Feature 150) ────────────────────────────────────────────────────
@@ -567,6 +581,10 @@ function refreshMenu() {
         showWindow();
         sendToRenderer("menu:new-tunnel");
       },
+      newConsole: () => {
+        showWindow();
+        sendToRenderer("menu:new-console");
+      },
       armAll,
       disarmAll,
       armGroup,
@@ -738,6 +756,35 @@ function registerIpc() {
     getMainWindow: () => mainWindow,
   });
 
+  // Consoles (Feature 200): CRUD over the ConsoleStore + session control
+  // (open/close/sessions) over the ConsoleManager. Opening a console mints a
+  // terminal window; the interactive byte stream flows over the separate one-way
+  // console:* channels registered just below.
+  registerConsoleIPC({
+    ipcMain,
+    getStores,
+    getConsoleManager,
+    safeCall,
+    safeCallWrite,
+  });
+
+  // Console terminal byte pipe (Feature 200). One-way `send`/`on` (not
+  // invoke/handle), so high-frequency keystrokes + output carry no round-trip and
+  // stay outside the invoke/handle IPC-parity guard. The console window stamps its
+  // sessionId on each message so the manager can route it.
+  ipcMain.on("console:ready", (_event, { sessionId, cols, rows } = {}) =>
+    getConsoleManager()?.ready(sessionId, { cols, rows }),
+  );
+  ipcMain.on("console:input", (_event, { sessionId, data } = {}) =>
+    getConsoleManager()?.input(sessionId, data),
+  );
+  ipcMain.on("console:resize", (_event, { sessionId, cols, rows } = {}) =>
+    getConsoleManager()?.resize(sessionId, cols, rows),
+  );
+  ipcMain.on("console:close", (_event, { sessionId } = {}) =>
+    getConsoleManager()?.close(sessionId),
+  );
+
   // Auto-update (Feature 70) intents. `check` runs a manual (noisy) check; the
   // lifecycle events reach the renderer over the `updater:*` push channels.
   // `install` restarts to apply a downloaded update (user-confirmed in the UI).
@@ -801,6 +848,9 @@ const appIcon = loadAppIcon();
 // ─── Window ───────────────────────────────────────────────────────────────────
 let mainWindow = null;
 let _docsWin = null; // singleton user-guide window (Feature 80)
+// Live console (terminal) windows, keyed by sessionId (Feature 200). Each hosts
+// one interactive shell; closing a window tears its session down.
+const _consoleWins = new Map();
 // Set true only by an explicit Quit; the window `close` handler hides instead of
 // closing until this flips, so closing the window keeps tunnels alive.
 let isQuitting = false;
@@ -956,6 +1006,89 @@ function showDocsWindow() {
   });
 }
 
+// ─── Console (terminal) windows (Feature 200) ───────────────────────────────
+// Each open console gets its own independent window (no `parent`) hosting the
+// xterm.js emulator; the console manager relays an ssh2 shell to it. The window's
+// narrow preload (preload-console.js) exposes only the console:* byte pipe.
+
+/** The SSH keepalive probe interval in ms (0 = off), read live from settings. */
+function sshKeepaliveMs() {
+  const DEFAULT_SSH_KEEPALIVE_SECONDS = 15;
+  const secs = Number(
+    safeCall(
+      "console:keepalive",
+      () =>
+        getStores().settingsStore().get().sshKeepaliveSeconds ??
+        DEFAULT_SSH_KEEPALIVE_SECONDS,
+      DEFAULT_SSH_KEEPALIVE_SECONDS,
+    ),
+  );
+  return Number.isFinite(secs) && secs > 0 ? Math.round(secs * 1000) : 0;
+}
+
+/** Open a terminal window for a session; the console manager connects on ready. */
+function openConsoleWindow(sessionId, { title } = {}) {
+  const theme = safeCall(
+    "console:theme",
+    () => getStores().settingsStore().get().theme,
+    "system",
+  );
+  const win = new BrowserWindow({
+    width: 900,
+    height: 560,
+    minWidth: 480,
+    minHeight: 240,
+    title: title || label("console.window.title", "Console"),
+    icon: appIcon,
+    backgroundColor: "#101010",
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, "preload-console.js"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  win.loadFile(path.join(__dirname, "..", "web", "console.html"), {
+    query: { sessionId, title: title || "Console", theme },
+  });
+  // A console window never navigates or spawns sub-windows.
+  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+
+  _consoleWins.set(sessionId, win);
+  win.on("closed", () => {
+    _consoleWins.delete(sessionId);
+    getConsoleManager()?.close(sessionId);
+  });
+}
+
+/** Push a console:* message to one session's window (used by the manager). */
+function sendToConsoleWindow(sessionId, channel, payload) {
+  const win = _consoleWins.get(sessionId);
+  if (win && !win.isDestroyed()) {
+    try {
+      win.webContents.send(channel, payload);
+    } catch (err) {
+      console.error(
+        `[main] console send ${channel} failed:`,
+        err && err.message,
+      );
+    }
+  }
+}
+
+/** Close every open console window (app quit). */
+function closeConsoleWindows() {
+  for (const win of _consoleWins.values()) {
+    try {
+      if (!win.isDestroyed()) win.destroy();
+    } catch {
+      /* best-effort teardown */
+    }
+  }
+  _consoleWins.clear();
+}
+
 // One-off "still running in the tray" notification, persisted so it shows once.
 function maybeShowHideNotice() {
   let seen = false;
@@ -1036,6 +1169,32 @@ function bootstrap() {
     // Resolve the catalog for main-side chrome, then create the engine (broadcasts
     // fan out to the renderer + tray).
     refreshCatalog();
+
+    // Feature 190: on the Mac App Store, read picked private keys through their
+    // security-scoped bookmark so they survive a relaunch; a plain fs.readFileSync
+    // everywhere else. The reader owns the Electron `app` access — the engine +
+    // console manager stay Electron-free behind this injected seam. Built once and
+    // shared so both connect key-auth hops identically.
+    const keyReader = makeKeyReader({
+      app,
+      getBookmark: (p) =>
+        safeCall(
+          "keybookmark:get",
+          () => getStores().keyBookmarkStore().get(p),
+          null,
+        ),
+      deleteBookmark: (p) =>
+        safeCall("keybookmark:delete", () =>
+          getStores().keyBookmarkStore().delete(p),
+        ),
+      isMas: isMas(),
+    });
+
+    // Feature 200: ONE host-key TOFU mediator, shared by the engine and the console
+    // manager, so a single hostkeys:trust/reject path resolves either's prompt and
+    // the TOFU logic lives in exactly one place.
+    _hostKeys = new HostKeyMediator({ getStores, broadcast });
+
     _engine = new TunnelEngine({
       getStores,
       broadcast,
@@ -1043,24 +1202,21 @@ function bootstrap() {
       // manages — the scheduler owns its armed state. Read live (the scheduler is
       // created just below), so an empty set until then means "nothing managed".
       getManagedIds: () => _scheduler?.governedIds() ?? new Set(),
-      // Feature 190: on the Mac App Store, read picked private keys through their
-      // security-scoped bookmark so they survive a relaunch; a plain fs.readFileSync
-      // everywhere else. The reader owns the Electron `app` access — the engine
-      // stays Electron-free behind this injected seam.
-      keyReader: makeKeyReader({
-        app,
-        getBookmark: (p) =>
-          safeCall(
-            "keybookmark:get",
-            () => getStores().keyBookmarkStore().get(p),
-            null,
-          ),
-        deleteBookmark: (p) =>
-          safeCall("keybookmark:delete", () =>
-            getStores().keyBookmarkStore().delete(p),
-          ),
-        isMas: isMas(),
-      }),
+      keyReader,
+      hostKeys: _hostKeys,
+    });
+
+    // Feature 200: the console manager owns every live interactive-shell session,
+    // reusing the shared host-key mediator + keyReader. Opening the terminal window
+    // and pushing its bytes are injected so the manager never imports Electron.
+    _consoleManager = new ConsoleManager({
+      getStores,
+      broadcast,
+      hostKeys: _hostKeys,
+      keyReader,
+      getSshKeepaliveMs: sshKeepaliveMs,
+      openWindow: openConsoleWindow,
+      sendToWindow: sendToConsoleWindow,
     });
 
     // Scheduler (Feature 150): time/network auto-arm. It only reaches the renderer
@@ -1147,6 +1303,9 @@ function bootstrap() {
     if (_disarmed) return; // second pass, after teardown → let the quit proceed
     _tray?.destroy();
     _scheduler?.dispose(); // stop its timers + powerMonitor subscriptions
+    // Feature 200: end every interactive shell + close its window on quit.
+    _consoleManager?.disposeAll();
+    closeConsoleWindows();
     if (!_engine) return;
     // Hold the quit until SSH sessions close cleanly, then re-issue it — so remote
     // servers see a graceful close, not an abrupt TCP drop. Bounded by a timeout

@@ -74,6 +74,17 @@ Four seeded tunnels, one per capability:
 | Sandbox — SOCKS proxy (via jump) | **dynamic** | SOCKS5 on `:18080`, exits at the jump |
 | Sandbox — reverse forward (jump → host) | **remote** | binds `:9090` on the jump → an echo on this machine |
 
+…and two seeded **consoles** (interactive shells) in the sidebar's CONSOLES section:
+
+| Console | What it exercises |
+|---------|-------------------|
+| Sandbox — jump shell (direct)  | a shell on the jump host, reached directly (key auth) |
+| Sandbox — dest shell (via jump) | a shell on the **sealed** dest, reached through the jump chain |
+
+Double-click a console (or right-click ▸ **Open**) to drop into `tunnel@…`'s prompt in
+a terminal window — the shell reuses the same credentials, jump host, and host-key
+trust as the tunnels above.
+
 ### Testing the dynamic (SOCKS) tunnel
 
 Arm **Sandbox — SOCKS proxy (via jump)**, then point a SOCKS5 client at

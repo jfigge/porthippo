@@ -57,6 +57,7 @@ export class TunnelsView {
   #now;
 
   #split;
+  #sidebarStack; // left-column stack: TUNNELS sidebar + the CONSOLES mount slot
   #resizer;
   #listResizer;
   #tableEl;
@@ -143,8 +144,14 @@ export class TunnelsView {
       ...groupCbs,
     });
 
-    this.#split = el("div", { class: "tunnels-split" }, [
+    // The left master column is a vertical stack: the TUNNELS sidebar plus a mount
+    // point the app fills with the CONSOLES section (Feature 200), so the two read
+    // as one tree. TunnelsView stays console-unaware — it only exposes the slot.
+    this.#sidebarStack = el("div", { class: "sidebar-stack" }, [
       this.#list.element,
+    ]);
+    this.#split = el("div", { class: "tunnels-split" }, [
+      this.#sidebarStack,
       this.#detail.element,
     ]);
     this.#tableEl = this.#table.element;
@@ -216,6 +223,11 @@ export class TunnelsView {
 
   get element() {
     return this.#el;
+  }
+
+  /** The left-column stack element — the app mounts the CONSOLES section here. */
+  get sidebarStack() {
+    return this.#sidebarStack;
   }
 
   /** Load definitions, jump hosts (breadcrumb), groups, live state, card order + mode. */

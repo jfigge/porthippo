@@ -46,6 +46,8 @@ down, and **resume** it later.
   and passphrases.
 - **[Host Keys & Trust](host-keys.md)** — how Jump Hippo verifies servers, and
   what a "changed key" warning means.
+- **[Consoles](consoles.md)** — open an interactive remote shell to a server,
+  reusing the same credentials, jump hosts, and host-key trust as a tunnel.
 - **[Monitoring & Pause](monitoring.md)** — live stats, the Cards and List views,
   groups, and pause/resume.
 - **[Import & Export](import-export.md)** — move a setup between machines, back it up,

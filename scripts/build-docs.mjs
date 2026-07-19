@@ -62,6 +62,7 @@ export const PAGES = [
   { slug: "jump-hosts", title: "Jump Hosts" },
   { slug: "authentication", title: "Authentication" },
   { slug: "host-keys", title: "Host Keys & Trust" },
+  { slug: "consoles", title: "Consoles" },
   { slug: "import-export", title: "Import & Export" },
   { slug: "monitoring", title: "Monitoring & Pause" },
   { slug: "tray-and-background", title: "Tray & Background" },

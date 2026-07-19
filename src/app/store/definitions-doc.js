@@ -25,7 +25,9 @@
  * / inline jumps out of the old tunnel shape must be a single pure `(doc) => doc`
  * transform (migrations.js runs per-document and can't move data across files).
  * Feature 140 adds `groups` as a fourth sibling slice (organisational only — a
- * tunnel references at most one by `groupId`).
+ * tunnel references at most one by `groupId`). Feature 200 adds `consoles` as a
+ * fifth sibling slice — reusable interactive-shell targets that reference the same
+ * `credentials` / `jumpHosts` a tunnel does.
  *
  * Each store reads the whole document, mutates only its own slice, and writes the
  * whole document back — safe because io.js writes are synchronous and therefore
@@ -40,7 +42,7 @@ const io = require("./io");
  * Read the definitions document, normalised so every slice is an array.
  * @param {import('./paths').Paths} paths
  * @returns {{ tunnels: object[], credentials: object[], jumpHosts: object[],
- *   groups: object[] }}
+ *   groups: object[], consoles: object[] }}
  */
 function readDoc(paths) {
   const doc = io.readJSON(paths.tunnelsPath());
@@ -49,6 +51,7 @@ function readDoc(paths) {
     credentials: Array.isArray(doc?.credentials) ? doc.credentials : [],
     jumpHosts: Array.isArray(doc?.jumpHosts) ? doc.jumpHosts : [],
     groups: Array.isArray(doc?.groups) ? doc.groups : [],
+    consoles: Array.isArray(doc?.consoles) ? doc.consoles : [],
   };
 }
 
@@ -58,7 +61,7 @@ function readDoc(paths) {
  * a caller can pass `{ ...current, tunnels: next }` without losing siblings.
  * @param {import('./paths').Paths} paths
  * @param {{ tunnels?: object[], credentials?: object[], jumpHosts?: object[],
- *   groups?: object[] }} doc
+ *   groups?: object[], consoles?: object[] }} doc
  */
 function writeDoc(paths, doc) {
   io.writeJSON(paths.tunnelsPath(), {
@@ -66,6 +69,7 @@ function writeDoc(paths, doc) {
     credentials: Array.isArray(doc?.credentials) ? doc.credentials : [],
     jumpHosts: Array.isArray(doc?.jumpHosts) ? doc.jumpHosts : [],
     groups: Array.isArray(doc?.groups) ? doc.groups : [],
+    consoles: Array.isArray(doc?.consoles) ? doc.consoles : [],
   });
 }
 

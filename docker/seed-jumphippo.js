@@ -17,8 +17,9 @@
 /**
  * seed-jumphippo.js — populate Jump Hippo's store with definitions that match the
  * Docker sandbox (see docker/README.md): two reusable credentials (key + password),
- * a jump host, and two tunnels (direct to the jump's echo, and through the jump to
- * the dest's echo).
+ * a jump host, four tunnels (one per forwarding type), and two consoles (Feature
+ * 200 — a direct interactive shell on the jump host, and a shell on the sealed dest
+ * reached through the jump). The consoles reuse the same credentials + jump host.
  *
  * Runs through the REAL store layer (src/app/store), so secrets are sealed with the
  * app's own at-rest crypto (the app-key file already in the data dir) and every
@@ -75,6 +76,7 @@ const stores = new Stores(dataDir);
 const creds = stores.credentialStore();
 const jumps = stores.jumpHostStore();
 const tunnels = stores.tunnelStore();
+const consoles = stores.consoleStore();
 
 let added = 0;
 
@@ -111,6 +113,18 @@ function ensureTunnel(spec) {
   const created = tunnels.create(spec);
   added++;
   console.log(`  + tunnel "${spec.name}"  →  ${created.routeSummary || ""}`);
+  return created.id;
+}
+
+function ensureConsole(spec) {
+  const existing = consoles.list().find((c) => c.name === spec.name);
+  if (existing) {
+    console.log(`  = console "${spec.name}" already exists`);
+    return existing.id;
+  }
+  const created = consoles.create(spec);
+  added++;
+  console.log(`  + console "${spec.name}"  →  ${created.routeSummary || ""}`);
   return created.id;
 }
 
@@ -197,7 +211,31 @@ ensureTunnel({
   enabled: true,
 });
 
+// Scenario E (CONSOLE / interactive shell, Feature 200) — open a real shell ON the
+// jump host, reached directly from this machine with KEY auth. Double-click it in
+// the CONSOLES sidebar section (or right-click ▸ Open) to drop into `tunnel@…`'s
+// prompt in a terminal window.
+ensureConsole({
+  name: "Sandbox — jump shell (direct)",
+  sshHost: "127.0.0.1",
+  sshPort: JUMP_SSH_PORT, // SSH server = the jump host (127.0.0.1:2201)
+  credentialId: keyCredId,
+});
+
+// Scenario F (CONSOLE / interactive shell via jump) — a shell on the SEALED dest
+// box, reachable only THROUGH the jump. Reuses the same jump host + key credential
+// the "dest echo (via jump)" tunnel does, so one bastion serves both a tunnel and a
+// console. Opening it verifies the console engine chains hops exactly as a tunnel.
+ensureConsole({
+  name: "Sandbox — dest shell (via jump)",
+  sshHost: DEST_BACK_IP, // final SSH server = dest
+  sshPort: 22,
+  jumpHostIds: [jumpId],
+  credentialId: keyCredId,
+});
+
 console.log(
   `\nDone. ${added} record(s) added. ` +
-    `Run 'make debug' and open the Definition view.`,
+    `Run 'make debug', then open the Definition view (tunnels) and the ` +
+    `CONSOLES section (double-click a console to open its shell).`,
 );

@@ -23,6 +23,7 @@
 import "./stats-store.js";
 
 import { TunnelsView } from "./components/tunnels-view.js";
+import { ConsolesView } from "./components/consoles-view.js";
 import { HostKeyPrompt } from "./host-key-prompt.js";
 import { UnlockPrompt } from "./unlock-prompt.js";
 import { UpdateNotifier } from "./update-notifier.js";
@@ -38,6 +39,7 @@ import {
 } from "./zoom-handlers.js";
 
 let tunnelsView = null;
+let consolesView = null;
 let settingsPopup = null;
 
 // System CJK faces, appended to every Latin stack so Chinese/Japanese render
@@ -111,6 +113,20 @@ async function initTunnelsView() {
     await tunnelsView.load();
   } catch (err) {
     console.error("[app] tunnels view load failed:", err && err.message);
+  }
+}
+
+// Mount the CONSOLES section (Feature 200) into the tunnels sidebar stack, so the
+// left tree shows TUNNELS then CONSOLES. Independent of the tunnels load, so a slow
+// console list never blocks tunnels (and vice-versa).
+async function initConsolesView() {
+  if (!tunnelsView || !tunnelsView.sidebarStack) return;
+  consolesView = new ConsolesView();
+  tunnelsView.sidebarStack.appendChild(consolesView.element);
+  try {
+    await consolesView.load();
+  } catch (err) {
+    console.error("[app] consoles view load failed:", err && err.message);
   }
 }
 
@@ -231,4 +247,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     setFontSize: (size) => commitFontSize(size),
   });
   initTunnelsView();
+  // Mount consoles after tunnels: initTunnelsView creates the view (and its sidebar
+  // stack) synchronously before awaiting its data load, so the slot exists now.
+  initConsolesView();
 });

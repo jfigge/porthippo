@@ -434,7 +434,11 @@ function applyBundle(stores, bundle, { mode = "merge", passphrase } = {}) {
       ? replaceDoc(parts, plainById)
       : mergeDoc(parts, plainById, current);
 
-  writeDoc(paths, next);
+  // The bundle only carries tunnels / credentials / jump hosts, so preserve the
+  // document's other slices (groups — Feature 140; consoles — Feature 200) across
+  // an import rather than letting writeDoc default the absent keys to []. Spreading
+  // `current` first keeps those untouched; `next` overrides the imported slices.
+  writeDoc(paths, { ...current, ...next });
 
   if (parts.settings) {
     try {

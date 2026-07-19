@@ -29,11 +29,10 @@
  */
 "use strict";
 
-const crypto = require("crypto");
 const fs = require("fs");
 
 const { Tunnel } = require("./tunnel");
-const { makeHostVerifier } = require("./host-verifier");
+const { HostKeyMediator } = require("./host-key-mediator");
 const { probeChain } = require("./ssh-chain");
 
 const DEFAULT_LINGER_MS = 10000;
@@ -62,9 +61,9 @@ class TunnelEngine {
   #knownHostsFile;
   #getManagedIds;
   #keyReader;
+  #hostKeys; // shared host-key TOFU prompt mediator (Feature 200)
 
   #tunnels = new Map();
-  #prompts = new Map(); // promptId → { resolve } for pending host-key decisions
   #statsTimer = null; // the throttled jumphippo:stats heartbeat (null when idle)
   // Feature 140 — bulk-action coalescing. While `applyToMany` runs, this is a
   // `Map<id, snapshot>` (last-wins) that collects each tunnel's state change
@@ -88,6 +87,11 @@ class TunnelEngine {
    *        else it's a plain `fs.readFileSync` (the default). Threaded into each
    *        Tunnel as `readFileSync` — the same seam the tests inject a fake through
    *        — so the engine never imports Electron.
+   * @param {import('./host-key-mediator').HostKeyMediator} [deps.hostKeys]  the shared
+   *        host-key TOFU prompt mediator (Feature 200). Main injects ONE instance shared
+   *        with the console manager so `trustHostKey`/`rejectHostKey` resolve either's
+   *        prompt. Defaults to a private mediator built from this engine's own deps, so
+   *        tests that construct the engine directly are unchanged.
    */
   constructor({
     getStores,
@@ -95,12 +99,15 @@ class TunnelEngine {
     knownHostsFile,
     getManagedIds,
     keyReader,
+    hostKeys,
   }) {
     this.#getStores = getStores;
     this.#broadcast = broadcast;
     this.#knownHostsFile = knownHostsFile;
     this.#getManagedIds = getManagedIds || (() => new Set());
     this.#keyReader = keyReader || fs.readFileSync;
+    this.#hostKeys =
+      hostKeys || new HostKeyMediator({ getStores, knownHostsFile, broadcast });
   }
 
   /** The scheduler-managed id set, coerced + fail-safe to empty. */
@@ -247,8 +254,7 @@ class TunnelEngine {
     this.#tunnels.clear();
     this.#stopStatsTimer(); // dispose() doesn't emit, so stop the heartbeat here
     await Promise.all(tunnels.map((t) => t.dispose().catch(() => {})));
-    for (const { resolve } of this.#prompts.values()) resolve(false);
-    this.#prompts.clear();
+    this.#hostKeys.rejectAll();
   }
 
   /**
@@ -367,22 +373,14 @@ class TunnelEngine {
 
   // ── Host-key trust decisions (resolve a pending verifier prompt) ──────────────
 
-  /** Resolve an unknown-host-key prompt as trusted. */
+  /** Resolve an unknown-host-key prompt as trusted (any subsystem's prompt). */
   trustHostKey(promptId) {
-    return this.#resolvePrompt(promptId, true);
+    return this.#hostKeys.trust(promptId);
   }
 
-  /** Resolve an unknown-host-key prompt as rejected. */
+  /** Resolve an unknown-host-key prompt as rejected (any subsystem's prompt). */
   rejectHostKey(promptId) {
-    return this.#resolvePrompt(promptId, false);
-  }
-
-  #resolvePrompt(promptId, accepted) {
-    const prompt = this.#prompts.get(promptId);
-    if (!prompt) return { ok: false, promptId };
-    this.#prompts.delete(promptId);
-    prompt.resolve(accepted);
-    return { ok: true, promptId, accepted };
+    return this.#hostKeys.reject(promptId);
   }
 
   // ── Internal wiring ───────────────────────────────────────────────────────────
@@ -499,30 +497,7 @@ class TunnelEngine {
   }
 
   #buildHostVerifier(ctx) {
-    return makeHostVerifier({
-      ...ctx, // host, port, hopLabel, tunnelId
-      knownHostsStore: this.#getStores().knownHostsStore(),
-      knownHostsFile: this.#knownHostsFile,
-      requestTrust: (info) => this.#requestTrust(info),
-      reportChanged: (info) =>
-        this.#broadcast?.("jumphippo:hostkey-changed", info),
-    });
-  }
-
-  /** Emit an unknown-host-key prompt and return a promise resolved by the user. */
-  #requestTrust(info) {
-    const promptId = crypto.randomUUID();
-    return new Promise((resolve) => {
-      this.#prompts.set(promptId, { resolve });
-      this.#broadcast?.("jumphippo:hostkey-unknown", {
-        promptId,
-        tunnelId: info.tunnelId,
-        hop: info.hop,
-        host: info.host,
-        port: info.port,
-        fingerprint: info.fingerprint,
-      });
-    });
+    return this.#hostKeys.buildVerifier(ctx);
   }
 
   #effectiveLinger(def) {

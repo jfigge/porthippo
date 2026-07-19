@@ -139,4 +139,7 @@ export const icons = {
         '<path d="M6 5.5H10.8"/><path d="M9.3 4.4 11.1 5.5 9.3 6.6"/>' +
         '<path d="M6 10.5H10.8"/><path d="M9.3 9.4 11.1 10.5 9.3 11.6"/>',
     ),
+  // Console (Feature 200): a shell prompt chevron + input line, row-inline sized.
+  terminal: () =>
+    stroke16('<path d="M3.5 5.2 6.2 8 3.5 10.8"/><path d="M7.6 11.2H12"/>'),
 };

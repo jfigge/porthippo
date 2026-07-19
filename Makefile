@@ -171,6 +171,15 @@ vendor-markdown:
 	@cd $(SRC_DIR) && npm run vendor-markdown
 	@echo "--------------------------------"
 
+# Bundle the terminal emulator (@xterm/xterm + @xterm/addon-fit) →
+# web/scripts/vendor/xterm.js and copy its stylesheet → web/scripts/vendor/xterm.css.
+# Re-run after bumping @xterm/*; the generated bundle + css are committed and drive
+# the console window's interactive remote shell (Feature 200).
+vendor-terminal:
+	@echo "Bundling terminal emulator (@xterm/xterm + addon-fit) vendor file..."
+	@cd $(SRC_DIR) && npm run vendor-terminal
+	@echo "--------------------------------"
+
 # Render the single-source user guide (src/web/docs/*.md) into website/docs/*.html
 # (+ sitemap). The same Markdown feeds the in-app DocsViewer, so the two never
 # drift; keep the PAGES lists in docs-viewer.js and build-docs.mjs in lockstep.
@@ -201,10 +210,11 @@ test-js:
 	@cd $(SRC_DIR) && node --test --test-timeout=$(TEST_TIMEOUT) "app/tests/**/*.test.js" "app/store/**/*.test.js"
 	@echo "--------------------------------"
 
-# Integration tests for the SSH tunnel engine (in-process ssh2 server + echo dest).
+# Integration tests for the SSH tunnel engine + console sessions (in-process ssh2
+# server + echo dest / echo shell).
 test-tunnel:
-	@echo "Running SSH tunnel engine integration tests..."
-	@cd $(SRC_DIR) && node --test --test-timeout=$(TEST_TIMEOUT) "app/tunnel/**/*.test.js"
+	@echo "Running SSH tunnel engine + console integration tests..."
+	@cd $(SRC_DIR) && node --test --test-timeout=$(TEST_TIMEOUT) "app/tunnel/**/*.test.js" "app/console/**/*.test.js"
 	@echo "--------------------------------"
 
 # Renderer component tests (jsdom). Node auto-detects ESM in these .js files, so
@@ -671,7 +681,7 @@ help:
 	@echo "    sandbox-status  docker compose ps  ·  sandbox-logs  Follow logs"
 
 .PHONY: version info install debug debug-inspect fmt fmt-check lint license-headers \
-        vendor-markdown build-docs test \
+        vendor-markdown vendor-terminal build-docs test \
         test-license-headers test-js test-tunnel test-renderer test-scripts \
         build build-mac build-linux build-win dmg \
         build-setup build-install icons sign-dmg sign-all dist dist-mac dist-linux dist-win \

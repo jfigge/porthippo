@@ -466,6 +466,54 @@ function validateGroup(group) {
   return { valid: Object.keys(errors).length === 0, errors };
 }
 
+/**
+ * Validate a console definition (Feature 200) — a reusable interactive-shell
+ * target. A console is a much simpler reference record than a tunnel: it has no
+ * local port, destination, forwarding type or linger — only a required `name`, a
+ * `sshHost` (the target server, its `sshPort` optional and defaulted to 22 in the
+ * resolver), a `credentialId`, and an optional ordered `jumpHostIds` chain. It
+ * reuses the same credential + jump-host pools tunnels do; referential integrity
+ * (does a referenced id exist?) is a store-level concern (see console-store's
+ * _assertRefs), so only structure is checked here.
+ *
+ * @param {*} def
+ * @returns {{ valid: boolean, errors: Object<string,string> }}
+ */
+function validateConsole(def) {
+  const errors = {};
+
+  if (!def || typeof def !== "object" || Array.isArray(def)) {
+    return { valid: false, errors: { _: "console must be an object" } };
+  }
+
+  if (!isNonEmptyString(def.name)) {
+    errors.name = "name is required";
+  }
+  if (!isNonEmptyString(def.sshHost)) {
+    errors.sshHost = "target server is required";
+  }
+  if (def.sshPort !== undefined && !isValidPort(def.sshPort)) {
+    errors.sshPort = `sshPort must be an integer ${MIN_PORT}–${MAX_PORT}`;
+  }
+  if (!isNonEmptyString(def.credentialId)) {
+    errors.credentialId = "a credential is required";
+  }
+
+  if (def.jumpHostIds !== undefined) {
+    if (!Array.isArray(def.jumpHostIds)) {
+      errors.jumpHostIds = "jumpHostIds must be an array";
+    } else {
+      def.jumpHostIds.forEach((id, i) => {
+        if (!isNonEmptyString(id)) {
+          errors[`jumpHostIds[${i}]`] = "jump host reference must be a string";
+        }
+      });
+    }
+  }
+
+  return { valid: Object.keys(errors).length === 0, errors };
+}
+
 module.exports = {
   AUTH_TYPES,
   TUNNEL_TYPES,
@@ -477,4 +525,5 @@ module.exports = {
   validateCredential,
   validateJumpHost,
   validateGroup,
+  validateConsole,
 };

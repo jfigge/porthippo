@@ -197,6 +197,11 @@ function installAppMenu({
           accelerator: "CmdOrCtrl+N",
           click: () => a.newTunnel?.(),
         },
+        {
+          label: label("menu.newConsole", "New Console"),
+          accelerator: "CmdOrCtrl+Shift+N",
+          click: () => a.newConsole?.(),
+        },
         { type: "separator" },
         {
           label: label("menu.armAll", "Arm All Tunnels"),

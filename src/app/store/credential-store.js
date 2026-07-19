@@ -141,8 +141,8 @@ class CredentialStore {
   }
 
   /**
-   * Remove a credential. Blocked (IN_USE) while any tunnel or jump host still
-   * references it. Throws NOT_FOUND for an unknown id.
+   * Remove a credential. Blocked (IN_USE) while any tunnel, jump host or console
+   * still references it. Throws NOT_FOUND for an unknown id.
    */
   delete(id) {
     const doc = this._read();
@@ -158,9 +158,9 @@ class CredentialStore {
   }
 
   /**
-   * Names of the tunnels / jump hosts referencing a credential, for the delete
-   * guard and the renderer's warning.
-   * @returns {Array<{ type: "tunnel"|"jumpHost", id: string, label: string }>}
+   * Names of the tunnels / jump hosts / consoles referencing a credential, for the
+   * delete guard and the renderer's warning.
+   * @returns {Array<{ type: "tunnel"|"jumpHost"|"console", id: string, label: string }>}
    */
   _referencesOf(doc, id) {
     const refs = [];
@@ -172,6 +172,11 @@ class CredentialStore {
     for (const j of doc.jumpHosts) {
       if (j && j.credentialId === id) {
         refs.push({ type: "jumpHost", id: j.id, label: j.label || j.id });
+      }
+    }
+    for (const c of doc.consoles) {
+      if (c && c.credentialId === id) {
+        refs.push({ type: "console", id: c.id, label: c.name || c.id });
       }
     }
     return refs;
