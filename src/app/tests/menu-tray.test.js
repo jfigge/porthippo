@@ -152,8 +152,12 @@ test("createTray sets a status tooltip and per-tunnel arm/disarm items", () => {
     setContextMenu(menu) {
       contextMenu = menu;
     }
+    popUpContextMenu() {
+      popUps.push(true);
+    }
     destroy() {}
   }
+  const popUps = [];
 
   const fired = [];
   const status = {
@@ -196,9 +200,59 @@ test("createTray sets a status tooltip and per-tunnel arm/disarm items", () => {
   alphaDisarm.click();
   assert.deepEqual(fired, ["disarm:a"]);
 
-  // The tray click shows the window.
+  // A tray-icon click must NOT auto-open the window (regression guard) — only the
+  // menu's "Show" item does. On macOS the click opens the context menu via
+  // setContextMenu; on Windows/Linux the handler pops it up. Never a window.
   clickHandlers.click();
-  assert.ok(fired.includes("show"));
+  assert.ok(!fired.includes("show"), "a tray click does not open the window");
+  if (process.platform !== "darwin") {
+    assert.equal(popUps.length, 1, "off macOS a click pops up the menu");
+  }
+
+  // The Show menu item is what actually opens the window.
+  findItem(template, "tray.show").click();
+  assert.ok(fired.includes("show"), "the Show item opens the window");
+});
+
+test("a tray click on Windows pops up the menu instead of opening the window", () => {
+  const Menu = fakeMenu();
+  const original = process.platform;
+  Object.defineProperty(process, "platform", {
+    value: "win32",
+    configurable: true,
+  });
+  const popUps = [];
+  const fired = [];
+  const clickHandlers = {};
+  class FakeTray {
+    on(event, cb) {
+      clickHandlers[event] = cb;
+    }
+    setToolTip() {}
+    setContextMenu() {}
+    popUpContextMenu() {
+      popUps.push(true);
+    }
+    destroy() {}
+  }
+  try {
+    createTray({
+      Tray: FakeTray,
+      Menu,
+      image: { fake: true },
+      t,
+      getStatus: () => ({ tunnels: [], total: 0, active: 0 }),
+      actions: { showWindow: () => fired.push("show") },
+    });
+    clickHandlers.click();
+    assert.deepEqual(popUps, [true], "the menu is popped up");
+    assert.deepEqual(fired, [], "the window is never opened by a click");
+  } finally {
+    Object.defineProperty(process, "platform", {
+      value: original,
+      configurable: true,
+    });
+  }
 });
 
 test("createTray adds per-group arm-all/disarm-all submenus (Feature 140)", () => {

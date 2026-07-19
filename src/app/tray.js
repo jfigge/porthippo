@@ -48,9 +48,16 @@ function createTray({ Tray, Menu, image, renderImage, t, getStatus, actions }) {
   const a = actions || {};
   const tray = new Tray(image);
 
-  // Left-click shows/focuses the window (the natural gesture on Win/Linux; on
-  // macOS a click opens the menu, but honouring it too is harmless).
-  tray.on("click", () => a.showWindow?.());
+  // A tray-icon click NEVER auto-opens the window — only the menu's "Show" item
+  // does (users don't expect a background utility's menu-bar icon to launch a
+  // window on a stray primary/secondary click). macOS opens the context menu on a
+  // click automatically (via setContextMenu below); on Windows/Linux a left click
+  // doesn't, so pop the menu up ourselves — putting "Show" one click away there too
+  // (a right click already shows the menu). Either way: no window until the user
+  // chooses "Show".
+  tray.on("click", () => {
+    if (process.platform !== "darwin") tray.popUpContextMenu?.();
+  });
 
   function stateLabel(state) {
     return t(`state.${state}`);
