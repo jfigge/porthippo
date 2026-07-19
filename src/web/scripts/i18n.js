@@ -186,6 +186,13 @@ export const EN = {
   "cred.user.placeholder": "username",
   "cred.new": "New…",
   "cred.choose": "Choose a credential…",
+  "cred.delete": "Delete credential",
+  "cred.delete.title": "Delete credential?",
+  "cred.delete.message":
+    "Delete “{name}”? This removes the reusable credential.",
+  "cred.delete.inUse":
+    "This credential is still used by a tunnel or jump host — remove it from them first.",
+  "cred.delete.failed": "Couldn’t delete the credential.",
   // Feature 120: a password credential imported without its secret.
   "cred.needsSecret": "needs password",
   "cred.needsSecret.hint":

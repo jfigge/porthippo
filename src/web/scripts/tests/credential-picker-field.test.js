@@ -18,10 +18,15 @@ import { resetDom, change } from "./jsdom-setup.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { CredentialPickerField } from "../components/credential-picker-field.js";
+import { PopupManager } from "../popup-manager.js";
+import { t } from "../i18n.js";
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
+const settle = async () => {
+  for (let i = 0; i < 4; i++) await flush();
+};
 
-function stub(creds) {
+function stub(creds, deleteImpl) {
   const list = [...creds];
   return {
     credentials: {
@@ -32,14 +37,25 @@ function stub(creds) {
         list.push(rec);
         return rec;
       },
+      delete:
+        deleteImpl ||
+        (async (id) => {
+          const i = list.findIndex((c) => c.id === id);
+          if (i !== -1) list.splice(i, 1);
+          return { id };
+        }),
     },
     _list: list,
   };
 }
 
-async function mount(creds = [{ id: "c1", label: "Prod" }], onChange) {
+async function mount(
+  creds = [{ id: "c1", label: "Prod" }],
+  onChange,
+  opts = {},
+) {
   resetDom();
-  const jumphippo = stub(creds);
+  const jumphippo = stub(creds, opts.deleteImpl);
   const picker = new CredentialPickerField({ jumphippo, onChange });
   document.body.appendChild(picker.element);
   await picker.load();
@@ -47,6 +63,7 @@ async function mount(creds = [{ id: "c1", label: "Prod" }], onChange) {
 }
 
 const sel = (p) => p.element.querySelector(".cred-picker-select");
+const deleteBtn = (p) => p.element.querySelector(".cred-picker-delete");
 
 test("renders a placeholder + one option per credential", async () => {
   const { picker } = await mount([
@@ -99,4 +116,76 @@ test("New… opens the credential editor dialog", async () => {
   picker.element.querySelector(".cred-picker-new").click();
   const dialog = document.querySelector(".credential-dialog");
   assert.ok(dialog && dialog.open, "credential editor opened");
+});
+
+test("the picker-row actions are icon buttons with accessible labels", async () => {
+  const { picker } = await mount([{ id: "c1", label: "Prod" }]);
+  for (const [cls, label] of [
+    [".cred-picker-new", t("cred.new")],
+    [".cred-picker-edit", t("common.edit")],
+    [".cred-picker-delete", t("cred.delete")],
+  ]) {
+    const btn = picker.element.querySelector(cls);
+    assert.ok(btn, `${cls} present`);
+    assert.ok(btn.classList.contains("btn--icon"), `${cls} is an icon button`);
+    assert.equal(btn.getAttribute("aria-label"), label, `${cls} labelled`);
+    assert.ok(btn.querySelector("svg"), `${cls} renders an SVG glyph`);
+  }
+});
+
+test("Delete is disabled until a credential is selected", async () => {
+  const { picker } = await mount([{ id: "c1", label: "Prod" }]);
+  assert.equal(deleteBtn(picker).disabled, true);
+  change(sel(picker), "c1");
+  assert.equal(deleteBtn(picker).disabled, false);
+});
+
+test("Delete confirms then removes the selected credential record", async () => {
+  const { picker, jumphippo } = await mount([{ id: "c1", label: "Prod" }]);
+  const changed = [];
+  const onChanged = () => changed.push(1);
+  window.addEventListener("jumphippo:credentials-changed", onChanged);
+  try {
+    change(sel(picker), "c1");
+    deleteBtn(picker).click();
+
+    const danger = document.querySelector(".popup-confirm .btn--danger");
+    assert.ok(danger, "the delete confirm opened");
+    assert.equal(danger.disabled, false, "no type-to-confirm gate");
+    danger.click();
+    await settle();
+
+    assert.equal(
+      jumphippo._list.find((c) => c.id === "c1"),
+      undefined,
+      "the record was deleted",
+    );
+    assert.equal(picker.value, "", "and cleared from the selection");
+    assert.ok(changed.length >= 1, "announced credentials-changed");
+  } finally {
+    window.removeEventListener("jumphippo:credentials-changed", onChanged);
+    PopupManager.close();
+  }
+});
+
+test("Delete blocked while in use shows a notice and keeps the credential", async () => {
+  const inUse = async () => ({ __hippoError: true, code: "IN_USE" });
+  const { picker, jumphippo } = await mount(
+    [{ id: "c1", label: "Prod" }],
+    null,
+    { deleteImpl: inUse },
+  );
+  change(sel(picker), "c1");
+  deleteBtn(picker).click();
+  document.querySelector(".popup-confirm .btn--danger").click();
+  await settle();
+
+  const notify = document.querySelector(".popup-notify .popup-message");
+  assert.ok(notify, "an in-use notice is shown");
+  assert.equal(notify.textContent, t("cred.delete.inUse"));
+  assert.ok(
+    jumphippo._list.find((c) => c.id === "c1"),
+    "the credential is kept",
+  );
+  PopupManager.close();
 });

@@ -24,6 +24,8 @@
 import { el, clear } from "../dom.js";
 import { field } from "../field.js";
 import { t } from "../i18n.js";
+import { icons } from "../icons.js";
+import { PopupManager } from "../popup-manager.js";
 import { CredentialEditorDialog } from "./credential-editor-dialog.js";
 import { credentialNeedsSecret } from "./credential-status.js";
 
@@ -31,6 +33,7 @@ export class CredentialPickerField {
   #el;
   #select;
   #editBtn;
+  #deleteBtn;
   #jumphippo;
   #openKeyFile;
   #onChange;
@@ -77,7 +80,7 @@ export class CredentialPickerField {
     this.#select.value = this.#value;
     // A stale id the <select> couldn't take falls back to the placeholder.
     if (this.#select.value !== this.#value) this.#value = "";
-    this.#syncEdit();
+    this.#syncButtons();
   }
 
   /** Load the credential list and render the options. Call once after mount. */
@@ -108,30 +111,51 @@ export class CredentialPickerField {
       "aria-label": label,
       onChange: (e) => {
         this.#value = e.target.value;
-        this.#syncEdit();
+        this.#syncButtons();
         this.#onChange?.(this.#value);
       },
     });
-    const newBtn = el("button", {
-      class: "btn btn--secondary cred-picker-new",
-      type: "button",
-      text: t("cred.new"),
-      onClick: () => this.#openNew(),
-    });
-    this.#editBtn = el("button", {
-      class: "btn btn--secondary cred-picker-edit",
-      type: "button",
-      text: t("common.edit"),
-      disabled: true,
-      onClick: () => this.#openEdit(),
-    });
+    const newBtn = this.#iconBtn(
+      "cred-picker-new",
+      t("cred.new"),
+      icons.filePlus(),
+      () => this.#openNew(),
+    );
+    this.#editBtn = this.#iconBtn(
+      "cred-picker-edit",
+      t("common.edit"),
+      icons.edit(),
+      () => this.#openEdit(),
+      true,
+    );
+    this.#deleteBtn = this.#iconBtn(
+      "cred-picker-delete",
+      t("cred.delete"),
+      icons.trash(),
+      () => this.#confirmDelete(),
+      true,
+    );
     const control = el("div", { class: "picker-row" }, [
       this.#select,
       newBtn,
       this.#editBtn,
+      this.#deleteBtn,
     ]);
     this.#renderOptions();
     return field({ label, control, errorKey: this.#errorKey });
+  }
+
+  /** A labelled icon button for the picker row. */
+  #iconBtn(className, label, glyph, onClick, disabled = false) {
+    return el("button", {
+      class: `btn btn--icon ${className}`,
+      type: "button",
+      title: label,
+      "aria-label": label,
+      html: glyph,
+      disabled,
+      onClick,
+    });
   }
 
   #renderOptions() {
@@ -151,8 +175,9 @@ export class CredentialPickerField {
     this.#select.value = this.#value;
   }
 
-  #syncEdit() {
+  #syncButtons() {
     this.#editBtn.disabled = !this.#value;
+    this.#deleteBtn.disabled = !this.#value;
   }
 
   #ensureEditor() {
@@ -179,5 +204,45 @@ export class CredentialPickerField {
     if (!this.#value) return;
     const cred = await this.#jumphippo?.credentials?.get?.(this.#value);
     if (cred) this.#ensureEditor().openEdit(cred);
+  }
+
+  // Delete the selected credential RECORD. A light confirm (no type-to-confirm
+  // gate — recreatable, and the store blocks deletion while a tunnel/jump host
+  // still uses it). On success, announce so every open picker refreshes and drops
+  // the now-deleted selection (this one via its jumphippo:credentials-changed
+  // listener).
+  #confirmDelete() {
+    const id = this.#value;
+    if (!id) return;
+    const cred = this.#credentials.find((c) => c.id === id);
+    const name = (cred && (cred.label || cred.id)) || id;
+    PopupManager.confirmDelete({
+      title: t("cred.delete.title"),
+      message: t("cred.delete.message", { name }),
+      requireText: false,
+      onConfirm: async () => {
+        let result;
+        try {
+          result = await this.#jumphippo?.credentials?.delete?.(id);
+        } catch (err) {
+          PopupManager.notify({
+            message: err?.message || t("cred.delete.failed"),
+          });
+          return;
+        }
+        if (result && result.__hippoError) {
+          PopupManager.notify({
+            message:
+              result.code === "IN_USE"
+                ? t("cred.delete.inUse")
+                : result.message || t("cred.delete.failed"),
+          });
+          return;
+        }
+        window.dispatchEvent(
+          new CustomEvent("jumphippo:credentials-changed", { detail: { id } }),
+        );
+      },
+    });
   }
 }
