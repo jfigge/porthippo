@@ -150,6 +150,57 @@
 
     .nav-link:hover { color: var(--text); }
 
+    /* ── Other-Hippos dropdown (native <details>, no JS — CSP-safe) ─────────── */
+
+    .nav-dropdown { position: relative; }
+
+    .nav-dropdown-summary {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      cursor: pointer;
+      list-style: none;
+      user-select: none;
+    }
+    .nav-dropdown-summary::-webkit-details-marker { display: none; }
+    .nav-dropdown-summary::marker { content: ""; }
+    .nav-dropdown-summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+
+    .nav-dropdown-chevron { transition: transform 0.15s; }
+    .nav-dropdown[open] .nav-dropdown-summary { color: var(--text); }
+    .nav-dropdown[open] .nav-dropdown-chevron { transform: rotate(180deg); }
+
+    .nav-dropdown-menu {
+      position: absolute;
+      top: calc(100% + 12px);
+      right: 0;
+      min-width: 168px;
+      background: var(--mantle);
+      border: 1px solid var(--surface-1);
+      border-radius: 10px;
+      padding: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      box-shadow: 0 14px 36px rgba(0, 0, 0, 0.55);
+      z-index: 200;
+    }
+
+    .nav-dropdown-item {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 9px 12px;
+      border-radius: 7px;
+      color: var(--subtext);
+      text-decoration: none;
+      font-size: 0.85rem;
+      white-space: nowrap;
+      transition: background 0.15s, color 0.15s;
+    }
+    .nav-dropdown-item:hover { background: var(--surface-0); color: var(--text); }
+    .nav-dropdown-favicon { flex-shrink: 0; }
+
     .btn {
       display: inline-flex;
       align-items: center;
@@ -705,7 +756,7 @@
     @media (max-width: 640px) {
       .prerelease-banner { padding: 9px 1rem; font-size: 0.74rem; }
       nav { padding: 0 1rem; }
-      .nav-right .nav-link { display: none; }
+      .nav-right .nav-link, .nav-right .nav-dropdown { display: none; }
       .hero { padding: 64px 1rem 48px; }
       .mock-wrap { display: none; }
       .section { padding: 64px 1rem; }
@@ -749,7 +800,26 @@
   </a>
   <div class="nav-right">
     <a class="nav-link" href="#features">Features</a>
-    <a class="nav-link" href="#downloads">Downloads</a>
+    <details class="nav-dropdown">
+      <summary class="nav-link nav-dropdown-summary">
+        Other Hippos
+        <svg class="nav-dropdown-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+      </summary>
+      <div class="nav-dropdown-menu">
+        <a class="nav-dropdown-item" href="https://resthippo.com" rel="noopener noreferrer">
+          <svg class="nav-dropdown-favicon" width="16" height="16" viewBox="0 0 512 512" aria-hidden="true"><rect width="512" height="512" rx="114" fill="#6C5CE7"/><circle cx="170" cy="146" r="40" fill="#fff"/><circle cx="342" cy="146" r="40" fill="#fff"/><rect x="144" y="140" width="224" height="190" rx="74" fill="#fff"/><rect x="118" y="260" width="276" height="150" rx="74" fill="#fff"/><circle cx="201" cy="198" r="17" fill="#6C5CE7"/><circle cx="311" cy="198" r="17" fill="#6C5CE7"/><ellipse cx="210" cy="330" rx="14" ry="20" fill="#6C5CE7"/><ellipse cx="302" cy="330" rx="14" ry="20" fill="#6C5CE7"/></svg>
+          Rest Hippo
+        </a>
+        <a class="nav-dropdown-item" href="https://chiphippo.com" rel="noopener noreferrer">
+          <svg class="nav-dropdown-favicon" width="16" height="16" viewBox="0 0 512 512" aria-hidden="true"><rect width="512" height="512" rx="114" fill="#2F855A"/><circle cx="170" cy="146" r="40" fill="#fff"/><circle cx="342" cy="146" r="40" fill="#fff"/><rect x="144" y="140" width="224" height="190" rx="74" fill="#fff"/><rect x="118" y="260" width="276" height="150" rx="74" fill="#fff"/><circle cx="201" cy="198" r="17" fill="#2F855A"/><circle cx="311" cy="198" r="17" fill="#2F855A"/><rect x="186" y="320" width="140" height="52" rx="10" fill="#2F855A"/></svg>
+          Chip Hippo
+        </a>
+        <a class="nav-dropdown-item" href="https://keephippo.com" rel="noopener noreferrer">
+          <svg class="nav-dropdown-favicon" width="16" height="16" viewBox="0 0 512 512" aria-hidden="true"><rect width="512" height="512" rx="114" fill="#F5A623"/><circle cx="170" cy="146" r="40" fill="#fff"/><circle cx="342" cy="146" r="40" fill="#fff"/><rect x="144" y="140" width="224" height="190" rx="74" fill="#fff"/><rect x="118" y="260" width="276" height="150" rx="74" fill="#fff"/><circle cx="201" cy="198" r="17" fill="#F5A623"/><circle cx="311" cy="198" r="17" fill="#F5A623"/><ellipse cx="210" cy="330" rx="14" ry="20" fill="#F5A623"/><ellipse cx="302" cy="330" rx="14" ry="20" fill="#F5A623"/></svg>
+          Keep Hippo
+        </a>
+      </div>
+    </details>
     <a class="nav-link" href="/docs/">Docs</a>
     <a class="nav-link" href="/features.html">Feature Requests</a>
     <a class="nav-link" href="https://github.com/sponsors/jfigge" rel="noopener noreferrer">Donate</a>
